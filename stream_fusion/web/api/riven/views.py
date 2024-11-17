@@ -236,7 +236,7 @@ async def search_yggflix(
 class ZileanAPI:
     def __init__(self):
         self.session = requests.Session()
-        self.base_url = "http://localhost:8181"  # Port sur lequel fonctionne Zilean
+        self.base_url = "http://zilean:8181"  # Port sur lequel fonctionne Zilean
         self.logger = logging.getLogger(__name__)
 
     def dmm_filtered(self, query: str, season: Optional[int] = None, episode: Optional[int] = None,
