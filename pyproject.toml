@@ -39,6 +39,7 @@ rank-torrent-name = "^1.2.0"
 orjson = "^3.10.7"
 alembic = "^1.13.2"
 ujson = "^5.10.0"
+bencodepy = "^0.9.5"
 
 
 [tool.poetry.group.dev.dependencies]

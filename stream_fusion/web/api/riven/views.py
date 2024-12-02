@@ -20,6 +20,8 @@ from .schemas import RivenResponse, RivenResult, ErrorResponse, MediaTypes
 from RTN import parse
 from stream_fusion.utils.models.movie import Movie
 from stream_fusion.utils.models.series import Series
+from stream_fusion.utils.sharewood.sharewood_api import SharewoodAPI
+from stream_fusion.utils.xthor.xthor_api import XthorAPI
 
 
 router = APIRouter()
@@ -117,6 +119,196 @@ def __process_magnet_link(
         f"&tr={encoded_tracker}"
     )
     return magnet_link
+
+@router.get(
+    "/sharewood",
+    response_model=RivenResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+)
+@rate_limiter(limit=20, seconds=60)  # Limitation du débit à 20 requêtes par minute
+async def recherche_sharewood(
+    query: str = Query(..., description="Requête de recherche"),
+    sharewood_passkey: str = Query(..., description="Passkey utilisateur pour Sharewood"),
+    category: Optional[int] = Query(None, description="Catégorie du torrent (facultatif)"),
+    subcategory: Optional[int] = Query(None, description="Sous-catégorie du torrent (facultatif)"),
+    redis_client: Redis = Depends(get_redis),
+) -> RivenResponse:
+    """
+    Recherche des torrents sur Sharewood via leur API.
+
+    Args:
+        query (str): Requête de recherche.
+        sharewood_passkey (str): Passkey Sharewood de l'utilisateur.
+        category (Optional[int]): Catégorie du torrent (facultatif).
+        subcategory (Optional[int]): Sous-catégorie du torrent (facultatif).
+
+    Returns:
+        RivenResponse: Résultats de la recherche.
+    """
+    try:
+        logger.info(f"Requête de recherche Sharewood avec query={query}, category={category}, subcategory={subcategory}")
+        
+        # Initialisation de l'API Sharewood
+        sharewood = SharewoodAPI(sharewood_passkey=sharewood_passkey)
+        
+        # Recherche des torrents
+        search_results = await asyncio.to_thread(
+            sharewood.search, query=query, category=category, subcategory=subcategory
+        )
+
+        # Filtrage et traitement des résultats
+        torrent_results = []
+        for torrent in search_results:
+            try:
+                parsed_data = parse(torrent.get("name", "unknown"))
+                torrent_results.append(
+                    RivenResult(
+                        raw_title=torrent.get("name", "unknown"),
+                        size=torrent.get("size"),
+                        link=f"{settings.sharewood_url}/torrent/{torrent.get('id')}/download",
+                        seeders=torrent.get("seeders", 0),
+                        magnet=f"magnet:?xt=urn:btih:{torrent.get('info_hash')}",
+                        info_hash=torrent.get("info_hash", "").lower(),
+                        privacy="private",
+                        languages=["fr"],  # Hypothèse: Sharewood se concentre principalement sur le contenu français
+                        type="movie",  # Par défaut, à adapter en fonction de vos besoins
+                        source="sharewood",
+                        parsed_data=parsed_data,
+                    )
+                )
+            except Exception as e:
+                logger.error(f"Erreur lors du traitement d'un résultat de torrent : {e}")
+                continue
+
+        # Retourner les résultats formatés
+        return RivenResponse(
+            query=query,
+            total_results=len(torrent_results),
+            results=torrent_results,
+        )
+
+    except Exception as e:
+        logger.error(f"Erreur lors de la recherche Sharewood : {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Une erreur est survenue lors du traitement de la recherche sur Sharewood.",
+        )
+
+@router.get(
+    "/xthor",
+    response_model=RivenResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+)
+@rate_limiter(limit=20, seconds=60)
+async def recherche_xthor(
+    query: str = Query(..., description="Requête de recherche"),
+    xthor_passkey: str = Query(..., description="Passkey utilisateur pour Xthor"),
+    redis_client: Redis = Depends(get_redis),
+) -> RivenResponse:
+    """
+    Recherche des torrents sur Xthor via leur API.
+
+    Args:
+        query (str): Requête de recherche.
+        xthor_passkey (str): Passkey Xthor de l'utilisateur.
+
+    Returns:
+        RivenResponse: Résultats de la recherche.
+    """
+    try:
+        logger.info(f"Requête de recherche Xthor avec query={query}")
+        
+        # Initialisation de l'API Xthor
+        from stream_fusion.utils.xthor.xthor_api import XthorAPI
+        import bencodepy
+        import hashlib
+
+        xthor = XthorAPI(xthor_passkey=xthor_passkey)
+
+        def calculate_info_hash(torrent_content: bytes) -> str:
+            """Calcule le hash SHA-1 de la section 'info' d'un fichier .torrent."""
+            try:
+                torrent_data = bencodepy.decode(torrent_content)
+                info_section = torrent_data[b"info"]
+                return hashlib.sha1(bencodepy.encode(info_section)).hexdigest()
+            except Exception as e:
+                logger.error(f"Erreur lors du calcul du hash : {e}")
+                return None
+
+        async def download_torrent_and_calculate_hash(download_link: str) -> str:
+            """
+            Télécharge le fichier .torrent depuis le lien donné et calcule son hash.
+
+            Args:
+                download_link (str): Lien de téléchargement du fichier .torrent.
+
+            Returns:
+                str: Hash SHA-1 ou None en cas d'erreur.
+            """
+            try:
+                logger.info(f"Téléchargement du fichier .torrent depuis {download_link}")
+                response = await asyncio.to_thread(xthor.session.get, download_link, timeout=xthor.timeout)
+                response.raise_for_status()
+                logger.info(f"Téléchargement réussi depuis {download_link}")
+                return calculate_info_hash(response.content)
+            except Exception as e:
+                logger.error(f"Erreur lors du téléchargement ou du calcul du hash : {e}")
+                return None
+
+        # Recherche des torrents
+        search_results = await asyncio.to_thread(xthor.search, query=query)
+        logger.info(f"Nombre de résultats trouvés : {len(search_results)}")
+
+        # Filtrage et traitement des résultats
+        torrent_results = []
+        for torrent in search_results:
+            try:
+                raw_title = torrent.get("name", "unknown")
+                logger.info(f"Analyse du torrent : {raw_title}")
+                download_link = torrent.get("download_link")
+                size = int(torrent.get("size", 0))
+                seeders = int(torrent.get("seeders", 0))
+                parsed_data = parse(torrent.get("name", "unknown"))
+
+                # Calcul du hash
+                info_hash = None
+                if download_link:
+                    info_hash = await download_torrent_and_calculate_hash(download_link)
+
+                # Ajouter les résultats enrichis
+                torrent_results.append(
+                    RivenResult(
+                        raw_title=raw_title,
+                        size=size,
+                        link=download_link,
+                        seeders=seeders,
+                        magnet=f"magnet:?xt=urn:btih:{info_hash}" if info_hash else None,
+                        info_hash=info_hash or "",
+                        privacy="private",
+                        languages=["en", "fr"],  # Exemple à adapter
+                        type="movie",  # Par défaut, ajustez selon vos besoins
+                        source="xthor",
+                        parsed_data=parsed_data,  # Ajoutez ici votre logique pour enrichir parsed_data
+                    )
+                )
+
+            except Exception as e:
+                logger.error(f"Erreur lors du traitement d'un torrent : {e}")
+                continue
+
+        # Retourner les résultats formatés
+        return RivenResponse(
+            query=query,
+            total_results=len(torrent_results),
+            results=torrent_results,
+        )
+
+    except Exception as e:
+        logger.error(f"Erreur lors de la recherche Xthor : {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Une erreur est survenue lors du traitement de la recherche sur Xthor.",
+        )
 
 @router.get(
     "/yggflix",
