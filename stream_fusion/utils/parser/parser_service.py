@@ -94,6 +94,7 @@ class StreamParser:
                 "name": name,
                 "description": title,
                 "url": f"{self.config['addonHost']}/playback/{self.configb64}/{queryb64}",
+                "infoHash": torrent_item.info_hash, 
                 "behaviorHints": {
                     "bingeGroup": self._generate_binge_group(torrent_item, media),
                     "filename": torrent_item.file_name or torrent_item.raw_title,
