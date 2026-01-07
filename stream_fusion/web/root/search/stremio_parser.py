@@ -144,6 +144,7 @@ def parse_to_debrid_stream(
             "name": name,
             "description": title,
             "url": f"{host}/playback/{configb64}/{queryb64}",
+            "infoHash": torrent_item.info_hash,
             "behaviorHints": {
                 "bingeGroup": _generate_binge_group(torrent_item, media),
                 "filename": (
