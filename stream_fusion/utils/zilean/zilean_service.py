@@ -1,7 +1,6 @@
-import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import asyncio
+import aiohttp
 from typing import List, Union, Dict, Tuple, Optional
-from functools import lru_cache
 import time
 
 from stream_fusion.logging_config import logger
@@ -10,29 +9,30 @@ from stream_fusion.utils.models.series import Series
 from stream_fusion.settings import settings
 from stream_fusion.utils.zilean.zilean_api import ZileanAPI, DMMQueryRequest, DMMTorrentInfo
 
+
 class ZileanService:
-    def __init__(self, config):
-        self.zilean_api = ZileanAPI()
+    def __init__(self, config, session: Optional[aiohttp.ClientSession] = None):
+        self.zilean_api = ZileanAPI(session=session)
         self.logger = logger
         self.max_workers = settings.zilean_max_workers
         self._search_cache: Dict[str, Tuple[List[DMMTorrentInfo], float]] = {}
         self._cache_ttl = 3600  # 1 heure en secondes
 
-    def search(self, media: Union[Movie, Series]) -> List[DMMTorrentInfo]:
+    async def search(self, media: Union[Movie, Series]) -> List[DMMTorrentInfo]:
         # Vérifier si nous avons déjà des résultats en cache pour ce média
         cache_key = self._get_cache_key(media)
         cached_results = self._get_from_cache(cache_key)
         if cached_results:
             return cached_results
-            
+
         # Sinon, effectuer la recherche
         if isinstance(media, Movie):
-            results = self.__search_movie(media)
+            results = await self.__search_movie(media)
         elif isinstance(media, Series):
-            results = self.__search_series(media)
+            results = await self.__search_series(media)
         else:
             raise TypeError("Only Movie and Series are allowed as media!")
-            
+
         # Stocker les résultats dans le cache
         self._add_to_cache(cache_key, results)
         return results
@@ -59,7 +59,7 @@ class ZileanService:
     def _add_to_cache(self, cache_key: str, results: List[DMMTorrentInfo]) -> None:
         """Ajoute des résultats au cache avec un timestamp."""
         self._search_cache[cache_key] = (results, time.time())
-        
+
         # Nettoyer le cache si trop volumineux (garder max 50 entrées)
         if len(self._search_cache) > 50:
             # Supprimer la plus ancienne entrée
@@ -84,92 +84,96 @@ class ZileanService:
         seen = set()
         return [title for title in titles if not (title.lower() in seen or seen.add(title.lower()))]
 
-    def __search_movie(self, movie: Movie) -> List[DMMTorrentInfo]:
+    async def __search_movie(self, movie: Movie) -> List[DMMTorrentInfo]:
         unique_titles = self.__remove_duplicate_titles(movie.titles)
-        
+
         # Recherche par IMDb ID d'abord (souvent plus précise)
-        imdb_results = self.__search_by_imdb_id(movie.id)
-        
+        imdb_results = await self.__search_by_imdb_id(movie.id)
+
         # Si nous avons suffisamment de résultats IMDb, nous pouvons éviter des recherches supplémentaires
         if len(imdb_results) >= 10:
             return imdb_results
-            
-        # Sinon, compléter avec des recherches par titre
-        keyword_results = self.__threaded_search_movie(unique_titles)
-        
+
+        # Sinon, compléter avec des recherches par titre en parallèle
+        keyword_results = await self.__parallel_search_movie(unique_titles)
+
         # Combiner et dédupliquer les résultats
         all_results = imdb_results + keyword_results
         return self.__deduplicate_api_results(all_results)
 
-    def __search_series(self, series: Series) -> List[DMMTorrentInfo]:
+    async def __search_series(self, series: Series) -> List[DMMTorrentInfo]:
         unique_titles = self.__remove_duplicate_titles(series.titles)
-        
+
         # Recherche par IMDb ID d'abord (souvent plus précise)
-        imdb_results = self.__search_by_imdb_id(series.id)
-        
+        imdb_results = await self.__search_by_imdb_id(series.id)
+
         # Si nous avons suffisamment de résultats IMDb, nous pouvons éviter des recherches supplémentaires
         if len(imdb_results) >= 10:
             return imdb_results
-            
-        # Sinon, compléter avec des recherches par titre
-        keyword_results = self.__threaded_search_series(unique_titles, series)
-        
+
+        # Sinon, compléter avec des recherches par titre en parallèle
+        keyword_results = await self.__parallel_search_series(unique_titles, series)
+
         # Combiner et dédupliquer les résultats
         all_results = imdb_results + keyword_results
         return self.__deduplicate_api_results(all_results)
 
-    def __threaded_search_movie(self, search_texts: List[str]) -> List[DMMTorrentInfo]:
-        results = []
+    async def __parallel_search_movie(self, search_texts: List[str]) -> List[DMMTorrentInfo]:
+        """Recherche parallèle avec asyncio.gather()."""
         if not search_texts:
-            return results
-            
-        # Limite le nombre de titres à rechercher pour éviter trop de requêtes
-        search_texts = search_texts[:3]  
-        
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_text = {executor.submit(self.__make_movie_request, text): text for text in search_texts}
-            for future in as_completed(future_to_text):
-                try:
-                    results.extend(future.result())
-                except Exception as e:
-                    self.logger.exception(f"Error in threaded movie search: {str(e)}")
-        return results
+            return []
 
-    def __threaded_search_series(self, search_texts: List[str], series: Series) -> List[DMMTorrentInfo]:
-        results = []
-        if not search_texts:
-            return results
-            
         # Limite le nombre de titres à rechercher pour éviter trop de requêtes
         search_texts = search_texts[:3]
-        
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_text = {executor.submit(self.__make_series_request, text, series): text for text in search_texts}
-            for future in as_completed(future_to_text):
-                try:
-                    results.extend(future.result())
-                except Exception as e:
-                    self.logger.exception(f"Error in threaded series search: {str(e)}")
+
+        tasks = [self.__make_movie_request(text) for text in search_texts]
+        results_lists = await asyncio.gather(*tasks, return_exceptions=True)
+
+        results = []
+        for result in results_lists:
+            if isinstance(result, Exception):
+                self.logger.exception(f"Error in parallel movie search: {result}")
+            elif result:
+                results.extend(result)
         return results
 
-    def __make_movie_request(self, query_text: str) -> List[DMMTorrentInfo]:
+    async def __parallel_search_series(self, search_texts: List[str], series: Series) -> List[DMMTorrentInfo]:
+        """Recherche parallèle avec asyncio.gather()."""
+        if not search_texts:
+            return []
+
+        # Limite le nombre de titres à rechercher pour éviter trop de requêtes
+        search_texts = search_texts[:3]
+
+        tasks = [self.__make_series_request(text, series) for text in search_texts]
+        results_lists = await asyncio.gather(*tasks, return_exceptions=True)
+
+        results = []
+        for result in results_lists:
+            if isinstance(result, Exception):
+                self.logger.exception(f"Error in parallel series search: {result}")
+            elif result:
+                results.extend(result)
+        return results
+
+    async def __make_movie_request(self, query_text: str) -> List[DMMTorrentInfo]:
         try:
-            return self.zilean_api.dmm_search(DMMQueryRequest(queryText=query_text))
+            return await self.zilean_api.dmm_search(DMMQueryRequest(queryText=query_text))
         except Exception as e:
             self.logger.exception(f"An exception occurred while searching for movie '{query_text}' on Zilean: {str(e)}")
             return []
 
-    def __make_series_request(self, query_text: str, series: Series) -> List[DMMTorrentInfo]:
+    async def __make_series_request(self, query_text: str, series: Series) -> List[DMMTorrentInfo]:
         try:
             season = getattr(series, 'season', None)
             episode = getattr(series, 'episode', None)
-            
+
             if season is not None:
                 season = season.lstrip('S') if isinstance(season, str) else season
             if episode is not None:
                 episode = episode.lstrip('E') if isinstance(episode, str) else episode
-            
-            return self.zilean_api.dmm_filtered(
+
+            return await self.zilean_api.dmm_filtered(
                 query=query_text,
                 season=season,
                 episode=episode
@@ -178,9 +182,13 @@ class ZileanService:
             self.logger.exception(f"An exception occurred while searching for series '{query_text}' on Zilean: {str(e)}")
             return []
 
-    def __search_by_imdb_id(self, imdb_id: str) -> List[DMMTorrentInfo]:
+    async def __search_by_imdb_id(self, imdb_id: str) -> List[DMMTorrentInfo]:
         try:
-            return self.zilean_api.dmm_filtered(imdb_id=imdb_id)
+            return await self.zilean_api.dmm_filtered(imdb_id=imdb_id)
         except Exception as e:
             self.logger.exception(f"An exception occurred while searching for IMDb ID '{imdb_id}' on Zilean: {str(e)}")
             return []
+
+    async def close(self):
+        """Ferme les ressources."""
+        await self.zilean_api.close()

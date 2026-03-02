@@ -7,32 +7,35 @@ from stream_fusion.utils.detection import detect_languages
 
 class YggflixResult:
     def __init__(self):
-        self.raw_title = None  # Raw title of the torrent
-        self.size = None  # Size of the torrent
-        self.link = None  # Contruct a magnet link here
-        self.indexer = None  # Indexer
-        self.seeders = None  # Seeders count
-        self.magnet = None  # Magnet url
-        self.info_hash = None  # infoHash by Jackett
-        self.privacy = None  # public or private
+        self.raw_title = None
+        self.size = None
+        self.link = None
+        self.indexer = None
+        self.seeders = None
+        self.magnet = None
+        self.info_hash = None
+        self.privacy = None
         self.from_cache = None
-
-        self.languages = None  # Language of the torrent
-        self.type = None  # series or movie
-
-        self.parsed_data = None  # Ranked result
+        self.languages = None
+        self.type = None
+        self.tmdb_id = None
+        self.parsed_data = None
 
     def convert_to_torrent_item(self):
+        parsed_data = self.parsed_data or parse(self.raw_title)
+        logger.debug(f"YggflixResult.convert_to_torrent_item(): '{self.raw_title[:60]}' → resolution='{getattr(parsed_data, 'resolution', 'UNKNOWN')}'")
         return TorrentItem(
-            self.raw_title,
-            self.size,
-            self.magnet,
-            self.info_hash.lower() if self.info_hash is not None else None,
-            self.link,
-            self.seeders,
-            self.languages,
-            self.indexer,
-            self.privacy,
-            self.type,
-            self.parsed_data
+            raw_title=self.raw_title,
+            size=self.size,
+            magnet=self.magnet,
+            info_hash=self.info_hash.lower() if self.info_hash is not None else None,
+            link=self.link,
+            seeders=self.seeders,
+            languages=self.languages,
+            indexer=self.indexer,
+            privacy=self.privacy,
+            type=self.type,
+            parsed_data=parsed_data,
+            torrent_download=None,
+            tmdb_id=self.tmdb_id
         )

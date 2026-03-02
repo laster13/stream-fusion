@@ -1,13 +1,10 @@
 import os
-import queue
-import threading
-import time
+import asyncio
+import aiohttp
 import xml.etree.ElementTree as ET
+from typing import List, Optional
 
-import requests
 from RTN import parse
-from requests_ratelimiter import HTTPAdapter
-from urllib3 import Retry
 
 from stream_fusion.utils.jackett.jackett_indexer import JackettIndexer
 from stream_fusion.utils.jackett.jackett_result import JackettResult
@@ -19,77 +16,83 @@ from stream_fusion.settings import settings
 
 
 class JackettService:
-    def __init__(self, config):
+    def __init__(self, config, session: Optional[aiohttp.ClientSession] = None):
         self.logger = logger
 
         self.__api_key = settings.jackett_api_key
         self.__base_url = f"{settings.jackett_schema}://{settings.jackett_host}:{settings.jackett_port}/api/v2.0"
-        self.__session = requests.Session()
-        
-        adapter = HTTPAdapter(pool_connections=100, pool_maxsize=100)
-        
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "OPTIONS"]
-        )
-        adapter.max_retries = retry_strategy
-        
-        self.__session.mount("http://", adapter)
-        self.__session.mount("https://", adapter)
 
-    def search(self, media):
+        self._external_session = session is not None
+        self._session = session
+        self._timeout = aiohttp.ClientTimeout(total=30)
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Retourne la session aiohttp, en crée une si nécessaire."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(timeout=self._timeout)
+            self._external_session = False
+        return self._session
+
+    async def close(self):
+        """Ferme la session si elle a été créée en interne."""
+        if self._session and not self._external_session and not self._session.closed:
+            await self._session.close()
+
+    async def search(self, media) -> List[JackettResult]:
         self.logger.info("Started Jackett search for " + media.type + " " + media.titles[0])
 
-        indexers = self.__get_indexers()
-        threads = []
-        results_queue = queue.Queue()  # Create a Queue instance to hold the results
+        indexers = await self.__get_indexers()
 
-        # Define a wrapper function that calls the actual target function and stores its return value in the queue
-        def thread_target(media, indexer):
-            self.logger.info(f"Searching on {indexer.title}")
-            start_time = time.time()
+        if isinstance(media, Movie):
+            search_func = self.__search_movie_indexer
+        elif isinstance(media, Series):
+            search_func = self.__search_series_indexer
+        else:
+            raise TypeError("Only Movie and Series is allowed as media!")
 
-            # Call the actual function
-            if isinstance(media, Movie):
-                result = self.__search_movie_indexer(media, indexer)
-            elif isinstance(media, Series):
-                result = self.__search_series_indexer(media, indexer)
-            else:
-                raise TypeError("Only Movie and Series is allowed as media!")
-
-            self.logger.info(
-                f"Search on {indexer.title} took {time.time() - start_time} seconds and found {len([result for sublist in result for result in sublist])} results")
-
-            results_queue.put(result)  # Put the result in the queue
-
+        # Lancer toutes les recherches en parallèle avec asyncio.gather()
+        import time
+        tasks = []
         for indexer in indexers:
-            # Pass the wrapper function as the target to Thread, with necessary arguments
-            threads.append(threading.Thread(target=thread_target, args=(media, indexer)))
+            tasks.append(self.__search_indexer_wrapper(media, indexer, search_func))
 
-        for thread in threads:
-            thread.start()
+        results_nested = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for thread in threads:
-            thread.join()
-
+        # Aplatir les résultats
         results = []
+        for result in results_nested:
+            if isinstance(result, Exception):
+                self.logger.exception(f"Error in Jackett search: {result}")
+            elif result:
+                for sublist in result:
+                    if sublist:
+                        results.extend(sublist)
 
-        # Retrieve results from the queue and append them to the results list
-        while not results_queue.empty():
-            results.extend(results_queue.get())
+        return self.__post_process_results(results, media)
 
-        flatten_results = [result for sublist in results for result in sublist]
+    async def __search_indexer_wrapper(self, media, indexer, search_func):
+        """Wrapper pour mesurer le temps de recherche par indexer."""
+        import time
+        self.logger.info(f"Searching on {indexer.title}")
+        start_time = time.time()
 
-        return self.__post_process_results(flatten_results, media)
+        try:
+            result = await search_func(media, indexer)
+            count = len([r for sublist in result for r in sublist]) if result else 0
+            self.logger.info(
+                f"Search on {indexer.title} took {time.time() - start_time:.2f} seconds and found {count} results"
+            )
+            return result
+        except Exception as e:
+            self.logger.exception(f"Error searching on {indexer.title}: {e}")
+            return []
 
-    def __search_movie_indexer(self, movie, indexer):
-
-        # url = f"{self.__base_url}/indexers/all/results/torznab/api?apikey={self.__api_key}&t=movie&cat=2000&q={movie.title}&year={movie.year}"
-
-        has_imdb_search_capability = (os.getenv(
-            "DISABLE_JACKETT_IMDB_SEARCH") != "true" and indexer.movie_search_capatabilities is not None and 'imdbid' in indexer.movie_search_capatabilities)
+    async def __search_movie_indexer(self, movie: Movie, indexer: JackettIndexer) -> List[List[JackettResult]]:
+        has_imdb_search_capability = (
+            os.getenv("DISABLE_JACKETT_IMDB_SEARCH") != "true"
+            and indexer.movie_search_capatabilities is not None
+            and 'imdbid' in indexer.movie_search_capatabilities
+        )
 
         if has_imdb_search_capability:
             languages = ['en']
@@ -99,12 +102,15 @@ class JackettService:
             languages = movie.languages
             titles = movie.titles
         else:
-            index_of_language = [index for index, lang in enumerate(movie.languages) if
-                                 lang == indexer.language or lang == 'en']
+            index_of_language = [
+                index for index, lang in enumerate(movie.languages)
+                if lang == indexer.language or lang == 'en'
+            ]
             languages = [movie.languages[index] for index in index_of_language]
             titles = [movie.titles[index] for index in index_of_language]
 
         results = []
+        session = await self._get_session()
 
         for index, lang in enumerate(languages):
             params = {
@@ -122,23 +128,28 @@ class JackettService:
             url += '?' + '&'.join([f'{k}={v}' for k, v in params.items()])
 
             try:
-                response = self.__session.get(url)
-                response.raise_for_status()
-                results.append(self.__get_torrent_links_from_xml(response.text))
+                async with session.get(url) as response:
+                    response.raise_for_status()
+                    text = await response.text()
+                    results.append(self.__get_torrent_links_from_xml(text))
             except Exception:
                 self.logger.exception(
-                    f"An exception occured while searching for a movie on Jackett with indexer {indexer.title} and "
-                    f"language {lang}.")
+                    f"An exception occurred while searching for a movie on Jackett with indexer {indexer.title} and "
+                    f"language {lang}."
+                )
 
         return results
 
-    def __search_series_indexer(self, series, indexer):
+    async def __search_series_indexer(self, series: Series, indexer: JackettIndexer) -> List[List[JackettResult]]:
         season = str(int(series.season.replace('S', '')))
         episode = str(int(series.episode.replace('E', '')))
 
-        has_imdb_search_capability = (os.getenv("DISABLE_JACKETT_IMDB_SEARCH") != "true"
-                                      and indexer.tv_search_capatabilities is not None
-                                      and 'imdbid' in indexer.tv_search_capatabilities)
+        has_imdb_search_capability = (
+            os.getenv("DISABLE_JACKETT_IMDB_SEARCH") != "true"
+            and indexer.tv_search_capatabilities is not None
+            and 'imdbid' in indexer.tv_search_capatabilities
+        )
+
         if has_imdb_search_capability:
             languages = ['en']
             index_of_language = [index for index, lang in enumerate(series.languages) if lang == 'en'][0]
@@ -147,12 +158,15 @@ class JackettService:
             languages = series.languages
             titles = series.titles
         else:
-            index_of_language = [index for index, lang in enumerate(series.languages) if
-                                 lang == indexer.language or lang == 'en']
+            index_of_language = [
+                index for index, lang in enumerate(series.languages)
+                if lang == indexer.language or lang == 'en'
+            ]
             languages = [series.languages[index] for index in index_of_language]
             titles = [series.titles[index] for index in index_of_language]
 
         results = []
+        session = await self._get_session()
 
         for index, lang in enumerate(languages):
             params = {
@@ -169,24 +183,24 @@ class JackettService:
             url_title += '?' + '&'.join([f'{k}={v}' for k, v in params.items()])
 
             url_season = f"{self.__base_url}/indexers/{indexer.id}/results/torznab/api"
-            params['season'] = season
-            url_season += '?' + '&'.join([f'{k}={v}' for k, v in params.items()])
+            params_season = {**params, 'season': season}
+            url_season += '?' + '&'.join([f'{k}={v}' for k, v in params_season.items()])
 
             url_ep = f"{self.__base_url}/indexers/{indexer.id}/results/torznab/api"
-            params['ep'] = episode
-            url_ep += '?' + '&'.join([f'{k}={v}' for k, v in params.items()])
+            params_ep = {**params_season, 'ep': episode}
+            url_ep += '?' + '&'.join([f'{k}={v}' for k, v in params_ep.items()])
 
             try:
-                # Current functionality is that it returns if the season, episode search was successful. This is subject to change
-                # TODO: what should we prioritize? season, episode or title?
-                response_ep = self.__session.get(url_ep)
-                response_ep.raise_for_status()
+                # Lancer les 3 requêtes en parallèle
+                async with session.get(url_ep) as response_ep:
+                    response_ep.raise_for_status()
+                    text_ep = await response_ep.text()
+                    data_ep = self.__get_torrent_links_from_xml(text_ep)
 
-                response_season = self.__session.get(url_season)
-                response_season.raise_for_status()
-
-                data_ep = self.__get_torrent_links_from_xml(response_ep.text)
-                data_season = self.__get_torrent_links_from_xml(response_season.text)
+                async with session.get(url_season) as response_season:
+                    response_season.raise_for_status()
+                    text_season = await response_season.text()
+                    data_season = self.__get_torrent_links_from_xml(text_season)
 
                 if data_ep:
                     results.append(data_ep)
@@ -194,29 +208,33 @@ class JackettService:
                     results.append(data_season)
 
                 if not data_ep and not data_season:
-                    response_title = self.__session.get(url_title)
-                    response_title.raise_for_status()
-                    data_title = self.__get_torrent_links_from_xml(response_title.text)
-                    if data_title:
-                        results.append(data_title)
+                    async with session.get(url_title) as response_title:
+                        response_title.raise_for_status()
+                        text_title = await response_title.text()
+                        data_title = self.__get_torrent_links_from_xml(text_title)
+                        if data_title:
+                            results.append(data_title)
             except Exception:
                 self.logger.exception(
-                    f"An exception occured while searching for a series on Jackett with indexer {indexer.title} and language {lang}.")
+                    f"An exception occurred while searching for a series on Jackett with indexer {indexer.title} and language {lang}."
+                )
 
         return results
 
-    def __get_indexers(self):
+    async def __get_indexers(self) -> List[JackettIndexer]:
         url = f"{self.__base_url}/indexers/all/results/torznab/api?apikey={self.__api_key}&t=indexers&configured=true"
 
+        session = await self._get_session()
         try:
-            response = self.__session.get(url)
-            response.raise_for_status()
-            return self.__get_indexer_from_xml(response.text)
+            async with session.get(url) as response:
+                response.raise_for_status()
+                text = await response.text()
+                return self.__get_indexer_from_xml(text)
         except Exception:
-            self.logger.exception("An exception occured while getting indexers from Jackett.")
+            self.logger.exception("An exception occurred while getting indexers from Jackett.")
             return []
 
-    def __get_indexer_from_xml(self, xml_content):
+    def __get_indexer_from_xml(self, xml_content: str) -> List[JackettIndexer]:
         xml_root = ET.fromstring(xml_content)
 
         indexer_list = []
@@ -248,15 +266,17 @@ class JackettService:
 
         return indexer_list
 
-    def __get_torrent_links_from_xml(self, xml_content):
+    def __get_torrent_links_from_xml(self, xml_content: str) -> List[JackettResult]:
         xml_root = ET.fromstring(xml_content)
 
         result_list = []
         for item in xml_root.findall('.//item'):
             result = JackettResult()
 
-            result.seeders = item.find('.//torznab:attr[@name="seeders"]',
-                                       namespaces={'torznab': 'http://torznab.com/schemas/2015/feed'}).attrib['value']
+            result.seeders = item.find(
+                './/torznab:attr[@name="seeders"]',
+                namespaces={'torznab': 'http://torznab.com/schemas/2015/feed'}
+            ).attrib['value']
             if int(result.seeders) <= 0:
                 continue
 
@@ -266,24 +286,26 @@ class JackettService:
             result.indexer = item.find('jackettindexer').text
             result.privacy = item.find('type').text
 
-            # TODO: I haven't seen this in the Jackett XML response. Is this still relevant?
-            # Or which indexers provide this?
-            magnet = item.find('.//torznab:attr[@name="magneturl"]',
-                               namespaces={'torznab': 'http://torznab.com/schemas/2015/feed'})
+            magnet = item.find(
+                './/torznab:attr[@name="magneturl"]',
+                namespaces={'torznab': 'http://torznab.com/schemas/2015/feed'}
+            )
             result.magnet = magnet.attrib['value'] if magnet is not None else None
 
-            infoHash = item.find('.//torznab:attr[@name="infohash"]',
-                                 namespaces={'torznab': 'http://torznab.com/schemas/2015/feed'})
+            infoHash = item.find(
+                './/torznab:attr[@name="infohash"]',
+                namespaces={'torznab': 'http://torznab.com/schemas/2015/feed'}
+            )
             result.info_hash = infoHash.attrib['value'] if infoHash is not None else None
 
             result_list.append(result)
 
         return result_list
 
-    def __post_process_results(self, results, media):
+    def __post_process_results(self, results: List[JackettResult], media) -> List[JackettResult]:
         for result in results:
             parsed_result = parse(result.raw_title)
-            
+
             result.parsed_data = parsed_result
             result.languages = detect_languages(result.raw_title)
             result.type = media.type

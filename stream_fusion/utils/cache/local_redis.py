@@ -25,7 +25,9 @@ class RedisCache(CacheBase):
             try:
                 self._redis_client = Redis.from_url(
                     self.redis_url,
-                    max_connections=10
+                    max_connections=100,
+                    socket_connect_timeout=5,
+                    socket_timeout=10
                 )
             except Exception as e:
                 self.logger.error(f"RedisCache: Failed to create Redis client: {e}")
@@ -216,7 +218,16 @@ class RedisCache(CacheBase):
 
     async def close(self):
         if self._redis_client:
-            await self._redis_client.close()
+            try:
+                # Set a short timeout for closing to avoid blocking
+                await asyncio.wait_for(
+                    self._redis_client.close(),
+                    timeout=2.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("RedisCache: Timeout while closing Redis connection, ignoring")
+            except Exception as e:
+                self.logger.error(f"RedisCache: Error while closing Redis connection: {e}")
 
     async def __aenter__(self):
         return self

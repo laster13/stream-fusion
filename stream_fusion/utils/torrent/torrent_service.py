@@ -3,10 +3,13 @@ import os
 import time
 import urllib.parse
 from typing import List
+import pathlib
+import json
 
-import bencode
+import bencodepy
 import requests
 from RTN import parse
+from RTN.models import ParsedData
 
 from stream_fusion.services.postgresql.dao.torrentitem_dao import TorrentItemDAO
 from stream_fusion.utils.jackett.jackett_result import JackettResult
@@ -19,11 +22,15 @@ from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
 
 class TorrentService:
+    TORRENT_CACHE_DIR = pathlib.Path("/var/cache/torrents")
+
     def __init__(self, config, torrent_dao: TorrentItemDAO):
         self.config = config
         self.torrent_dao = torrent_dao
         self.logger = logger
         self.__session = requests.Session()
+        # Ensure cache directory exists
+        self.TORRENT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def __generate_unique_id(raw_title: str, indexer: str = "cached") -> str:
@@ -36,6 +43,7 @@ class TorrentService:
         try:
             cached_item = await self.torrent_dao.get_torrent_item_by_id(unique_id)
             if cached_item:
+                # to_torrent_item() automatically reprout parsed_data from raw_title
                 return cached_item.to_torrent_item()
             return None
         except Exception as e:
@@ -44,9 +52,57 @@ class TorrentService:
 
     async def cache_torrent(self, torrent_item: TorrentItem, id: str = None):
         unique_id = self.__generate_unique_id(torrent_item.raw_title, torrent_item.indexer)
-        await self.torrent_dao.create_torrent_item(torrent_item, unique_id)
+        # C411/Torr9 sans tmdb_id → orphelins, jamais retrouvés → on skip
+        if torrent_item.indexer in ['C411 - API', 'Torr9 - API'] and not torrent_item.tmdb_id:
+            self.logger.debug(f"TorrentService: Skipping {torrent_item.indexer} torrent without tmdb_id: {torrent_item.raw_title}")
+            return
+        try:
+            existing = await self.torrent_dao.get_torrent_item_by_id(unique_id)
+            if existing:
+                # Already in DB, skip — don't overwrite tmdb_id or other fields
+                self.logger.debug(f"TorrentService: Torrent already cached, skipping: {unique_id}")
+            else:
+                await self.torrent_dao.create_torrent_item(torrent_item, unique_id)
+                self.logger.debug(f"TorrentService: Created new cached torrent: {unique_id}")
+        except Exception as e:
+            if "duplicate key value violates unique constraint" in str(e):
+                self.logger.debug(f"TorrentService: Race condition, torrent already exists: {unique_id}")
+            else:
+                self.logger.error(f"TorrentService: Error caching torrent {unique_id}: {str(e)}")
 
-    async def convert_and_process(self, results: List[JackettResult | ZileanResult | YggflixResult | SharewoodResult]):
+    async def _update_cached_item(self, cached_item: TorrentItem, new_item: TorrentItem):
+        """Update cached item with new data (tmdb_id, torrent_file_path) if available"""
+        try:
+            unique_id = self.__generate_unique_id(cached_item.raw_title, cached_item.indexer)
+            needs_update = False
+
+            # Update tmdb_id if the new item has one and cached doesn't
+            if new_item.tmdb_id and not cached_item.tmdb_id:
+                cached_item.tmdb_id = new_item.tmdb_id
+                needs_update = True
+                self.logger.debug(f"Updated tmdb_id for {unique_id}: {new_item.tmdb_id}")
+
+            # Update torrent_file_path if new item has one and cached doesn't (or is different)
+            if new_item.torrent_file_path and not cached_item.torrent_file_path:
+                cached_item.torrent_file_path = new_item.torrent_file_path
+                needs_update = True
+                self.logger.debug(f"Updated torrent_file_path for {unique_id}: {new_item.torrent_file_path}")
+
+            if needs_update:
+                await self.torrent_dao.update_torrent_item(unique_id, cached_item)
+                self.logger.info(f"Cached torrent updated: {unique_id}")
+        except Exception as e:
+            self.logger.error(f"Error updating cached item: {e}")
+
+    async def convert_and_process(self, results: List[JackettResult | ZileanResult | YggflixResult | SharewoodResult], skip_yggflix_download: bool = False):
+        """
+        Convert and process torrent results.
+
+        Args:
+            results: List of torrent results to process
+            skip_yggflix_download: If True, don't download .torrent files from Yggflix (just update metadata)
+                                  Used during search to avoid heavy downloads. Set to False for actual playback.
+        """
         torrent_items_result = []
 
         for result in results:
@@ -54,7 +110,23 @@ class TorrentService:
 
             cached_item = await self.get_cached_torrent(torrent_item.raw_title, torrent_item.indexer)
             if cached_item:
+                # Pour Yggflix: mettre à jour les seeders frais en mémoire (sans écriture DB)
+                if torrent_item.indexer == "Yggtorrent - API":
+                    cached_item.seeders = torrent_item.seeders
+                    self.logger.debug(f"Updated seeders in memory for {torrent_item.raw_title}: {torrent_item.seeders}")
+
+                # Don't update - causes DB contention with concurrent requests
+                # tmdb_id will only be set for NEW torrents, not existing ones
+                # await self._update_cached_item(cached_item, torrent_item)
                 torrent_items_result.append(cached_item)
+                continue
+
+            # If skip_yggflix_download is True and this is a Yggflix URL, just cache without downloading
+            if skip_yggflix_download and settings.yggflix_url and torrent_item.link.startswith(settings.yggflix_url):
+                # Don't process, just cache the raw item (without .torrent file and info_hash)
+                # The info_hash will be set to None, magnet will be empty
+                await self.cache_torrent(torrent_item)
+                torrent_items_result.append(torrent_item)
                 continue
 
             if torrent_item.link.startswith("magnet:"):
@@ -138,11 +210,11 @@ class TorrentService:
 
     def __process_torrent(self, result: TorrentItem, torrent_file):
         try:
-            metadata = bencode.bdecode(torrent_file)
+            metadata = bencodepy.decode(torrent_file)
         except Exception as e:
             try:
                 from bencodepy import Decoder
-                decoder = Decoder(encoding='latin-1') 
+                decoder = Decoder(encoding='latin-1')
                 metadata = decoder.decode(torrent_file)
             except Exception as inner_e:
                 logger.error(f"Impossible de décoder le fichier torrent: {str(e)} puis {str(inner_e)}")
@@ -153,6 +225,19 @@ class TorrentService:
                 return result
 
         result.torrent_download = result.link
+        # Save .torrent file to disk instead of PostgreSQL
+        try:
+            # Use info_hash as filename if available, otherwise generate one
+            filename = f"{result.info_hash if result.info_hash else hashlib.sha256(torrent_file).hexdigest()}.torrent"
+            filepath = self.TORRENT_CACHE_DIR / filename
+            with open(filepath, 'wb') as f:
+                f.write(torrent_file)
+            result.torrent_file_path = str(filepath)
+            self.logger.debug(f"Saved .torrent to disk: {filepath}")
+        except Exception as e:
+            self.logger.error(f"Error saving .torrent to disk: {e}")
+            result.torrent_file_path = None
+
         try:
             result.trackers = self.__get_trackers_from_torrent(metadata)
             result.info_hash = self.__convert_torrent_to_hash(metadata["info"])
@@ -170,7 +255,16 @@ class TorrentService:
         result.files = metadata["info"]["files"]
 
         if result.type == "series":
-            file_details = self.__find_single_episode_file(result.files, result.parsed_data.seasons, result.parsed_data.episodes)
+            # Ensure we have parsed_data from raw_title
+            if not result.parsed_data:
+                result.parsed_data = parse(result.raw_title)
+
+            # Only try to find episode file if we have valid parsed_data
+            if result.parsed_data and isinstance(result.parsed_data, ParsedData):
+                file_details = self.__find_single_episode_file(result.files, result.parsed_data.seasons, result.parsed_data.episodes)
+            else:
+                file_details = None
+                self.logger.warning(f"No valid parsed_data for series torrent: {result.raw_title}")
 
             if file_details is not None:
                 self.logger.debug("File details")
@@ -178,8 +272,9 @@ class TorrentService:
                 result.file_index = file_details["file_index"]
                 result.file_name = file_details["title"]
                 result.size = file_details["size"]
-            else:
-                result.full_index = self.__find_full_index(result.files)
+
+            # Always create full_index for series - AllDebrid needs all files to search for matching episode
+            result.full_index = self.__find_full_index(result.files)
 
         if result.type == "movie":
             result.file_index = self.__find_movie_file(result.files)
@@ -198,7 +293,7 @@ class TorrentService:
         return result
 
     def __convert_torrent_to_hash(self, torrent_contents):
-        hashcontents = bencode.bencode(torrent_contents)
+        hashcontents = bencodepy.encode(torrent_contents)
         hexHash = hashlib.sha1(hashcontents).hexdigest()
         return hexHash.lower()
 
@@ -258,7 +353,7 @@ class TorrentService:
 
                 if season[0] in parsed_file.seasons and episode[0] in parsed_file.episodes:
                     episode_files.append({
-                        "file_index": file_index,
+                        "file_index": None,  # Let debrid service handle file selection
                         "title": file,
                         "size": files["length"]
                     })
@@ -266,7 +361,9 @@ class TorrentService:
             # Doesn't that need to be indented?
             file_index += 1
 
-        return max(episode_files, key=lambda file: file["size"])
+        if episode_files:
+            return max(episode_files, key=lambda file: file["size"])
+        return None
     
     def __find_full_index(self, file_structure):
         self.logger.debug("Starting to build full index of video files")

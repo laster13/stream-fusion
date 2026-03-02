@@ -20,4 +20,16 @@ def parse_config(b64config):
     if "addonHost" not in config:
         logger.warning("addonHost not found in config, using default")
         config["addonHost"] = "http://127.0.0.1:8000"
+
+    config["sharewood"] = False
+
+    if "c411" not in config:
+        config["c411"] = True
+
+    if "torr9" not in config:
+        config["torr9"] = True
+
+    if "yggflix" not in config:
+        config["yggflix"] = True
+
     return config

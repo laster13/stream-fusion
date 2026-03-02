@@ -116,6 +116,7 @@ FRENCH_PATTERNS = {
     "VQ": r"\b(?:VOQ|VQ)\b",
     "VOSTFR": r"\b(?:VOSTFR|SUBFRENCH)\b",
     "FRENCH": r"\b(?:FRENCH|FR)\b",
+    "MULTI": r"\b(?:MULTI)\b",
 }
 
 class CustomException(Exception):

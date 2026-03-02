@@ -1,17 +1,16 @@
 import asyncio
 import pickle
+from datetime import datetime, timedelta
 
 from redis import Redis
 from tmdbv3api import TMDb, Movie, TV, Season, Discover, Find
-from fastapi_simple_rate_limiter import rate_limiter
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi_simple_rate_limiter.database import create_redis_session
 
 from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
+from stream_fusion.services.postgresql.dao.torrentitem_dao import TorrentItemDAO
 from stream_fusion.settings import settings
 from stream_fusion.utils.parse_config import parse_config
 from stream_fusion.utils.security.security_api_key import check_api_key
-from stream_fusion.utils.yggfilx.yggflix_api import YggflixAPI
 from stream_fusion.web.root.catalog.schemas import (
     ErrorResponse,
     MetaItem,
@@ -23,8 +22,6 @@ from stream_fusion.services.redis.redis_config import get_redis
 from stream_fusion.logging_config import logger
 
 router = APIRouter()
-
-redis_session = create_redis_session(host=settings.redis_host, port=settings.redis_port, db=settings.redis_db)
 
 tmdb = TMDb()
 tmdb.api_key = settings.tmdb_api_key
@@ -77,10 +74,17 @@ def extract_year(date_string):
     return None
 
 
-async def create_meta_object(details, item_type: str, imdb_id: str):
+async def create_meta_object(details, item_type: str, imdb_id: str, include_episodes: bool = True):
+    """
+    Crée un objet Meta à partir des détails TMDB.
+
+    Args:
+        include_episodes: Si False, ne charge pas les épisodes (pour le catalogue).
+                         Si True, charge tous les épisodes (pour le endpoint /meta).
+    """
     meta = Meta(
         id=imdb_id,
-        title=getattr(details, "title", None) or getattr(details, "name", None),
+        name=getattr(details, "title", None) or getattr(details, "name", None),
         type=item_type,
         poster=(
             f"https://image.tmdb.org/t/p/w500{details.poster_path}"
@@ -115,7 +119,8 @@ async def create_meta_object(details, item_type: str, imdb_id: str):
         meta.stream = {
             "id": imdb_id
         }
-    elif item_type == "series" and hasattr(details, "seasons"):
+    elif item_type == "series" and include_episodes and hasattr(details, "seasons"):
+        # Charger les épisodes seulement si demandé (pour /meta, pas pour /catalog)
         meta.videos = []
         for season in details.seasons:
             season_details = await get_tv_season_details(
@@ -150,7 +155,6 @@ async def get_tmdb_id_from_imdb(imdb_id: str) -> str:
 @router.get(
     "/{config}/catalog/{type}/{id}/skip={skip}.json", responses={500: {"model": ErrorResponse}}
 )
-@rate_limiter(limit=20, seconds=60, redis=redis_session)
 async def get_catalog(
     config: str,
     type: str,
@@ -158,7 +162,8 @@ async def get_catalog(
     request: Request,
     skip: int = 0,
     redis_client: Redis = Depends(get_redis),
-    apikey_dao: APIKeyDAO = Depends()
+    apikey_dao: APIKeyDAO = Depends(),
+    torrentitem_dao: TorrentItemDAO = Depends()
 ):
     try:
         config_data = parse_config(config)
@@ -173,12 +178,8 @@ async def get_catalog(
         if type not in {"movie", "series"} or id not in {
             "latest_movies",
             "recently_added_movies",
-            "popular_movies",
-            "top_rated_movies",
             "latest_tv_shows",
             "recently_added_tv_shows",
-            "popular_tv_shows",
-            "top_rated_tv_shows",
         }:
             raise HTTPException(status_code=400, detail="Invalid type or catalog id")
 
@@ -192,48 +193,105 @@ async def get_catalog(
         logger.info(f"Catalog not found in cache for key: {cache_key}. Generating...")
 
         item_ids = []
-        use_yggflix = config_data.get("yggflix", False)
-        yggflix_ids = {
-            "latest_movies": "latest_movies",
-            "recently_added_movies": "recently_added_movies",
-            "latest_tv_shows": "latest_tv_shows",
-            "recently_added_tv_shows": "recently_added_tv_shows",
+        episode_info_map = {}  # Mapping tmdb_id -> episode info pour les séries
+
+        # Map catalog IDs to item types for PostgreSQL queries
+        catalog_type_map = {
+            "latest_movies": "movie",
+            "recently_added_movies": "movie",
+            "latest_tv_shows": "series",
+            "recently_added_tv_shows": "series",
         }
 
-        if use_yggflix and id in yggflix_ids:
+        item_type = catalog_type_map.get(id)
+
+        # For "latest_*": Different logic for movies vs series
+        if id.startswith("latest_"):
             try:
-                logger.info(f"Attempting to fetch catalog from Yggflix for id: {yggflix_ids[id]}")
-                yggflix = YggflixAPI()
-                home_data = await asyncio.to_thread(yggflix.get_home)
-                item_ids = [item["id"] for item in home_data.get(yggflix_ids[id], []) if "id" in item]
-                logger.info(f"Fetched {len(item_ids)} IDs from Yggflix for {yggflix_ids[id]}")
-            except Exception as ygg_error:
-                logger.warning(f"Failed to fetch catalog from Yggflix for id {yggflix_ids[id]}: {ygg_error}. Falling back to TMDb.")
+                if item_type == "movie":
+                    # Films: TMDB discover (films récents des 6 derniers mois) + filtre FR disponible en PostgreSQL
+                    logger.info(f"Fetching latest movies from TMDB discover (last 6 months) and filtering by PostgreSQL availability")
+                    today = datetime.now().strftime('%Y-%m-%d')
+                    six_months_ago = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
+                    tmdb_results = await asyncio.gather(
+                        *[asyncio.to_thread(discover.discover_movies, {
+                            'sort_by': 'popularity.desc',
+                            'primary_release_date.gte': six_months_ago,
+                            'primary_release_date.lte': today,
+                            'page': page,
+                        }) for page in range(1, 11)]
+                    )
+                    all_tmdb_ids = []
+                    for results in tmdb_results:
+                        for item in results:
+                            if hasattr(item, 'id'):
+                                all_tmdb_ids.append(item.id)
+                    logger.info(f"Fetched {len(all_tmdb_ids)} TMDB IDs from TMDB discover for {id}")
+
+                    # Filtre par disponibilité FR/MULTI, trié par date d'ajout en base (plus récent en premier)
+                    item_ids = await torrentitem_dao.filter_existing_tmdb_ids(all_tmdb_ids, item_type, sort_by_added=True)
+                    logger.info(f"Filtered to {len(item_ids)} available TMDB IDs (FR/MULTI, sorted by added date) for {id}")
+                else:
+                    # Séries: TMDB discover avec air_date récent (7 derniers jours) + filtre FR en PostgreSQL
+                    # Utilise discover au lieu de on_the_air car on_the_air vire trop vite les séries binge-release
+                    logger.info(f"Fetching latest series from TMDB discover (air_date last 7 days) and filtering by PostgreSQL availability")
+                    today = datetime.now().strftime('%Y-%m-%d')
+                    week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+                    tmdb_results = await asyncio.gather(
+                        *[asyncio.to_thread(discover.discover_tv_shows, {
+                            'air_date.gte': week_ago,
+                            'without_genres': '10763,10764,10766,10767',
+                            'air_date.lte': today,
+                            'sort_by': 'popularity.desc',
+                            'page': page
+                        }) for page in range(1, 11)]
+                    )
+                    all_tmdb_ids = []
+                    for results in tmdb_results:
+                        for item in results:
+                            if hasattr(item, 'id'):
+                                all_tmdb_ids.append(item.id)
+                    logger.info(f"Fetched {len(all_tmdb_ids)} series TMDB IDs from TMDB discover (air_date) for {id}")
+
+                    # Filtre par disponibilité FR/MULTI, trié par dernier nouvel épisode en base
+                    # Récupère aussi les infos d'épisode pour l'afficher dans le titre
+                    episode_data = await torrentitem_dao.filter_existing_tmdb_ids(all_tmdb_ids, item_type, sort_by_added=True, return_episode_info=True)
+                    item_ids = [ep['tmdb_id'] for ep in episode_data]
+                    # Créer un mapping tmdb_id -> episode info
+                    episode_info_map = {ep['tmdb_id']: ep for ep in episode_data}
+                    logger.info(f"Filtered to {len(item_ids)} available series TMDB IDs (FR/MULTI, sorted by new episode date) for {id}")
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch latest catalog for {id}: {e}. Falling back to PostgreSQL only.")
+                item_ids = await torrentitem_dao.get_latest_tmdb_ids(item_type, limit=50)
+
+        # For "recently_added_*": Use PostgreSQL directly (recent uploads)
+        elif id.startswith("recently_added_"):
+            try:
+                logger.info(f"Fetching recently added TMDB IDs from PostgreSQL for {item_type}")
+                item_ids = await torrentitem_dao.get_recently_added_tmdb_ids(item_type, limit=50)
+                logger.info(f"Fetched {len(item_ids)} TMDB IDs from PostgreSQL for {id}")
+            except Exception as pg_error:
+                logger.warning(f"Failed to fetch catalog from PostgreSQL for {id}: {pg_error}")
                 item_ids = []
 
+        # Fallback to TMDb discover if no results
         if not item_ids:
-            logger.info(f"Fetching catalog from TMDb for type: {type}, id: {id}")
+            logger.info(f"Fallback: Fetching catalog from TMDb discover for type: {type}, id: {id}")
             try:
                 tmdb_params = {"page": 1}
                 if type == "movie":
-                    if id == "popular_movies": discover_func = discover.discover_movies
-                    elif id == "top_rated_movies": discover_func = discover.discover_movies; tmdb_params['sort_by'] = 'vote_average.desc'
-                    else: discover_func = discover.discover_movies
-
-                    results = await asyncio.to_thread(discover_func, tmdb_params)
+                    discover_func = discover.discover_movies
                 else:
-                    if id == "popular_tv_shows": discover_func = discover.discover_tv_shows
-                    elif id == "top_rated_tv_shows": discover_func = discover.discover_tv_shows; tmdb_params['sort_by'] = 'vote_average.desc'
-                    else: discover_func = discover.discover_tv_shows
+                    discover_func = discover.discover_tv_shows
 
-                    results = await asyncio.to_thread(discover_func, tmdb_params)
-
+                results = await asyncio.to_thread(discover_func, tmdb_params)
                 item_ids = [item.id for item in results if hasattr(item, 'id')]
-                logger.info(f"Fetched {len(item_ids)} IDs from TMDb for {type}/{id}")
+                logger.info(f"Fetched {len(item_ids)} IDs from TMDb discover for {type}/{id}")
 
             except Exception as tmdb_error:
-                 logger.error(f"Failed to fetch catalog from TMDb for {type}/{id}: {tmdb_error}", exc_info=True)
-                 item_ids = []
+                logger.error(f"Failed to fetch catalog from TMDb for {type}/{id}: {tmdb_error}", exc_info=True)
+                item_ids = []
 
         metas = []
         pipeline = redis_client.pipeline()
@@ -245,7 +303,19 @@ async def get_catalog(
 
             if cached_item:
                 try:
-                    metas.append(Meta.model_validate(cached_item))
+                    meta = Meta.model_validate(cached_item)
+                    # Ajouter l'info d'épisode au DÉBUT du titre pour les séries (sans modifier le cache)
+                    if tmdb_id in episode_info_map:
+                        ep_info = episode_info_map[tmdb_id]
+                        season = ep_info.get('season', '').strip('[]') or ''
+                        episode = ep_info.get('episode', '').strip('[]') or ''
+                        if season:
+                            if episode:
+                                ep_prefix = f"S{season.zfill(2)}E{episode.zfill(2)}"
+                            else:
+                                ep_prefix = f"S{season.zfill(2)}"
+                            meta.name = f"{ep_prefix} - {meta.name}"
+                    metas.append(meta)
                 except Exception as validation_error:
                      logger.warning(f"Failed to validate cached meta for TMDB ID {tmdb_id}: {validation_error}")
                 continue
@@ -258,18 +328,25 @@ async def get_catalog(
                 else:
                     details = await get_tv_details(tmdb_id)
                     item_type = "series"
-                    external_ids = await asyncio.to_thread(tv.external_ids, tmdb_id)
-                    imdb_id = external_ids.get("imdb_id")
+                    # Vérifier le cache tmdbid_to_imdbid avant d'appeler external_ids
+                    cached_imdb_id = await asyncio.to_thread(redis_client.get, f"tmdbid_to_imdbid:{tmdb_id}")
+                    if cached_imdb_id:
+                        imdb_id = cached_imdb_id.decode('utf-8') if isinstance(cached_imdb_id, bytes) else cached_imdb_id
+                        logger.debug(f"IMDb ID found in cache for TMDB ID {tmdb_id}: {imdb_id}")
+                    else:
+                        external_ids = await asyncio.to_thread(tv.external_ids, tmdb_id)
+                        imdb_id = external_ids.get("imdb_id")
 
                 if not imdb_id:
                     logger.warning(f"No IMDb ID found for TMDB ID: {tmdb_id}")
                     continue
 
-                meta = await create_meta_object(details, item_type, imdb_id)
-                metas.append(meta)
+                # include_episodes=False pour le catalogue (pas besoin des épisodes)
+                meta = await create_meta_object(details, item_type, imdb_id, include_episodes=False)
 
                 item_cache_key_imdb = f"imdbid_item:{imdb_id}"
                 try:
+                    # Cacher la version sans l'épisode dans le titre
                     pipeline.set(
                         item_cache_key_tmdb, pickle.dumps(meta), ex=7 * 24 * 60 * 60
                     )
@@ -281,6 +358,20 @@ async def get_catalog(
                     )
                 except Exception as cache_err:
                     logger.error(f"Error adding item TMDB:{tmdb_id}/IMDB:{imdb_id} to cache pipeline: {cache_err}")
+
+                # Ajouter l'info d'épisode au DÉBUT du titre pour les séries (après le cache)
+                if tmdb_id in episode_info_map:
+                    ep_info = episode_info_map[tmdb_id]
+                    season = ep_info.get('season', '').strip('[]') or ''
+                    episode = ep_info.get('episode', '').strip('[]') or ''
+                    if season:
+                        if episode:
+                            ep_prefix = f"S{season.zfill(2)}E{episode.zfill(2)}"
+                        else:
+                            ep_prefix = f"S{season.zfill(2)}"
+                        meta.name = f"{ep_prefix} - {meta.name}"
+
+                metas.append(meta)
 
             except Exception as e:
                 logger.error(f"Error processing item with TMDB ID {tmdb_id}: {str(e)}")
@@ -310,7 +401,6 @@ async def get_catalog(
 @router.get(
     "/{config}/meta/{type}/{id}.json", responses={500: {"model": ErrorResponse}}
 )
-@rate_limiter(limit=20, seconds=60, redis=redis_session)
 async def get_meta(
     config: str,
     type: str,

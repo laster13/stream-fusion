@@ -28,36 +28,45 @@ def smart_episode_fallback(files: List[Dict], season: int, episode: int) -> Opti
     """
     if not files:
         return None
-    
+
     video_files = [f for f in files if is_video_file(f.get("name", ""))]
     if not video_files:
         return None
-    
+
     logger.debug(f"Smart fallback: Recherche S{season:02d}E{episode:02d} parmi {len(video_files)} fichiers")
-    
+
+    # Only use safe patterns that include season verification
     episode_patterns = [
         rf"[Ss]{season:02d}[Ee]{episode:02d}",  # S01E01
-        rf"[Ss]{season}[Ee]{episode:02d}",      # S1E01  
+        rf"[Ss]{season}[Ee]{episode:02d}",      # S1E01
         rf"{season:02d}x{episode:02d}",         # 01x01
         rf"{season}x{episode:02d}",             # 1x01
-        rf"[Ee]{episode:02d}",                  # E01 (si saison unique)
-        rf"[Ee]pisode.{episode:02d}",           # Episode 01
-        rf"\.{episode:02d}\.",                  # .01.
     ]
-    
+
     for pattern in episode_patterns:
         for file in video_files:
             filename = file.get("name", "")
             if re.search(pattern, filename, re.IGNORECASE):
                 logger.debug(f"Smart fallback: Match trouvé avec pattern '{pattern}': {filename}")
                 return file
-    
-    sorted_files = sorted(video_files, key=lambda f: f.get("name", "").lower())
+
+    # Deduplicate files by name (StremThru can return duplicates)
+    seen_names = set()
+    unique_files = []
+    for f in video_files:
+        name = f.get("name", "")
+        if name not in seen_names:
+            seen_names.add(name)
+            unique_files.append(f)
+
+    logger.info(f"Smart fallback: Total: {len(video_files)} fichiers, Uniques: {len(unique_files)} fichiers")
+
+    sorted_files = sorted(unique_files, key=lambda f: f.get("name", "").lower())
     if episode <= len(sorted_files):
         selected_file = sorted_files[episode - 1]  # Index 0-based
-        logger.debug(f"Smart fallback: Sélection par ordre alphabétique (épisode #{episode}): {selected_file.get('name')}")
+        logger.info(f"Smart fallback: Sélection par ordre alphabétique (épisode #{episode}): {selected_file.get('name')}")
         return selected_file
-    
+
     largest_file = max(video_files, key=lambda f: f.get("size", 0))
     logger.warning(f"Smart fallback: Aucune stratégie n'a fonctionné, sélection du plus gros fichier: {largest_file.get('name')}")
     return largest_file

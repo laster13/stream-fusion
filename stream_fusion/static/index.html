@@ -51,6 +51,9 @@
                                         <label for="ApiKey" class="block text-sm font-medium leading-6 text-red-600 text-center">API Key</label>
                                         <input type="text" name="ApiKey" id="ApiKey"
                                             class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6">
+                                        <div id="apiKeyError" class="hidden mt-2 text-sm text-center text-red-600">
+                                            <p>API Key manquante ou invalide</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -238,19 +241,6 @@
                                    placeholder="Enter your PikPak email:password">
                         </div>
 
-                        <div class="relative flex gap-x-3">
-                            <div class="flex h-6 items-center">
-                                <input id="torrenting" name="torrenting" type="checkbox"
-                                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600">
-                            </div>
-                            <div class="text-sm leading-6">
-                                <label for="torrenting" class="font-medium text-white">Enable Torrenting <span
-                                        class="text-red-500">(Risky)</span></label>
-                                <p class="text-gray-500 dark:text-gray-300">Activate direct torrent streaming. <span
-                                        class="text-red-500">This may be illegal in
-                                        some countries. Use at your own risk.</span></p>
-                            </div>
-                        </div>
                     </div>
                 </div>
 
@@ -370,6 +360,32 @@
                                         class="font-bold text-red-600 dark:text-red-500">Warning: The Sharewood API are
                                         not stable and very limited,
                                         you may prefere to disable it to save time on search</span></p>
+                            </div>
+                        </div>
+
+                        <div class="relative flex gap-x-3">
+                            <div class="flex h-6 items-center">
+                                <input id="c411" name="c411" type="checkbox" checked
+                                    data-unique-account="{{ c411_unique_account|lower }}"
+                                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                    onchange="updateProviderFields()">
+                            </div>
+                            <div class="text-sm leading-6">
+                                <label for="c411" class="font-medium text-white">Enable C411 API</label>
+                                <p class="text-gray-500 dark:text-gray-300">Use C411 Torznab API to find more results.</p>
+                            </div>
+                        </div>
+
+                        <div class="relative flex gap-x-3">
+                            <div class="flex h-6 items-center">
+                                <input id="torr9" name="torr9" type="checkbox" checked
+                                    data-unique-account="{{ torr9_unique_account|lower }}"
+                                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                    onchange="updateProviderFields()">
+                            </div>
+                            <div class="text-sm leading-6">
+                                <label for="torr9" class="font-medium text-white">Enable Torr9 API</label>
+                                <p class="text-gray-500 dark:text-gray-300">Use Torr9 Torznab API to find more results.</p>
                             </div>
                         </div>
                     </div>
@@ -513,7 +529,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 {% if not pm_unique_account %}
                 <div id="pm_debrid-fields" style="display: none;">
                     <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
@@ -640,19 +656,38 @@
                 </div>
                 {% endif %}
 
-                {% if not ygg_unique_account %}
-                <div id="ygg-fields" style="display: none;">
+
+                {% if not c411_unique_account %}
+                <div id="c411-fields" style="display: none;">
                     <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
                         <div class="flex flex-col items-center">
-                            <h2 class="text-white font-semibold leading-7">YggTorrent Login</h2>
-                            <p class="mt-1 text-sm leading-6 text-gray-600 dark:text-gray-400">Enter your YggTorrent account
-                                information here.</p>
+                            <h2 class="text-white font-semibold leading-7">C411 Configuration</h2>
+                            <p class="mt-1 text-sm leading-6 text-gray-600 dark:text-gray-400">Enter your C411 API key here.</p>
                         </div>
                         <div class="mt-10 grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-6">
                             <div class="sm:col-span-4">
-                                <label for="yggPasskey"
-                                    class="block text-sm font-medium leading-6 text-white">YggTorrent PassKey</label>
-                                <input type="text" name="yggPasskey" id="yggPasskey"
+                                <label for="c411ApiKey"
+                                    class="block text-sm font-medium leading-6 text-white">API Key</label>
+                                <input type="text" name="c411ApiKey" id="c411ApiKey"
+                                    class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if not torr9_unique_account %}
+                <div id="torr9-fields" style="display: none;">
+                    <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
+                        <div class="flex flex-col items-center">
+                            <h2 class="text-white font-semibold leading-7">Torr9 Configuration</h2>
+                            <p class="mt-1 text-sm leading-6 text-gray-600 dark:text-gray-400">Enter your Torr9 API key here.</p>
+                        </div>
+                        <div class="mt-10 grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-6">
+                            <div class="sm:col-span-4">
+                                <label for="torr9ApiKey"
+                                    class="block text-sm font-medium leading-6 text-white">API Key</label>
+                                <input type="text" name="torr9ApiKey" id="torr9ApiKey"
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6">
                             </div>
                         </div>
@@ -671,7 +706,7 @@
                             <legend class="text-sm font-semibold leading-6 text-white">Sorting Options</legend>
                             <div class="mt-6 space-y-6">
                                 <div class="flex items-center gap-x-3">
-                                    <input id="quality" name="sorting" type="radio"
+                                    <input id="quality" name="sorting" type="radio"  checked
                                         class="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-600">
                                     <label for="quality" class="block text-sm font-medium leading-6 text-white">Get the
                                         best
@@ -692,7 +727,7 @@
                                         size ascending</label>
                                 </div>
                                 <div class="flex items-center gap-x-3">
-                                    <input id="qualitythensize" name="sorting" type="radio" checked
+                                    <input id="qualitythensize" name="sorting" type="radio"
                                         class="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-600">
                                     <label for="qualitythensize"
                                         class="block text-sm font-medium leading-6 text-white">Filter
@@ -745,7 +780,7 @@
                                 want to exclude</p>
                             <div class="mt-6 space-y-6">
                                 <div class="flex items-center gap-x-3">
-                                    <input id="2160p" name="2160p" type="checkbox" checked
+                                    <input id="2160p" name="2160p" type="checkbox"
                                         class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600">
                                     <label for="2160p" class="block text-sm font-medium leading-6 text-white">Exclude
                                         2160p
@@ -766,7 +801,7 @@
                                         resolution</label>
                                 </div>
                                 <div class="flex items-center gap-x-3">
-                                    <input id="480p" name="480p" type="checkbox"
+                                    <input id="480p" name="480p" type="checkbox" checked
                                         class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600">
                                     <label for="480p" class="block text-sm font-medium leading-6 text-white">Exclude
                                         480p
@@ -851,7 +886,7 @@
                                             class="rounded border-gray-300 text-indigo-600 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
                                         <span class="ml-2 text-white">Français québécois (VFQ)</span>
                                         <span class="ml-2 text-xs text-gray-400">(Juste pour les québécois - VFQ en priorité)</span>
-                                    </label>  
+                                    </label>
                                 </div>
                             </div>
                         </div>
@@ -877,7 +912,7 @@
                             <label for="maxSize" class="block text-sm font-medium leading-6 text-white">Maximum file
                                 size
                                 (GB)</label>
-                            <input type="number" name="maxSize" id="maxSize" min="0" step="0.1" value="18"
+                            <input type="number" name="maxSize" id="maxSize" min="0" step="0.1" value="200"
                                 class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6">
                         </div>
 
@@ -907,9 +942,9 @@
                 </div>
 
                 <div class="mt-6 flex items-center justify-center gap-x-6">
-                    <a id="install" onclick="return getLink('link')"
+                    <a id="install" onclick="return getLink('link');"
                         class="cursor-pointer rounded-md bg-black px-3 py-2 text-sm font-semibold text-white dark:text-black dark:bg-white shadow-sm hover:bg--500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">Install</a>
-                    <a id="copy" onclick="return getLink('copy')"
+                    <a id="copy" onclick="return getLink('copy');"
                         class="cursor-pointer rounded-md bg-black px-3 py-2 text-sm font-semibold text-white dark:text-black dark:bg-white shadow-sm hover:bg--500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">Copy</a>
                 </div>
     </div>

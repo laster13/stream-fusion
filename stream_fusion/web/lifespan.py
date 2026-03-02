@@ -12,7 +12,6 @@ from stream_fusion.logging_config import configure_logging
 from stream_fusion.services.postgresql.base import Base
 from stream_fusion.services.postgresql.models import load_all_models
 from stream_fusion.settings import settings
-from stream_fusion.services.postgresql.utils import init_db_cleanup_function
 
 
 def _setup_db(app: FastAPI) -> None:  # pragma: no cover
@@ -25,7 +24,7 @@ def _setup_db(app: FastAPI) -> None:  # pragma: no cover
 
     :param app: fastAPI application.
     """
-    engine = create_async_engine(str(settings.pg_url), echo=settings.pg_echo)
+    engine = create_async_engine(str(settings.pg_url), echo=settings.pg_echo, pool_size=settings.pg_pool_size, max_overflow=settings.pg_max_overflow)
     session_factory = async_sessionmaker(
         engine,
         expire_on_commit=False,
@@ -33,8 +32,6 @@ def _setup_db(app: FastAPI) -> None:  # pragma: no cover
     app.state.db_engine = engine
     app.state.db_session_factory = session_factory
 
-    # Need to check if we can add pg_cron to the zileanDB
-    # init_db_cleanup_function(engine) 
 
 
 @asynccontextmanager
@@ -47,17 +44,8 @@ async def lifespan_setup(
     :param app: the FastAPI application.
     :yield: None
     """
-    # Startup actions
     app.middleware_stack = None
     _setup_db(app)
-
-    # # Load all models from postgresql/models
-    # load_all_models()
-    
-    # # Create tables
-    # async with app.state.db_engine.begin() as conn:
-    #     await conn.run_sync(Base.metadata.create_all)
-
     app.middleware_stack = app.build_middleware_stack()
 
     if settings.playback_proxy and settings.proxy_url:
@@ -72,8 +60,16 @@ async def lifespan_setup(
     timeout = aiohttp.ClientTimeout(total=settings.aiohttp_timeout)
     app.state.http_session = aiohttp.ClientSession(timeout=timeout, connector=connector)
 
+    # Session dédiée aux services debrid (avec proxy si configuré)
+    if settings.proxy_url:
+        debrid_connector = ProxyConnector.from_url(str(settings.proxy_url), limit=100, limit_per_host=50)
+    else:
+        debrid_connector = aiohttp.TCPConnector(limit=100, limit_per_host=50)
+    debrid_timeout = aiohttp.ClientTimeout(total=30)
+    app.state.debrid_session = aiohttp.ClientSession(timeout=debrid_timeout, connector=debrid_connector)
+
     app.state.redis_pool = ConnectionPool(
-        host=settings.redis_host, port=settings.redis_port, db=settings.redis_db, max_connections=50
+        host=settings.redis_host, port=settings.redis_port, db=settings.redis_db, max_connections=200
     )
 
     yield
@@ -81,6 +77,8 @@ async def lifespan_setup(
     # Shutdown actions
     if app.state.http_session:
         await app.state.http_session.close()
+    if app.state.debrid_session:
+        await app.state.debrid_session.close()
     if app.state.redis_pool:
         app.state.redis_pool.disconnect()
     await app.state.db_engine.dispose()

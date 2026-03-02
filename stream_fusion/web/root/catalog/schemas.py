@@ -21,7 +21,7 @@ class Video(BaseModel):
 
 class Meta(BaseModel):
     id: str  # = Field(alias="_id")
-    name: str = Field(alias="title")
+    name: str
     type: str = Field(default="movie")
     poster: str | None = None
     background: str | None = None

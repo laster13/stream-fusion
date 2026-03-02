@@ -2,10 +2,9 @@ const sorts = ['quality', 'sizedesc', 'sizeasc', 'qualitythensize'];
 const qualityExclusions = ['2160p', '1080p', '720p', '480p', 'rips', 'cam', 'hevc', 'unknown'];
 const languages = ['en', 'fr', 'multi', 'vfq'];
 
-// Débrideurs implémentés nativement dans Stream Fusion
+
 const implementedDebrids = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'sharewood', 'yggflix'];
 
-// Débrideurs qui nécessitent StremThru pour fonctionner
 const unimplementedDebrids = ['debrid_dl', 'debrid_ed', 'debrid_oc', 'debrid_pk'];
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -14,6 +13,17 @@ document.addEventListener('DOMContentLoaded', function () {
     updateProviderFields();
     updateDebridOrderList();
     toggleStremThruFields();
+    
+    const apiKeyInput = document.getElementById('ApiKey');
+    if (apiKeyInput) {
+        apiKeyInput.addEventListener('blur', function() {
+            validateApiKeyWithoutAlert(this.value);
+        });
+        
+        if (apiKeyInput.value && apiKeyInput.value.trim() !== '') {
+            validateApiKeyWithoutAlert(apiKeyInput.value);
+        }
+    }
 });
 
 function setElementDisplay(elementId, displayStatus) {
@@ -188,7 +198,7 @@ function pollForADCredentials(check, pin, expiresIn) {
                 return response.json();
             })
             .then(data => {
-                if (data === null) return; // Skip processing if user hasn't entered PIN yet
+                if (data === null) return;
                 if (data.data && data.data.activated && data.data.apikey) {
                     clearInterval(pollInterval);
                     clearTimeout(timeoutId);
@@ -222,7 +232,7 @@ function resetADAuthButton() {
 }
 
 function handleUniqueAccounts() {
-    const accounts = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'sharewood', 'yggflix'];
+    const accounts = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'sharewood', 'yggflix', 'c411', 'torr9'];
 
     accounts.forEach(account => {
         const checkbox = document.getElementById(account);
@@ -508,13 +518,16 @@ function updateProviderFields() {
     const cacheChecked = document.getElementById('cache')?.checked;
     const yggflixChecked = document.getElementById('yggflix')?.checked || document.getElementById('yggflix')?.disabled;
     const sharewoodChecked = document.getElementById('sharewood')?.checked || document.getElementById('sharewood')?.disabled;
-    const tbChecked = document.getElementById('debrid_tb')?.checked || document.getElementById('debrid_tb')?.disabled;
+    const torboxChecked = document.getElementById('debrid_tb')?.checked || document.getElementById('debrid_tb')?.disabled;
+    const c411Checked = document.getElementById('c411')?.checked || document.getElementById('c411')?.disabled;
+    const torr9Checked = document.getElementById('torr9')?.checked || document.getElementById('torr9')?.disabled;
 
     // Afficher/masquer les champs spécifiques
     setElementDisplay('cache-fields', cacheChecked ? 'block' : 'none');
-    setElementDisplay('ygg-fields', yggflixChecked ? 'block' : 'none');
     setElementDisplay('sharewood-fields', sharewoodChecked ? 'block' : 'none');
-    setElementDisplay('tb_debrid-fields', tbChecked ? 'block' : 'none');
+    setElementDisplay('tb_debrid-fields', torboxChecked ? 'block' : 'none');
+    setElementDisplay('c411-fields', c411Checked ? 'block' : 'none');
+    setElementDisplay('torr9-fields', torr9Checked ? 'block' : 'none');
 
     // Traiter tous les débrideurs
     allDebrids.forEach(id => {
@@ -676,7 +689,7 @@ function loadData() {
         zilean: true,
         yggflix: true,
         sharewood: false,
-        maxSize: '18',
+        maxSize: '150',
         resultsPerQuality: '10',
         maxResults: '30',
         minCachedResults: '10',
@@ -684,8 +697,8 @@ function loadData() {
         ctg_yggtorrent: true,
         ctg_yggflix: false,
         metadataProvider: 'tmdb',
-        sort: 'qualitythensize',
-        exclusion: ['cam', '2160p'],
+        sort: 'quality',
+        exclusion: ['cam'],
         languages: ['fr', 'multi'],
         debrid_rd: false,
         debrid_ad: false,
@@ -693,7 +706,9 @@ function loadData() {
         debrid_pm: false,
         tb_usenet: false,
         tb_search: false,
-        debrid_order: false
+        debrid_order: false,
+        c411: true,
+        torr9: true
     };
 
     Object.keys(defaultConfig).forEach(key => {
@@ -734,6 +749,8 @@ function loadData() {
     setElementValue('pm_token_info', decodedData.PMToken, '');
     setElementValue('sharewoodPasskey', decodedData.sharewoodPasskey, '');
     setElementValue('yggPasskey', decodedData.yggPasskey, '');
+    setElementValue('c411ApiKey', decodedData.c411ApiKey, '');
+    setElementValue('torr9ApiKey', decodedData.torr9ApiKey, '');
     setElementValue('ApiKey', decodedData.apiKey, '');
     setElementValue('exclusion-keywords', (decodedData.exclusionKeywords || []).join(', '), '');
     
@@ -756,10 +773,50 @@ function loadData() {
     ensureDebridConsistency();
 }
 
+// Fonction pour valider l'API key
+function validateApiKey(apiKey) {
+    // Référence à l'élément d'erreur
+    const apiKeyErrorElement = document.getElementById('apiKeyError');
+    
+    // Si aucune API key n'est fournie
+    if (!apiKey || apiKey.trim() === '') {
+        if (apiKeyErrorElement) {
+            apiKeyErrorElement.classList.remove('hidden');
+        }
+        alert('Veuillez fournir une API Key Stream Fusion.');
+        return false;
+    }
+    
+    // Vérification du format UUID v4
+    const isValidFormat = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(apiKey);
+    
+    if (!isValidFormat) {
+        if (apiKeyErrorElement) {
+            apiKeyErrorElement.classList.remove('hidden');
+        }
+        alert('API Key invalide.');
+        return false;
+    }
+    
+    // Si l'API key est valide, masquer le message d'erreur
+    if (apiKeyErrorElement) {
+        apiKeyErrorElement.classList.add('hidden');
+    }
+    
+    return true;
+}
+
 function getLink(method) {
+    const apiKey = document.getElementById('ApiKey').value;
+    
+    // Vérifier l'API key en premier
+    if (!validateApiKey(apiKey)) {
+        return false;
+    }
+    
     const data = {
         addonHost: new URL(window.location.href).origin,
-        apiKey: document.getElementById('ApiKey').value,
+        apiKey: apiKey,
         service: [],
         RDToken: document.getElementById('rd_token_info')?.value,
         ADToken: document.getElementById('ad_token_info')?.value,
@@ -768,6 +825,10 @@ function getLink(method) {
         TBUsenet: document.getElementById('tb_usenet')?.checked,
         TBSearch: document.getElementById('tb_search')?.checked,
         sharewoodPasskey: document.getElementById('sharewoodPasskey')?.value,
+        c411: document.getElementById('c411')?.checked || document.getElementById('c411')?.disabled || false,
+        torr9: document.getElementById('torr9')?.checked || document.getElementById('torr9')?.disabled || false,
+        c411ApiKey: document.getElementById('c411ApiKey')?.value || '',
+        torr9ApiKey: document.getElementById('torr9ApiKey')?.value || '',
         maxSize: parseInt(document.getElementById('maxSize').value) || 16,
         exclusionKeywords: document.getElementById('exclusion-keywords').value.split(',').map(keyword => keyword.trim()).filter(keyword => keyword !== ''),
         languages: languages.filter(lang => document.getElementById(lang).checked),
@@ -785,7 +846,7 @@ function getLink(method) {
         yggtorrentCtg: document.getElementById('ctg_yggtorrent')?.checked,
         yggflixCtg: document.getElementById('ctg_yggflix')?.checked,
         yggPasskey: document.getElementById('yggPasskey')?.value,
-        torrenting: document.getElementById('torrenting').checked,
+        torrenting: false,
         debrid: false,
         metadataProvider: document.getElementById('tmdb').checked ? 'tmdb' : 'cinemeta',
         debridDownloader: document.querySelector('input[name="debrid_downloader"]:checked')?.value,
@@ -814,8 +875,9 @@ function getLink(method) {
     if (data.service.includes('Offcloud') && document.getElementById('offcloud_credentials') && !data.offcloudCredentials) missingRequiredFields.push("Offcloud Credentials");
     if (data.service.includes('PikPak') && document.getElementById('pikpak_credentials') && !data.pikpakCredentials) missingRequiredFields.push("PikPak Credentials");
     if (data.languages.length === 0) missingRequiredFields.push("Languages");
-    if (data.yggflix && document.getElementById('yggPasskey') && !data.yggPasskey) missingRequiredFields.push("Ygg Passkey");
     if (data.sharewood && document.getElementById('sharewoodPasskey') && !data.sharewoodPasskey) missingRequiredFields.push("Sharewood Passkey");
+    if (data.c411 && document.getElementById('c411ApiKey') && !data.c411ApiKey) missingRequiredFields.push("C411 API Key");
+    if (data.torr9 && document.getElementById('torr9ApiKey') && !data.torr9ApiKey) missingRequiredFields.push("Torr9 API Key");
     if (data.stremthru && !data.stremthruUrl) missingRequiredFields.push("StremThru URL");
 
     if (missingRequiredFields.length > 0) {
@@ -827,10 +889,6 @@ function getLink(method) {
         return /^[a-zA-Z0-9]{32}$/.test(passkey);
     }
 
-    function validateApiKey(apiKey) {
-        return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(apiKey);
-    }
-
     if (data.yggflix && data.yggPasskey && !validatePasskey(data.yggPasskey)) {
         alert('Ygg Passkey doit contenir exactement 32 caractères alphanumériques');
         return false;
@@ -838,11 +896,6 @@ function getLink(method) {
 
     if (data.sharewood && data.sharewoodPasskey && !validatePasskey(data.sharewoodPasskey)) {
         alert('Sharewood Passkey doit contenir exactement 32 caractères alphanumériques');
-        return false;
-    }
-
-    if (data.apiKey && !validateApiKey(data.apiKey)) {
-        alert('APIKEY doit être un UUID v4 valide');
         return false;
     }
 
@@ -866,4 +919,34 @@ function showCheckboxes() {
     let checkboxes = document.getElementById("languageCheckBoxes");
     checkboxes.style.display = showLanguageCheckBoxes ? "block" : "none";
     showLanguageCheckBoxes = !showLanguageCheckBoxes;
+}
+
+// Fonction pour valider l'API key sans afficher d'alert
+function validateApiKeyWithoutAlert(apiKey) {
+    const apiKeyErrorElement = document.getElementById('apiKeyError');
+    
+    // Si aucune API key n'est fournie
+    if (!apiKey || apiKey.trim() === '') {
+        if (apiKeyErrorElement) {
+            apiKeyErrorElement.classList.remove('hidden');
+        }
+        return false;
+    }
+    
+    // Vérification du format UUID v4
+    const isValidFormat = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(apiKey);
+    
+    if (!isValidFormat) {
+        if (apiKeyErrorElement) {
+            apiKeyErrorElement.classList.remove('hidden');
+        }
+        return false;
+    }
+    
+    // Si l'API key est valide, masquer le message d'erreur
+    if (apiKeyErrorElement) {
+        apiKeyErrorElement.classList.add('hidden');
+    }
+    
+    return true;
 }

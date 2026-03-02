@@ -31,7 +31,7 @@ class LanguagePriorityFilter(BaseFilter):
                 # Groupe 1 (priorité la plus élevée)
                 1: ["VFQ", "VF2", "VQ"],  # VFQ et VF2 en priorité absolue
                 # Groupe 2 (priorité secondaire)
-                2: ["VFF", "VOF", "VFI", "FRENCH"],
+                2: ["VFF", "VOF", "VFI", "FRENCH", "MULTI"],
                 # Groupe 3 (priorité basse)
                 3: ["VOSTFR"],
 
@@ -41,7 +41,7 @@ class LanguagePriorityFilter(BaseFilter):
             # Configuration standard si VFQ n'est pas explicitement sélectionné
             self.language_priority_groups = {
                 # Groupe 1 (priorité la plus élevée)
-                1: ["VFF", "VOF", "VFI"],
+                1: ["VFF", "VOF", "VFI", "MULTI"],
                 # Groupe 2 (priorité moyenne)
                 2: ["VF2", "VFQ", "VQ", "FRENCH"],
                 # Groupe 3 (priorité basse)

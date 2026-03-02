@@ -13,26 +13,78 @@ from stream_fusion.logging_config import logger
 
 quality_order = {"2160p": 0, "1080p": 1, "720p": 2, "480p": 3}
 
+hdr_order = {"DV": 0, "HDR10+": 1, "HDR10": 2, "HDR": 3}
+
+def get_hdr_priority(hdr_list):
+    """Retourne la priorité HDR (plus petit = meilleur). DV > HDR10+ > HDR10 > HDR > SDR"""
+    if not hdr_list:
+        return 99  # SDR
+    best = 99
+    for h in hdr_list:
+        if h in hdr_order:
+            best = min(best, hdr_order[h])
+    return best
+
 
 def sort_quality(item: TorrentItem):
+    """Retourne (resolution_priority, is_unknown) pour le tri."""
     logger.trace(f"Filters: Evaluating quality for item: {item.raw_title}")
-    if not item.parsed_data.resolution:
+    # Ensure parsed_data is valid before accessing it
+    if hasattr(item, '_ensure_parsed_data_valid'):
+        item._ensure_parsed_data_valid()
+    # Check if parsed_data exists and is valid
+    if not item.parsed_data or not hasattr(item.parsed_data, 'resolution'):
         return float("inf"), True
     resolution = item.parsed_data.resolution
     priority = quality_order.get(resolution, float("inf"))
     return priority, item.parsed_data.resolution is None
 
 
+def get_item_hdr_priority(item: TorrentItem):
+    """Retourne la priorité HDR d'un item."""
+    if not item.parsed_data or not hasattr(item.parsed_data, 'hdr'):
+        return 99
+    return get_hdr_priority(getattr(item.parsed_data, 'hdr', []))
+
+
+def get_indexer_priority_for_sort(indexer, config=None):
+    """Fonction pour obtenir la priorité de l'indexer lors du tri"""
+    is_torbox = config and (config.get("debridDownloader") == "TorBox" or "TorBox" in config.get("service", []))
+    if is_torbox:
+        indexer_priority = {
+            "C411": 1,            # C411/Torr9 prioritaires pour TorBox
+            "Torr9": 1,
+            "Yggtorrent": 2,
+            "DMM": 3,
+            "Public": 4,
+            "Sharewood": 5,
+            "Jackett": 6,
+        }
+    else:
+        indexer_priority = {
+            "Yggtorrent": 1,      # Yggtorrent prioritaire pour les autres debrid
+            "DMM": 2,
+            "Public": 3,
+            "Sharewood": 4,
+            "C411": 5,
+            "Torr9": 5,
+            "Jackett": 6,
+        }
+    indexer_name = indexer.split(' ')[0] if indexer and ' ' in indexer else indexer
+    priority = indexer_priority.get(indexer_name, 999)
+    logger.trace(f"Filters: Indexer '{indexer}' -> extracted '{indexer_name}' -> priority {priority} (TorBox={is_torbox})")
+    return priority
+
 def items_sort(items, config):
     logger.info(f"Filters: Sorting items by method: {config['sort']}")
     if config["sort"] == "quality":
-        sorted_items = sorted(items, key=sort_quality)
+        sorted_items = sorted(items, key=lambda x: (sort_quality(x), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0)))
     elif config["sort"] == "sizeasc":
-        sorted_items = sorted(items, key=lambda x: int(x.size))
+        sorted_items = sorted(items, key=lambda x: (int(x.size), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0)))
     elif config["sort"] == "sizedesc":
-        sorted_items = sorted(items, key=lambda x: int(x.size), reverse=True)
+        sorted_items = sorted(items, key=lambda x: (-int(x.size), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0)))
     elif config["sort"] == "qualitythensize":
-        sorted_items = sorted(items, key=lambda x: (sort_quality(x), -int(x.size)))
+        sorted_items = sorted(items, key=lambda x: (sort_quality(x), -int(x.size), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0)))
     else:
         logger.warning(
             f"Filters: Unrecognized sort method: {config['sort']}. No sorting applied."
@@ -40,7 +92,7 @@ def items_sort(items, config):
         sorted_items = items
 
     logger.success(
-        f"Filters: Sorting complete. Number of sorted items: {len(sorted_items)}"
+        f"Filters: Sorting complete - Quality/Size first, YggFlix priority at equal quality, seeders as tiebreaker. Number of sorted items: {len(sorted_items)}"
     )
     return sorted_items
 
@@ -79,6 +131,11 @@ def filter_out_non_matching_series(items, season, episode):
     )
 
     for item in items:
+        # Ensure parsed_data is valid before accessing it
+        if not item.parsed_data or not hasattr(item.parsed_data, 'seasons') or not hasattr(item.parsed_data, 'episodes'):
+            logger.trace(f"Filters: Skipping item with invalid parsed_data: {item.raw_title}")
+            continue
+
         if len(item.parsed_data.seasons) == 0 and len(item.parsed_data.episodes) == 0:
             if integrale_pattern.search(item.raw_title):
                 logger.trace(
@@ -154,10 +211,21 @@ def remove_non_matching_title(items, titles):
         return subset_index == len(subset_words)
 
     for item in items:
-        cleaned_item_title = integrale_pattern.sub(
-            "", item.parsed_data.parsed_title
-        ).strip()
-        
+        # Ensure parsed_data is valid before accessing it
+        if hasattr(item, '_ensure_parsed_data_valid'):
+            item._ensure_parsed_data_valid()
+
+        # If parsed_data is None or invalid, use raw_title as fallback
+        if item.parsed_data and hasattr(item.parsed_data, 'parsed_title'):
+            cleaned_item_title = integrale_pattern.sub(
+                "", item.parsed_data.parsed_title
+            ).strip()
+        else:
+            # Fallback to raw_title if parsed_data is invalid
+            cleaned_item_title = integrale_pattern.sub(
+                "", item.raw_title
+            ).strip()
+
         if item.indexer and "Yggtorrent" in item.indexer:
             logger.debug(f"Filters: YggFlix item detected, accepting: {cleaned_item_title}")
             filtered_items.append(item)
@@ -197,15 +265,19 @@ def remove_non_matching_title(items, titles):
     return filtered_items
 
 
-def filter_items(items, media, config):
+def filter_items(items, media, config, skip_resolution=False):
     logger.info(f"Filters: Starting item filtering for media: {media.titles[0]}")
+    
+    # Préparer les filtres (SANS le filtre de résolution si skip_resolution=True)
     filters = {
         "languages": LanguageFilter(config),
         "maxSize": MaxSizeFilter(config, media.type),
         "exclusionKeywords": TitleExclusionFilter(config),
-        "exclusion": QualityExclusionFilter(config),
-        # "resultsPerQuality": ResultsPerQualityFilter(config),
     }
+    
+    # Ajouter le filtre de résolution seulement si skip_resolution=False
+    if not skip_resolution:
+        filters["exclusion"] = QualityExclusionFilter(config)
     
     language_priority_filter = LanguagePriorityFilter(config)
 
@@ -285,26 +357,15 @@ def merge_items(
     )
     merged_dict = {}
 
-    indexer_priority = {
-        "YggFlix": 1,
-        "DMM": 2,
-        "Sharewood": 3,
-        "Jackett": 4,
-    }
-    
-    def get_indexer_priority(indexer):
-        indexer_name = indexer.split(' ')[0] if indexer and ' ' in indexer else indexer
-        return indexer_priority.get(indexer_name, 999) 
-
     def add_to_merged(item: TorrentItem):
-        key = (item.raw_title, item.size)
+        key = (item.raw_title, item.size, item.privacy)
         if key not in merged_dict:
             merged_dict[key] = item
         else:
-            existing_priority = get_indexer_priority(merged_dict[key].indexer)
-            new_priority = get_indexer_priority(item.indexer)
-            
-            if new_priority < existing_priority or (new_priority == existing_priority and item.seeders > merged_dict[key].seeders):
+            existing_priority = get_indexer_priority_for_sort(merged_dict[key].indexer)
+            new_priority = get_indexer_priority_for_sort(item.indexer)
+
+            if new_priority < existing_priority or (new_priority == existing_priority and (item.seeders or 0) > (merged_dict[key].seeders or 0)):
                 merged_dict[key] = item
 
     for item in cache_items:

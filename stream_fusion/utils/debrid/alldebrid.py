@@ -1,5 +1,6 @@
-# alldebrid.py
+# alldebrid.py - AllDebrid v4.1 API (using magnet/status for files)
 import uuid
+import aiohttp
 from urllib.parse import unquote
 
 from fastapi import HTTPException
@@ -11,19 +12,6 @@ from stream_fusion.settings import settings
 
 
 def flatten_files(files, result=None):
-    """
-    Flattens the nested file structure from AllDebrid API.
-    Recursively extracts files from nested directories (e field).
-
-    Similar to stremthru's getFlatFiles() function.
-
-    Args:
-        files: List of file objects with optional 'e' (children) field
-        result: Accumulator list for recursion
-
-    Returns:
-        Flattened list of all files
-    """
     if result is None:
         result = []
 
@@ -34,10 +22,8 @@ def flatten_files(files, result=None):
         if not isinstance(file_item, dict):
             continue
 
-        # Add the current file
         result.append(file_item)
 
-        # Recursively add children if they exist
         children = file_item.get("e", [])
         if children and isinstance(children, list):
             flatten_files(children, result)
@@ -46,8 +32,8 @@ def flatten_files(files, result=None):
 
 
 class AllDebrid(BaseDebrid):
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, session: aiohttp.ClientSession = None):
+        super().__init__(config, session)
         self.base_url = f"{settings.ad_base_url}/{settings.ad_api_version}/"
         self.agent = settings.ad_user_app
 
@@ -65,32 +51,34 @@ class AllDebrid(BaseDebrid):
         else:
             return {"Authorization": f"Bearer {self.config.get('ADToken')}"}
 
-    def add_magnet(self, magnet, ip=None):
+    async def add_magnet(self, magnet, ip=None):
         url = f"{self.base_url}magnet/upload?agent={self.agent}"
         data = {"magnets[]": magnet}
-        return self.json_response(url, method='post', headers=self.get_headers(), data=data)
+        return await self.json_response(url, method='post', headers=self.get_headers(), data=data)
 
-    def add_torrent(self, torrent_file, ip=None):
+    async def add_torrent(self, torrent_file, ip=None):
         url = f"{self.base_url}magnet/upload/file?agent={self.agent}"
         files = {"files[]": (str(uuid.uuid4()) + ".torrent", torrent_file, 'application/x-bittorrent')}
-        return self.json_response(url, method='post', headers=self.get_headers(), files=files)
+        return await self.json_response(url, method='post', headers=self.get_headers(), files=files)
 
-    def get_magnet_files(self, id, ip=None):
+    async def get_magnet_files(self, id, ip=None):
         """Get files from magnet using v4 API"""
         url = f"{settings.ad_base_url}/v4/magnet/files"
         data = {"id[]": id, "agent": self.agent}
-        return self.json_response(url, method='post', headers=self.get_headers(), data=data)
+        return await self.json_response(url, method='post', headers=self.get_headers(), data=data)
 
-    def unrestrict_link(self, link, ip=None):
+    async def unrestrict_link(self, link, ip=None):
         url = f"{self.base_url}link/unlock?agent={self.agent}&link={link}"
-        return self.json_response(url, method='get', headers=self.get_headers())
+        return await self.json_response(url, method='get', headers=self.get_headers())
 
-    def get_stream_link(self, query, config, ip=None):
+    async def get_stream_link(self, query, config=None, ip=None):
         magnet = query['magnet']
         stream_type = query['type']
         torrent_download = unquote(query["torrent_download"]) if query["torrent_download"] is not None else None
+        torrent_file_content = query.get("torrent_file_content", None)
 
-        torrent_id = self.add_magnet_or_torrent(magnet, torrent_download, ip)
+        # Add magnet or torrent to AllDebrid
+        torrent_id = await self.add_magnet_or_torrent(magnet, torrent_download, torrent_file_content, ip)
         torrent_id = str(torrent_id) if torrent_id else ""
         logger.info(f"AllDebrid: Torrent ID: {torrent_id}")
 
@@ -98,102 +86,131 @@ class AllDebrid(BaseDebrid):
             logger.error(f"AllDebrid: Failed to add torrent: {torrent_id}")
             return settings.no_cache_video_url
 
-        logger.info(f"AllDebrid: Retrieving data for torrent ID: {torrent_id}")
-        files_response = self.get_magnet_files(torrent_id, ip)
-        logger.info(f"AllDebrid: Data retrieved for torrent ID")
+        # Get files from magnet using v4 API
+        logger.info(f"AllDebrid: Retrieving files for torrent ID: {torrent_id}")
+        try:
+            files_response = await self.get_magnet_files(torrent_id, ip)
+            logger.debug(f"AllDebrid: Files response: {files_response}")
 
-        if not files_response or files_response.get("status") != "success":
-            logger.error("AllDebrid: Failed to get files")
+            if not files_response:
+                logger.error("AllDebrid: Null response from get_magnet_files")
+                return settings.no_cache_video_url
+
+            if files_response.get("status") != "success":
+                logger.warning(f"AllDebrid: get_magnet_files returned error: {files_response.get('error')}")
+                return settings.no_cache_video_url
+
+            if "data" not in files_response:
+                logger.error("AllDebrid: No data in files response")
+                return settings.no_cache_video_url
+
+            magnets = files_response["data"].get("magnets", [])
+            if not magnets or len(magnets) == 0:
+                logger.error("AllDebrid: No magnet data in files response")
+                return settings.no_cache_video_url
+
+            magnet_data = magnets[0]
+            files = magnet_data.get("files", [])
+
+            # Flatten nested file structure
+            files = flatten_files(files)
+            logger.info(f"AllDebrid: Retrieved {len(files)} files (after flattening)")
+
+        except Exception as e:
+            logger.error(f"AllDebrid: Error getting magnet files: {str(e)}")
+            import traceback
+            logger.debug(f"AllDebrid: Traceback: {traceback.format_exc()}")
             return settings.no_cache_video_url
-
-        magnets = files_response["data"].get("magnets", [])
-        if not magnets:
-            logger.error("AllDebrid: No magnets in response")
-            return settings.no_cache_video_url
-
-        magnet_data = magnets[0]
-        files = magnet_data.get("files", [])
-
-        # Flatten nested file structure (handles directories with children)
-        files = flatten_files(files)
-        logger.info(f"AllDebrid: All files in torrent (flattened): {[f.get('n', '') for f in files]}")
 
         link = settings.no_cache_video_url
+
         if stream_type == "movie":
-            logger.info("AllDebrid: Getting link for movie")
+            logger.info("AllDebrid: Finding largest file for movie")
             try:
-                # Files are now all flattened (leaf nodes only)
-                link = max(files, key=lambda x: x.get('s', 0))['l']
+                largest_file = max(files, key=lambda x: x.get("s", 0)) if files else None
+
+                if largest_file and "l" in largest_file:
+                    link = largest_file["l"]
+                    logger.info(f"AllDebrid: Found movie link")
+                else:
+                    logger.error("AllDebrid: No valid link found for movie")
             except Exception as e:
-                logger.error(f"AllDebrid: Error getting movie link: {str(e)}")
+                logger.error(f"AllDebrid: Error processing movie: {str(e)}")
+
         elif stream_type == "series":
             numeric_season = int(query['season'].replace("S", ""))
             numeric_episode = int(query['episode'].replace("E", ""))
-            logger.info(f"AllDebrid: Getting link for series S{numeric_season:02d}E{numeric_episode:02d}")
+            logger.info(f"AllDebrid: Finding S{numeric_season:02d}E{numeric_episode:02d}")
 
-            matching_files = []
             try:
-                # Files are already flattened, no need to check list vs dict
-                for file_item in files:
-                    filename = file_item.get("n", "") if isinstance(file_item, dict) else ""
-                    logger.debug(f"AllDebrid: Checking file: {filename}")
+                matching_files = []
+                for file_info in files:
+                    if isinstance(file_info, dict):
+                        filename = file_info.get("n", "")
 
-                    if season_episode_in_filename(filename, numeric_season, numeric_episode):
-                        logger.debug(f"AllDebrid: ✓ Match found with RTN parser: {filename}")
-                        matching_files.append(file_item)
-                    else:
-                        import re
-                        episode_patterns = [
-                            rf"[Ss]{numeric_season:02d}[Ee]{numeric_episode:02d}",
-                            rf"[Ss]{numeric_season}[Ee]{numeric_episode:02d}",
-                            rf"{numeric_season:02d}x{numeric_episode:02d}",
-                            rf"{numeric_season}x{numeric_episode:02d}",
-                            rf"[Ss]eason.{numeric_season:02d}.*[Ee]{numeric_episode:02d}",
-                            rf"[Ss]eason.{numeric_season}.*[Ee]{numeric_episode:02d}",
-                            rf"[Ss]{numeric_season:02d}.*[Ee]pisode.{numeric_episode:02d}",
-                            rf"[Ss]{numeric_season}.*[Ee]pisode.{numeric_episode:02d}",
-                        ]
+                        if season_episode_in_filename(filename, numeric_season, numeric_episode):
+                            logger.debug(f"AllDebrid: ✓ Match: {filename}")
+                            matching_files.append(file_info)
+                        else:
+                            import re
+                            episode_patterns = [
+                                rf"[Ss]{numeric_season:02d}[Ee]{numeric_episode:02d}",
+                                rf"[Ss]{numeric_season}[Ee]{numeric_episode:02d}",
+                                rf"{numeric_season:02d}x{numeric_episode:02d}",
+                                rf"{numeric_season}x{numeric_episode:02d}",
+                                rf"[Ss]eason.{numeric_season:02d}.*[Ee]{numeric_episode:02d}",
+                                rf"[Ss]eason.{numeric_season}.*[Ee]{numeric_episode:02d}",
+                                rf"[Ss]{numeric_season:02d}.*[Ee]pisode.{numeric_episode:02d}",
+                                rf"[Ss]{numeric_season}.*[Ee]pisode.{numeric_episode:02d}",
+                                rf"\b{numeric_episode:03d}\b",
+                                rf"[Ee]p\.?\s*{numeric_episode:03d}\b",
+                                rf"[Ee]pisode\s*{numeric_episode:03d}\b",
+                            ]
 
-                        match_found = False
-                        for pattern in episode_patterns:
-                            if re.search(pattern, filename, re.IGNORECASE):
-                                logger.debug(f"AllDebrid: ✓ Match found with improved pattern '{pattern}': {filename}")
-                                matching_files.append(file_item)
-                                match_found = True
-                                break
-
-                        if not match_found:
-                            logger.debug(f"AllDebrid: ✗ No match: {filename}")
+                            for pattern in episode_patterns:
+                                if re.search(pattern, filename, re.IGNORECASE):
+                                    logger.debug(f"AllDebrid: ✓ Match with pattern: {filename}")
+                                    matching_files.append(file_info)
+                                    break
 
                 if matching_files:
-                    link = max(matching_files, key=lambda x: x.get("s", 0))["l"]
+                    target_file = max(matching_files, key=lambda x: x.get("s", 0))
+                    if "l" in target_file:
+                        link = target_file["l"]
+                        logger.info(f"AllDebrid: Found episode link")
+                    else:
+                        logger.error("AllDebrid: Matching file has no link")
                 else:
-                    logger.warning(f"AllDebrid: No matching files found for S{numeric_season:02d}E{numeric_episode:02d}")
+                    logger.warning(f"AllDebrid: No files found for S{numeric_season:02d}E{numeric_episode:02d}")
+
             except Exception as e:
                 logger.error(f"AllDebrid: Error processing series: {str(e)}")
+
         else:
             logger.error("AllDebrid: Unsupported stream type.")
             raise HTTPException(status_code=500, detail="Unsupported stream type.")
 
         if link == settings.no_cache_video_url:
-            logger.info("AllDebrid: Video not cached, returning NO_CACHE_VIDEO_URL")
+            logger.info("AllDebrid: No link found, returning no-cache URL")
             return link
 
-        logger.info(f"AllDebrid: Retrieved link: {link}")
+        logger.info(f"AllDebrid: Retrieved link successfully")
 
+        # Try to unrestrict the link
         try:
-            unlocked_link_data = self.unrestrict_link(link, ip)
-            if unlocked_link_data and unlocked_link_data.get("status") == "success":
-                logger.info(f"AllDebrid: Unrestricted link")
-                return unlocked_link_data["data"]["link"]
+            unlocked_response = await self.unrestrict_link(link, ip)
+            if unlocked_response and unlocked_response.get("status") == "success" and "data" in unlocked_response:
+                final_link = unlocked_response["data"].get("link", link)
+                logger.info(f"AllDebrid: Link unrestricted")
+                return final_link
         except Exception as e:
             logger.debug(f"AllDebrid: Could not unrestrict link: {str(e)}")
 
         return link
 
-    def get_availability_bulk(self, hashes_or_magnets, ip=None):
+    async def get_availability_bulk(self, hashes_or_magnets, ip=None):
         if len(hashes_or_magnets) == 0:
-            logger.info("AllDebrid: No hashes to be sent.")
+            logger.info("AllDebrid: No hashes to check")
             return {"status": "success", "data": {"magnets": []}}
 
         result_magnets = []
@@ -214,30 +231,59 @@ class AllDebrid(BaseDebrid):
 
         return {"status": "success", "data": {"magnets": result_magnets}}
 
-    def add_magnet_or_torrent(self, magnet, torrent_download=None, ip=None):
+    async def add_magnet_or_torrent(self, magnet, torrent_download=None, torrent_file_content=None, ip=None):
+        logger.debug(f"AllDebrid: Adding magnet or torrent")
         torrent_id = ""
-        if torrent_download is None:
-            logger.info(f"AllDebrid: Adding magnet")
-            magnet_response = self.add_magnet(magnet, ip)
-            logger.info(f"AllDebrid: Add magnet response received")
 
-            if not magnet_response or "status" not in magnet_response or magnet_response["status"] != "success":
-                return "Error: Failed to add magnet."
+        # PRIORITE 1: Use cached .torrent file
+        if torrent_file_content is not None:
+            logger.info(f"AllDebrid: Attempting to add cached .torrent file")
+            try:
+                upload_response = await self.add_torrent(torrent_file_content, ip)
+                if upload_response and upload_response.get("status") == "success":
+                    files = upload_response.get("data", {}).get("files", [])
+                    if files and len(files) > 0:
+                        torrent_id = files[0].get("id")
+                        if torrent_id:
+                            logger.info(f"AllDebrid: Successfully added cached .torrent, ID: {torrent_id}")
+                            return str(torrent_id)
+                logger.warning(f"AllDebrid: Failed to add cached .torrent")
+            except Exception as e:
+                logger.warning(f"AllDebrid: Exception with cached .torrent: {str(e)}")
 
-            torrent_id = magnet_response["data"]["magnets"][0]["id"]
-        else:
-            logger.info(f"AllDebrid: Downloading torrent file")
-            torrent_file = self.download_torrent_file(torrent_download)
-            logger.info(f"AllDebrid: Torrent file downloaded")
+        # PRIORITE 2: Download and add .torrent file
+        if torrent_download is not None:
+            logger.info(f"AllDebrid: Downloading and adding .torrent file")
+            try:
+                torrent_file = await self.download_torrent_file(torrent_download)
+                upload_response = await self.add_torrent(torrent_file, ip)
 
-            logger.info(f"AllDebrid: Adding torrent file")
-            upload_response = self.add_torrent(torrent_file, ip)
-            logger.info(f"AllDebrid: Add torrent file response received")
+                if upload_response and upload_response.get("status") == "success":
+                    files = upload_response.get("data", {}).get("files", [])
+                    if files and len(files) > 0:
+                        torrent_id = files[0].get("id")
+                        if torrent_id:
+                            logger.info(f"AllDebrid: Successfully added downloaded .torrent, ID: {torrent_id}")
+                            return str(torrent_id)
+                logger.warning(f"AllDebrid: Failed to add downloaded .torrent, falling back to magnet")
+            except Exception as e:
+                logger.warning(f"AllDebrid: Exception downloading .torrent: {str(e)}")
 
-            if not upload_response or "status" not in upload_response or upload_response["status"] != "success":
-                return "Error: Failed to add torrent file in AllDebrid."
+        # PRIORITE 3: Fall back to magnet
+        logger.info(f"AllDebrid: Adding magnet link")
+        magnet_response = await self.add_magnet(magnet, ip)
 
-            torrent_id = upload_response["data"]["files"][0]["id"]
+        if not magnet_response or magnet_response.get("status") != "success":
+            logger.error(f"AllDebrid: Failed to add magnet: {magnet_response}")
+            return "Error: Failed to add magnet."
 
-        logger.info(f"AllDebrid: New torrent ID: {torrent_id}")
-        return torrent_id
+        try:
+            magnets = magnet_response.get("data", {}).get("magnets", [])
+            if magnets and len(magnets) > 0:
+                torrent_id = magnets[0].get("id")
+                logger.info(f"AllDebrid: Successfully added magnet, ID: {torrent_id}")
+                return str(torrent_id)
+        except Exception as e:
+            logger.error(f"AllDebrid: Exception extracting magnet ID: {str(e)}")
+
+        return "Error: Could not extract torrent ID."

@@ -35,6 +35,8 @@ async def configure(request: Request):
         "ygg_unique_account": settings.ygg_unique_account,
         "jackett_enable": settings.jackett_enable,
         "tb_unique_account": settings.tb_unique_account,
+        "c411_unique_account": settings.c411_unique_account,
+        "torr9_unique_account": settings.torr9_unique_account,
     })
 
 

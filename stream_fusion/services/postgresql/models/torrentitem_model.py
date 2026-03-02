@@ -25,7 +25,8 @@ class TorrentItemModel(Base):
     indexer: Mapped[str] = mapped_column(String, nullable=False)
     privacy: Mapped[str] = mapped_column(String, nullable=False)
     type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    
+    tmdb_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+
     file_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     files: Mapped[Optional[List[dict]]] = mapped_column(JSON, nullable=True)  # Kept as JSON
     torrent_download: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -40,8 +41,8 @@ class TorrentItemModel(Base):
     updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     @staticmethod
-    def generate_unique_id(raw_title: str, size: int, indexer: str = "cached") -> str:
-        unique_string = f"{raw_title}_{size}_{indexer}"
+    def generate_unique_id(raw_title: str, size: int, indexer: str = "cached", info_hash: str = "") -> str:
+        unique_string = f"{raw_title}_{size}_{indexer}_{info_hash}"
         full_hash = hashlib.sha256(unique_string.encode()).hexdigest()
         return full_hash[:16]
 
@@ -50,7 +51,8 @@ class TorrentItemModel(Base):
             kwargs['id'] = self.generate_unique_id(
                 kwargs.get('raw_title', ''),
                 self._parse_size(kwargs.get('size', 0)),
-                kwargs.get('indexer', 'cached')
+                kwargs.get('indexer', 'cached'),
+                kwargs.get('info_hash', '')
             )
         super().__init__(**kwargs)
         current_time = int(datetime.now().timestamp())
@@ -58,6 +60,24 @@ class TorrentItemModel(Base):
             self.created_at = current_time
         if 'updated_at' not in kwargs:
             self.updated_at = current_time
+
+    @staticmethod
+    def _remove_ed2k_from_files(value):
+        """Remove ed2k bytes field from files/full_index for JSON serialization"""
+        if not value:
+            return value
+
+        if isinstance(value, list):
+            result = []
+            for item in value:
+                if isinstance(item, dict):
+                    # Create a new dict without ed2k key
+                    new_item = {k: v for k, v in item.items() if k != 'ed2k'}
+                    result.append(new_item)
+                else:
+                    result.append(item)
+            return result
+        return value
 
     @classmethod
     def from_torrent_item(cls, torrent_item: TorrentItem):
@@ -67,13 +87,32 @@ class TorrentItemModel(Base):
                 if attr == 'size':
                     model_dict[attr] = cls._parse_size(value)
                 elif attr in ['files', 'full_index']:
-                    model_dict[attr] = cls._parse_json(value)
+                    # Remove ed2k bytes before JSON serialization
+                    cleaned_value = cls._remove_ed2k_from_files(value)
+                    model_dict[attr] = cls._parse_json(cleaned_value)
                 elif attr == 'parsed_data':
-                    model_dict[attr] = value.model_dump() if value else None
+                    if value:
+                        try:
+                            # Try to convert to dict if it's a Pydantic model
+                            if hasattr(value, 'model_dump'):
+                                model_dict[attr] = value.model_dump()
+                            elif isinstance(value, dict):
+                                model_dict[attr] = value
+                            else:
+                                # Convert to dict representation
+                                model_dict[attr] = vars(value) if hasattr(value, '__dict__') else str(value)
+                        except Exception as e:
+                            logger.warning(f"Could not serialize parsed_data: {e}")
+                            model_dict[attr] = None
+                    else:
+                        model_dict[attr] = None
                 elif attr == "availability":
                     model_dict[attr] = False
                 elif attr == "seeders":
                     model_dict[attr] = int(value) if value else 0
+                elif attr in ["torrent_file", "torrent_file_path"]:
+                    # Skip both torrent_file and torrent_file_path - not storing these in DB
+                    pass
                 else:
                     model_dict[attr] = value
 
@@ -81,13 +120,30 @@ class TorrentItemModel(Base):
 
     def to_torrent_item(self):
         from RTN.models import ParsedData
+        from RTN import parse
         from stream_fusion.utils.torrent.torrent_item import TorrentItem
 
         torrent_item_dict = {}
+        raw_title = None
+
         for attr, value in self.__dict__.items():
             if attr not in ['_sa_instance_state', 'created_at', 'updated_at']:
-                if attr == 'parsed_data':
-                    torrent_item_dict[attr] = ParsedData(**value) if value else None
+                if attr == 'raw_title':
+                    raw_title = value
+                    torrent_item_dict[attr] = value
+                elif attr == 'parsed_data':
+                    # Handle parsed_data conversion with validation
+                    if value is None:
+                        torrent_item_dict[attr] = None
+                    elif isinstance(value, dict):
+                        try:
+                            torrent_item_dict[attr] = ParsedData(**value)
+                        except Exception:
+                            # If parsing dict fails, reparse from raw_title
+                            torrent_item_dict[attr] = parse(raw_title) if raw_title else None
+                    else:
+                        # If it's a string or other type, reparse from raw_title
+                        torrent_item_dict[attr] = parse(raw_title) if raw_title else None
                 else:
                     torrent_item_dict[attr] = value
 

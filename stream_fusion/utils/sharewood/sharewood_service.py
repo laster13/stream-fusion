@@ -1,6 +1,7 @@
 import re
 import urllib.parse
-from typing import List, Union
+import aiohttp
+from typing import List, Union, Optional
 from RTN import parse
 
 from stream_fusion.logging_config import logger
@@ -13,17 +14,17 @@ from stream_fusion.utils.sharewood.sharewood_api import SharewoodAPI
 
 
 class SharewoodService:
-    """Service for searching media on Sharewood."""
+    """Service for searching media on Sharewood (async version)."""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, session: Optional[aiohttp.ClientSession] = None):
         self.sharewood_url = settings.sharewood_url
         if settings.sharewood_unique_account and settings.sharewood_passkey:
             self.sharewood_passkey = settings.sharewood_passkey
         else:
             self.sharewood_passkey = config.get("sharewoodPasskey")
-        self.sharewood = SharewoodAPI(self.sharewood_passkey)
+        self.sharewood = SharewoodAPI(self.sharewood_passkey, session=session)
 
-    def search(self, media: Union[Movie, Series]) -> List[SharewoodResult]:
+    async def search(self, media: Union[Movie, Series]) -> List[SharewoodResult]:
         """
         Search for a media (movie or series) on sharewood.
 
@@ -31,15 +32,15 @@ class SharewoodService:
             media (Union[Movie, Series]): The media to search for.
 
         Returns:
-            List[sharewoodResult]: List of search results.
+            List[SharewoodResult]: List of search results.
 
         Raises:
             TypeError: If the media type is neither Movie nor Series.
         """
         if isinstance(media, Movie):
-            results = self.__search_movie(media)
+            results = await self.__search_movie(media)
         elif isinstance(media, Series):
-            results = self.__search_series(media)
+            results = await self.__search_series(media)
         else:
             raise TypeError("Only Movie and Series types are allowed as media!")
 
@@ -59,10 +60,10 @@ class SharewoodService:
             "tib": 1024**4,
             "pib": 1024**5,
         }
-        
+
         if isinstance(size, int):
             return size  # Si c'est déjà un entier, on le retourne tel quel
-        
+
         if isinstance(size, str):
             size = size.lower().replace(',', '.')  # Remplace la virgule par un point pour les nombres décimaux
             parts = size.split()
@@ -75,7 +76,7 @@ class SharewoodService:
                 if unit not in units:
                     raise ValueError(f"None support unit : {unit}")
                 return int(value * units[unit])
-        
+
         raise ValueError(f"unkound size format : {size}")
 
     def __clean_title(self, title):
@@ -156,15 +157,17 @@ class SharewoodService:
             if not (title.lower() in seen or seen.add(title.lower()))
         ]
 
-    def __search_movie(self, movie: Movie) -> List[dict]:
+    async def __search_movie(self, movie: Movie) -> List[dict]:
         unique_titles = self.__remove_duplicate_titles(movie.titles)
         clean_titles = [self.__clean_title(title) for title in unique_titles]
         results = []
         for title in clean_titles:
-            results.extend(self.sharewood.search(query=title, category=1))
+            search_results = await self.sharewood.search(query=title, category=1)
+            if search_results:
+                results.extend(search_results)
         return self.__deduplicate_api_results(results)
 
-    def __search_series(self, series: Series) -> List[dict]:
+    async def __search_series(self, series: Series) -> List[dict]:
         unique_titles = self.__remove_duplicate_titles(series.titles)
         clean_titles = [self.__clean_title(title) for title in unique_titles]
         search_texts = clean_titles.copy()
@@ -176,7 +179,9 @@ class SharewoodService:
 
         results = []
         for text in search_texts:
-            results.extend(self.sharewood.search(query=text, category=1))
+            search_results = await self.sharewood.search(query=text, category=1)
+            if search_results:
+                results.extend(search_results)
         return self.__deduplicate_api_results(results)
 
     def __filter_out_no_seeders(self, results: List[dict]) -> List[dict]:
@@ -197,7 +202,7 @@ class SharewoodService:
     def __post_process_results(
         self, results: List[dict], media: Union[Movie, Series]
     ) -> List[SharewoodResult]:
-        """Process raw search results and convert them to sharewoodResult objects."""
+        """Process raw search results and convert them to SharewoodResult objects."""
         if not results:
             logger.info(f"No results found on sharewood for: {media.titles[0]}")
             return []
@@ -229,3 +234,7 @@ class SharewoodService:
             items.append(item)
 
         return items
+
+    async def close(self):
+        """Ferme les ressources."""
+        await self.sharewood.close()

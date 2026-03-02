@@ -45,9 +45,9 @@ class NoCacheVideoLanguages(str, enum.Enum):
 def get_default_worker_count():
     """
     Calculate the default number of workers based on CPU cores.
-    Returns the number of CPU cores multiplied by 2, with a minimum of 2 and a maximum of 6.
+    Returns the number of CPU cores multiplied by 2, with a minimum of 2 and a maximum of 10.
     """
-    return min(max(multiprocessing.cpu_count() * 2, 2), 6)
+    return min(max(multiprocessing.cpu_count() * 2, 2), 8)
 
 
 def check_env_variable(var_name):
@@ -135,12 +135,14 @@ class Settings(BaseSettings):
     pg_pass: str = "streamfusion"  # "stremio"
     pg_base: str = "streamfusion"
     pg_echo: bool = False
+    pg_pool_size: int = 100
+    pg_max_overflow: int = 50
 
     # REDIS
     redis_host: str = "redis"
     redis_port: int = 6379
     redis_db: int = 5
-    redis_expiration: int = 604800
+    redis_expiration: int = 604800  # 7 jours
     redis_password: str | None = None
 
     # TMDB
@@ -189,6 +191,16 @@ class Settings(BaseSettings):
     sharewood_max_workers: int = 4
     sharewood_passkey: str | None = None
     sharewood_unique_account: bool = check_env_variable("SHAREWOOD_PASSKEY")
+
+    # C411 TORZNAB
+    c411_url: str = "https://c411.org"
+    c411_api_key: str | None = None  # Env: C411_API_KEY
+    c411_unique_account: bool = check_env_variable("C411_API_KEY")
+
+    # TORR9 TORZNAB
+    torr9_url: str = "https://api.torr9.xyz"
+    torr9_api_key: str | None = None  # Env: TORR9_API_KEY
+    torr9_unique_account: bool = check_env_variable("TORR9_API_KEY")
 
     # PUBLIC_CACHE
     public_cache_url: str = "https://stremio-jackett-cacher.elfhosted.com/"
@@ -282,6 +294,20 @@ class Settings(BaseSettings):
         Get the URL for the no-cache video based on the selected language.
         """
         return self.no_cache_video_language.value
+
+    @property
+    def banned_video_url(self) -> str:
+        """
+        Get the URL for the banned video when torrent is unavailable for legal reasons.
+        """
+        return "https://raw.githubusercontent.com/Telkaoss/stream-fusion/refs/heads/master/stream_fusion/static/videos/banned_error.mp4"
+
+    @property
+    def slots_full_video_url(self) -> str:
+        """
+        Get the URL for the slots full video when TorBox slots are full.
+        """
+        return "https://raw.githubusercontent.com/Telkaoss/stream-fusion/refs/heads/master/stream_fusion/static/videos/slots_full.mp4"
 
 
 try:

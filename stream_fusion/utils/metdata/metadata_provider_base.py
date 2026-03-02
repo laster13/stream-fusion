@@ -1,11 +1,27 @@
+import aiohttp
+from typing import Optional
+
 from stream_fusion.logging_config import logger
 
 
 class MetadataProvider:
 
-    def __init__(self, config):
+    def __init__(self, config, session: Optional[aiohttp.ClientSession] = None):
         self.config = config
         self.logger = logger
+        self._external_session = session is not None
+        self._session = session
+        self._timeout = aiohttp.ClientTimeout(total=10)
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(timeout=self._timeout)
+            self._external_session = False
+        return self._session
+
+    async def close(self):
+        if self._session and not self._external_session and not self._session.closed:
+            await self._session.close()
 
     def replace_weird_characters(self, string):
         corresp = {
