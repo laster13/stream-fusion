@@ -50,8 +50,11 @@ class C411Result:
         self.raw_title = parsed.raw_title
         self.parsed_data = parsed
         self.size = api_item.size or "0"
-        c411_tracker = "https://c411.org/announce/78edc22b1a637cbcafd9126a9ca7a8ae?sig=v2-d04b879f8c55ae49a3c46434d2a98c87a780c760&ts=2000000000"
-        self.magnet = f"magnet:?xt=urn:btih:{self.info_hash}&dn={self.raw_title}&tr={quote(c411_tracker, safe='')}"
+        c411_tracker = settings.c411_passkey or ""
+        if c411_tracker:
+            self.magnet = f"magnet:?xt=urn:btih:{self.info_hash}&dn={self.raw_title}&tr={quote(c411_tracker, safe='')}"
+        else:
+            self.magnet = f"magnet:?xt=urn:btih:{self.info_hash}&dn={self.raw_title}"
         self.link = self.magnet
         self.seeders = api_item.seeders or 0
         self.privacy = api_item.privacy or "public"
