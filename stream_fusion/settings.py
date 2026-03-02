@@ -194,7 +194,8 @@ class Settings(BaseSettings):
 
     # C411 TORZNAB
     c411_url: str = "https://c411.org"
-    c411_api_key: str | None = None  # Env: C411_API_KEY
+    c411_api_key: str | None = None  # Env: C411_API_KEY — Torznab access key
+    c411_passkey: str | None = None  # Env: C411_PASSKEY — full tracker announce URL
     c411_unique_account: bool = check_env_variable("C411_API_KEY")
 
     # TORR9 TORZNAB
