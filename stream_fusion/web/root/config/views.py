@@ -37,6 +37,7 @@ async def configure(request: Request):
         "tb_unique_account": settings.tb_unique_account,
         "c411_unique_account": settings.c411_unique_account,
         "torr9_unique_account": settings.torr9_unique_account,
+        "lacale_unique_account": settings.lacale_unique_account,
     })
 
 

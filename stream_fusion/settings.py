@@ -180,11 +180,11 @@ class Settings(BaseSettings):
     zilean_api_pool_maxsize: int = 10
     zilean_max_retry: int = 3
 
-    # YGGFLIX
-    yggflix_url: str = "https://yggflix.fr"
+    # YGG RELAY / YGGFLIX
+    yggflix_url: str = "https://relay.ygg.gratis/torznab"
     yggflix_max_workers: int = 4
     ygg_passkey: str | None = None
-    ygg_unique_account: bool = check_env_variable("YGG_PASSKEY")
+    ygg_unique_account: bool = False
 
     # SHAREWOOD
     sharewood_url: str = "https://www.sharewood.tv"
@@ -202,6 +202,11 @@ class Settings(BaseSettings):
     torr9_url: str = "https://api.torr9.xyz"
     torr9_api_key: str | None = None  # Env: TORR9_API_KEY
     torr9_unique_account: bool = check_env_variable("TORR9_API_KEY")
+
+    # LACALE TORZNAB
+    lacale_url: str = "https://la-cale.space/api/external/torznab"
+    lacale_api_key: str | None = None  # Env: LACALE_API_KEY
+    lacale_unique_account: bool = check_env_variable("LACALE_API_KEY")
 
     # PUBLIC_CACHE
     public_cache_url: str = "https://stremio-jackett-cacher.elfhosted.com/"

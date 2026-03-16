@@ -1,6 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Union
-from urllib.parse import quote
+from typing import List, Union, Set
 from RTN import parse
 
 from stream_fusion.logging_config import logger
@@ -12,7 +11,6 @@ from stream_fusion.utils.yggfilx.yggflix_api import YggflixAPI
 
 
 class YggflixService:
-
     def __init__(self, config: dict):
         self.yggflix = YggflixAPI()
         self.has_tmdb = config.get("metadataProvider") == "tmdb"
@@ -30,22 +28,90 @@ class YggflixService:
     def __filter_out_no_seeders(self, results: List[dict]) -> List[dict]:
         return [result for result in results if result.get("seeders", 0) >= 0]
 
-    def __build_magnet(self, info_hash: str, title: str) -> str:
-        return f"magnet:?xt=urn:btih:{info_hash}&dn={quote(title)}"
+    def __normalize_title(self, title: str) -> str:
+        return " ".join((title or "").split()).strip()
+
+    def __unique_titles(self, titles: List[str]) -> List[str]:
+        seen = set()
+        unique = []
+        for title in titles or []:
+            normalized = self.__normalize_title(title)
+            if not normalized:
+                continue
+            lowered = normalized.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            unique.append(normalized)
+        return unique
 
     def __search_movie(self, media: Movie) -> List[dict]:
-        if not self.has_tmdb:
-            raise ValueError("Please use TMDB metadata provider for Yggflix")
+        titles = self.__unique_titles(getattr(media, "titles", []) or [])
+        year = getattr(media, "year", None)
 
-        logger.info(f"Searching Yggflix for movie: {media.titles[0]}")
-        return self.yggflix.get_movie_torrents(media.tmdb_id)
+        logger.info(f"Searching YGG Relay for movie: {media.titles[0] if media.titles else 'unknown'}")
+
+        queries = []
+        for title in titles:
+            q = f"{title} {year}".strip() if year else title
+            if q:
+                queries.append(q)
+
+        merged_results = []
+        seen_hashes: Set[str] = set()
+
+        for query in queries:
+            try:
+                raw_results = self.yggflix.search_movie(title=query)
+                logger.info(f"YGG Relay movie query '{query}' -> {len(raw_results)} results")
+            except Exception as e:
+                logger.warning(f"YGG Relay movie query failed '{query}': {e}")
+                continue
+
+            for item in raw_results:
+                info_hash = (item.get("info_hash") or "").lower()
+                if info_hash:
+                    if info_hash in seen_hashes:
+                        continue
+                    seen_hashes.add(info_hash)
+                merged_results.append(item)
+
+        return merged_results
 
     def __search_series(self, media: Series) -> List[dict]:
-        if not self.has_tmdb:
-            raise ValueError("Please use TMDB metadata provider for Yggflix")
+        titles = self.__unique_titles(getattr(media, "titles", []) or [])
+        season_num = media.get_season_number()
+        episode_num = media.get_episode_number()
 
-        logger.info(f"Searching Yggflix for series: {media.titles[0]}")
-        return self.yggflix.get_tvshow_torrents(int(media.tmdb_id))
+        logger.info(f"Searching YGG Relay for series: {media.titles[0] if media.titles else 'unknown'}")
+
+        queries = []
+        for title in titles:
+            if season_num is not None and episode_num is not None:
+                queries.append(f"{title} S{int(season_num):02d}E{int(episode_num):02d}")
+            if season_num is not None:
+                queries.append(f"{title} S{int(season_num):02d}")
+
+        merged_results = []
+        seen_hashes: Set[str] = set()
+
+        for query in queries:
+            try:
+                raw_results = self.yggflix.search_series(title=query)
+                logger.info(f"YGG Relay series query '{query}' -> {len(raw_results)} results")
+            except Exception as e:
+                logger.warning(f"YGG Relay series query failed '{query}': {e}")
+                continue
+
+            for item in raw_results:
+                info_hash = (item.get("info_hash") or "").lower()
+                if info_hash:
+                    if info_hash in seen_hashes:
+                        continue
+                    seen_hashes.add(info_hash)
+                merged_results.append(item)
+
+        return merged_results
 
     def __filter_series_results(self, results: List[dict], media: Series) -> List[dict]:
         season_num = media.get_season_number()
@@ -53,67 +119,64 @@ class YggflixService:
 
         filtered = []
         for r in results:
-            r_season = r.get("season")
-            r_episode = r.get("episode")
-            if r_season is None:
+            name = r.get("name", "")
+            parsed = parse(name)
+
+            if not parsed.seasons:
                 filtered.append(r)
-            elif r_season == season_num and r_episode is None:
+                continue
+
+            if season_num in parsed.seasons and not parsed.episodes:
                 filtered.append(r)
-            elif r_season == season_num and r_episode == episode_num:
+                continue
+
+            if season_num in parsed.seasons and episode_num in parsed.episodes:
                 filtered.append(r)
 
         if filtered:
-            logger.debug(f"Yggflix: pre-filtered {len(results)} → {len(filtered)} results for {media.season}{media.episode}")
-        else:
-            logger.debug(f"Yggflix: pre-filter found nothing, keeping all {len(results)} results")
-            filtered = results
-        return filtered
+            logger.debug(
+                f"YGG Relay: pre-filtered {len(results)} -> {len(filtered)} results "
+                f"for {media.season}{media.episode}"
+            )
+            return filtered
 
-    def __fetch_detail(self, result: dict) -> tuple:
-        torrent_id = result.get("id")
-        if not torrent_id:
-            return result, None
-        try:
-            detail = self.yggflix.get_torrent_detail(torrent_id)
-            return result, detail.get("hash")
-        except Exception as e:
-            logger.warning(f"Yggflix: failed to get detail for torrent {torrent_id}: {e}")
-            return result, None
+        logger.debug(f"YGG Relay: pre-filter found nothing, keeping all {len(results)} results")
+        return results
 
     def __post_process_results(
         self, results: List[dict], media: Union[Movie, Series]
     ) -> List[YggflixResult]:
         if not results:
-            logger.info(f"No results found on Yggflix for: {media.titles[0]}")
+            logger.info(f"No results found on YGG Relay for: {media.titles[0]}")
             return []
 
         results = self.__filter_out_no_seeders(results)
+
         if isinstance(media, Series):
             results = self.__filter_series_results(results, media)
+
         results = sorted(results, key=lambda r: r.get("seeders", 0), reverse=True)[:50]
-        logger.info(f"{len(results)} results to fetch from Yggflix for: {media.titles[0]}")
+        logger.info(f"{len(results)} results to process from YGG Relay for: {media.titles[0]}")
 
         items = []
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(self.__fetch_detail, r): r for r in results}
-            for future in as_completed(futures):
-                result, info_hash = future.result()
-                if not info_hash:
-                    continue
-                item = YggflixResult()
-                item.raw_title = result["title"]
-                item.size = result.get("size", 0)
-                item.info_hash = info_hash.lower()
-                item.magnet = self.__build_magnet(info_hash, result["title"])
-                item.link = item.magnet
-                item.indexer = "Yggtorrent - API"
-                item.seeders = result.get("seeders", 0)
-                item.privacy = "private"
-                item.languages = detect_languages(item.raw_title, default_language="fr")
-                item.type = media.type
-                item.parsed_data = parse(item.raw_title)
-                item.tmdb_id = media.tmdb_id
-                items.append(item)
-                logger.trace(f"Yggflix result: {item}")
+        for result in results:
+            info_hash = result.get("info_hash")
+            if not info_hash:
+                continue
+
+            item = YggflixResult()
+            item.raw_title = result.get("name")
+            item.size = result.get("size", 0)
+            item.info_hash = info_hash.lower()
+            item.magnet = result.get("magnet")
+            item.link = result.get("link") or item.magnet
+            item.indexer = "Yggtorrent - API"
+            item.seeders = result.get("seeders", 0)
+            item.privacy = "public"
+            item.languages = detect_languages(item.raw_title, default_language="fr")
+            item.type = media.type
+            item.parsed_data = parse(item.raw_title)
+            item.tmdb_id = getattr(media, "tmdb_id", None)
+            items.append(item)
 
         return items

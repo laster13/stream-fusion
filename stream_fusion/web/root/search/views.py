@@ -42,6 +42,8 @@ from stream_fusion.utils.c411.c411_service import C411Service
 from stream_fusion.utils.c411.c411_result import C411Result as C411SearchResult
 from stream_fusion.utils.torr9.torr9_service import Torr9Service
 from stream_fusion.utils.torr9.torr9_result import Torr9Result as Torr9SearchResult
+from stream_fusion.utils.lacale.lacale_service import LaCaleService
+from stream_fusion.utils.lacale.lacale_result import LaCaleResult as LaCaleSearchResult
 from stream_fusion.settings import settings
 
 
@@ -157,6 +159,17 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                             logger.debug(f"Pre-fetch: Torr9 API: {len(torr9_results)} results")
                     except Exception as e:
                         logger.debug(f"Pre-fetch: Torr9 search failed: {e}")
+
+                if config.get("lacale"):
+                    try:
+                        lacale_service = LaCaleService(config, session=http_session)
+                        lacale_results = await lacale_service.search(next_media)
+                        if lacale_results:
+                            lacale_results = await torrent_service.convert_and_process(lacale_results)
+                            search_results = merge_items(search_results, lacale_results)
+                            logger.debug(f"Pre-fetch: LaCale API: {len(lacale_results)} results")
+                    except Exception as e:
+                        logger.debug(f"Pre-fetch: LaCale search failed: {e}")
 
                 if postgres_results:
                     search_results = merge_items(postgres_results, search_results)
@@ -429,6 +442,17 @@ async def get_results(
                     logger.warning(f"Search: Torr9 search failed, skipping: {str(e)}")
                 return []
 
+            async def _fetch_lacale_raw():
+                if not config.get("lacale"):
+                    return []
+                try:
+                    lacale_service = LaCaleService(config, session=http_session)
+                    raw = await lacale_service.search(media)
+                    return raw if raw else []
+                except Exception as e:
+                    logger.warning(f"Search: LaCale search failed, skipping: {str(e)}")
+                return []
+
             async def _fetch_yggflix_raw():
                 if not config.get("yggflix"):
                     return []
@@ -440,8 +464,8 @@ async def get_results(
                     logger.warning(f"Search: Yggflix search failed, skipping: {str(e)}")
                 return []
 
-            c411_raw, torr9_raw, yggflix_raw = await asyncio.gather(
-                _fetch_c411_raw(), _fetch_torr9_raw(), _fetch_yggflix_raw()
+            c411_raw, torr9_raw, lacale_raw, yggflix_raw = await asyncio.gather(
+                _fetch_c411_raw(), _fetch_torr9_raw(), _fetch_lacale_raw(), _fetch_yggflix_raw()
             )
 
             if c411_raw:
@@ -452,6 +476,10 @@ async def get_results(
                 torr9_search_results = await torrent_service.convert_and_process(torr9_raw)
                 logger.success(f"Search: Found {len(torr9_search_results)} results from Torr9")
                 search_results = merge_items(search_results, torr9_search_results)
+            if lacale_raw:
+                lacale_search_results = await torrent_service.convert_and_process(lacale_raw)
+                logger.success(f"Search: Found {len(lacale_search_results)} results from LaCale")
+                search_results = merge_items(search_results, lacale_search_results)
             if yggflix_raw:
                 yggflix_search_results = await torrent_service.convert_and_process(yggflix_raw)
                 logger.success(f"Search: Found {len(yggflix_search_results)} results from Yggflix")
@@ -560,7 +588,7 @@ async def get_results(
                     )
                     torrent_service = TorrentService(config, torrent_dao)
                     for db_item in postgres_items:
-                        if db_item.indexer in ['Yggtorrent - API', 'C411 - API', 'Torr9 - API']:
+                        if db_item.indexer in ['Yggtorrent - API', 'C411 - API', 'Torr9 - API', 'LaCale - API']:
                             torrent_item = db_item.to_torrent_item()
                             postgres_results.append(torrent_item)
             except Exception as pg_error:

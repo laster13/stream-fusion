@@ -54,6 +54,7 @@ def get_indexer_priority_for_sort(indexer, config=None):
         indexer_priority = {
             "C411": 1,            # C411/Torr9 prioritaires pour TorBox
             "Torr9": 1,
+            "LaCale": 1,
             "Yggtorrent": 2,
             "DMM": 3,
             "Public": 4,
@@ -62,12 +63,13 @@ def get_indexer_priority_for_sort(indexer, config=None):
         }
     else:
         indexer_priority = {
-            "Yggtorrent": 1,      # Yggtorrent prioritaire pour les autres debrid
-            "DMM": 2,
-            "Public": 3,
-            "Sharewood": 4,
-            "C411": 5,
-            "Torr9": 5,
+            "C411": 1,            # C411/Torr9 prioritaires pour TorBox
+            "Torr9": 1,
+            "LaCale": 1,
+            "Yggtorrent": 1,
+            "DMM": 3,
+            "Public": 4,
+            "Sharewood": 5,
             "Jackett": 6,
         }
     indexer_name = indexer.split(' ')[0] if indexer and ' ' in indexer else indexer
@@ -226,10 +228,10 @@ def remove_non_matching_title(items, titles):
                 "", item.raw_title
             ).strip()
 
-        if item.indexer and "Yggtorrent" in item.indexer:
-            logger.debug(f"Filters: YggFlix item detected, accepting: {cleaned_item_title}")
-            filtered_items.append(item)
-            continue
+        #if item.indexer and "Yggtorrent" in item.indexer:
+        #    logger.debug(f"Filters: YggFlix item detected, accepting: {cleaned_item_title}")
+        #    filtered_items.append(item)
+        #    continue
         
         for title in cleaned_titles:
             logger.trace(

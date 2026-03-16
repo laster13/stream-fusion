@@ -232,7 +232,7 @@ function resetADAuthButton() {
 }
 
 function handleUniqueAccounts() {
-    const accounts = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'sharewood', 'yggflix', 'c411', 'torr9'];
+    const accounts = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'sharewood', 'yggflix', 'c411', 'torr9', 'lacale'];
 
     accounts.forEach(account => {
         const checkbox = document.getElementById(account);
@@ -521,6 +521,7 @@ function updateProviderFields() {
     const torboxChecked = document.getElementById('debrid_tb')?.checked || document.getElementById('debrid_tb')?.disabled;
     const c411Checked = document.getElementById('c411')?.checked || document.getElementById('c411')?.disabled;
     const torr9Checked = document.getElementById('torr9')?.checked || document.getElementById('torr9')?.disabled;
+    const lacaleChecked = document.getElementById('lacale')?.checked || document.getElementById('lacale')?.disabled;
 
     // Afficher/masquer les champs spécifiques
     setElementDisplay('cache-fields', cacheChecked ? 'block' : 'none');
@@ -528,6 +529,7 @@ function updateProviderFields() {
     setElementDisplay('tb_debrid-fields', torboxChecked ? 'block' : 'none');
     setElementDisplay('c411-fields', c411Checked ? 'block' : 'none');
     setElementDisplay('torr9-fields', torr9Checked ? 'block' : 'none');
+    setElementDisplay('lacale-fields', lacaleChecked ? 'block' : 'none');
 
     // Traiter tous les débrideurs
     allDebrids.forEach(id => {
@@ -708,7 +710,8 @@ function loadData() {
         tb_search: false,
         debrid_order: false,
         c411: true,
-        torr9: true
+        torr9: true,
+        lacale: true
     };
 
     Object.keys(defaultConfig).forEach(key => {
@@ -748,9 +751,9 @@ function loadData() {
     setElementValue('tb_token_info', decodedData.TBToken, '');
     setElementValue('pm_token_info', decodedData.PMToken, '');
     setElementValue('sharewoodPasskey', decodedData.sharewoodPasskey, '');
-    setElementValue('yggPasskey', decodedData.yggPasskey, '');
     setElementValue('c411ApiKey', decodedData.c411ApiKey, '');
     setElementValue('torr9ApiKey', decodedData.torr9ApiKey, '');
+    setElementValue('lacaleApiKey', decodedData.lacaleApiKey, '');
     setElementValue('ApiKey', decodedData.apiKey, '');
     setElementValue('exclusion-keywords', (decodedData.exclusionKeywords || []).join(', '), '');
     
@@ -827,8 +830,10 @@ function getLink(method) {
         sharewoodPasskey: document.getElementById('sharewoodPasskey')?.value,
         c411: document.getElementById('c411')?.checked || document.getElementById('c411')?.disabled || false,
         torr9: document.getElementById('torr9')?.checked || document.getElementById('torr9')?.disabled || false,
+        lacale: document.getElementById('lacale')?.checked || document.getElementById('lacale')?.disabled || false,
         c411ApiKey: document.getElementById('c411ApiKey')?.value || '',
         torr9ApiKey: document.getElementById('torr9ApiKey')?.value || '',
+        lacaleApiKey: document.getElementById('lacaleApiKey')?.value || '',
         maxSize: parseInt(document.getElementById('maxSize').value) || 16,
         exclusionKeywords: document.getElementById('exclusion-keywords').value.split(',').map(keyword => keyword.trim()).filter(keyword => keyword !== ''),
         languages: languages.filter(lang => document.getElementById(lang).checked),
@@ -845,7 +850,6 @@ function getLink(method) {
         sharewood: document.getElementById('sharewood')?.checked,
         yggtorrentCtg: document.getElementById('ctg_yggtorrent')?.checked,
         yggflixCtg: document.getElementById('ctg_yggflix')?.checked,
-        yggPasskey: document.getElementById('yggPasskey')?.value,
         torrenting: false,
         debrid: false,
         metadataProvider: document.getElementById('tmdb').checked ? 'tmdb' : 'cinemeta',
@@ -878,6 +882,7 @@ function getLink(method) {
     if (data.sharewood && document.getElementById('sharewoodPasskey') && !data.sharewoodPasskey) missingRequiredFields.push("Sharewood Passkey");
     if (data.c411 && document.getElementById('c411ApiKey') && !data.c411ApiKey) missingRequiredFields.push("C411 API Key");
     if (data.torr9 && document.getElementById('torr9ApiKey') && !data.torr9ApiKey) missingRequiredFields.push("Torr9 API Key");
+    if (data.lacale && document.getElementById('lacaleApiKey') && !data.lacaleApiKey) missingRequiredFields.push("LaCale API Key");
     if (data.stremthru && !data.stremthruUrl) missingRequiredFields.push("StremThru URL");
 
     if (missingRequiredFields.length > 0) {
@@ -887,11 +892,6 @@ function getLink(method) {
 
     function validatePasskey(passkey) {
         return /^[a-zA-Z0-9]{32}$/.test(passkey);
-    }
-
-    if (data.yggflix && data.yggPasskey && !validatePasskey(data.yggPasskey)) {
-        alert('Ygg Passkey doit contenir exactement 32 caractères alphanumériques');
-        return false;
     }
 
     if (data.sharewood && data.sharewoodPasskey && !validatePasskey(data.sharewoodPasskey)) {

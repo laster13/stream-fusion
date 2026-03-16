@@ -331,20 +331,19 @@
                             </div>
                         </div>
 
-                        <div class="relative flex gap-x-3">
-                            <div class="flex h-6 items-center">
-                                <input id="yggflix" name="yggflix" type="checkbox"
-                                    data-unique-account="{{ ygg_unique_account|lower }}"
-                                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                    onchange="updateProviderFields()">
-                            </div>
-                            <div class="text-sm leading-6">
-                                <label for="yggflix" class="font-medium text-white">Enable YggTorrent API</label>
-                                <p class="text-gray-500 dark:text-gray-300">Use Yggtorrent API and internal cf bypass
-                                    to find more results.</p>
-                            </div>
-                        </div>
-
+<div class="relative flex gap-x-3">
+    <div class="flex h-6 items-center">
+        <input id="yggflix" name="yggflix" type="checkbox"
+            class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+            onchange="updateProviderFields()">
+    </div>
+    <div class="text-sm leading-6">
+        <label for="yggflix" class="font-medium text-white">Enable YGG Relay</label>
+        <p class="text-gray-500 dark:text-gray-300">
+            Use the public YGG Torznab relay to find more results.
+        </p>
+    </div>
+</div>
                         <div class="relative flex gap-x-3">
                             <div class="flex h-6 items-center">
                                 <input id="sharewood" name="sharewood" type="checkbox"
@@ -390,6 +389,19 @@
                         </div>
                     </div>
                 </div>
+
+<div class="relative flex gap-x-3">
+    <div class="flex h-6 items-center">
+        <input id="lacale" name="lacale" type="checkbox" checked
+            data-unique-account="{{ lacale_unique_account|lower }}"
+            class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+            onchange="updateProviderFields()">
+    </div>
+    <div class="text-sm leading-6">
+        <label for="lacale" class="font-medium text-white">Enable LaCale API</label>
+        <p class="text-gray-500 dark:text-gray-300">Use LaCale Torznab API to find more results.</p>
+    </div>
+</div>
 
                 <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
                     <div class="flex flex-col items-center">
@@ -694,6 +706,25 @@
                     </div>
                 </div>
                 {% endif %}
+
+{% if not lacale_unique_account %}
+<div id="lacale-fields" style="display: none;">
+    <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
+        <div class="flex flex-col items-center">
+            <h2 class="text-white font-semibold leading-7">LaCale Configuration</h2>
+            <p class="mt-1 text-sm leading-6 text-gray-600 dark:text-gray-400">Enter your LaCale API key here.</p>
+        </div>
+        <div class="mt-10 grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-6">
+            <div class="sm:col-span-4">
+                <label for="lacaleApiKey"
+                    class="block text-sm font-medium leading-6 text-white">API Key</label>
+                <input type="text" name="lacaleApiKey" id="lacaleApiKey"
+                    class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6">
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
 
                 <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
                     <div class="flex flex-col items-center">
