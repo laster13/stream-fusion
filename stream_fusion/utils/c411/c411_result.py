@@ -3,9 +3,7 @@ from RTN import parse
 
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
 from stream_fusion.utils.detection import detect_languages
-from urllib.parse import quote
 from stream_fusion.logging_config import logger
-from stream_fusion.settings import settings
 
 
 class C411Result:
@@ -50,17 +48,13 @@ class C411Result:
         self.raw_title = parsed.raw_title
         self.parsed_data = parsed
         self.size = api_item.size or "0"
-        c411_tracker = settings.c411_passkey or ""
-        if c411_tracker:
-            self.magnet = f"magnet:?xt=urn:btih:{self.info_hash}&dn={self.raw_title}&tr={quote(c411_tracker, safe='')}"
-        else:
-            self.magnet = f"magnet:?xt=urn:btih:{self.info_hash}&dn={self.raw_title}"
+        self.magnet = f"magnet:?xt=urn:btih:{self.info_hash}&dn={self.raw_title}"
         self.link = self.magnet
         self.seeders = api_item.seeders or 0
         self.privacy = api_item.privacy or "public"
         self.languages = detect_languages(self.raw_title, default_language="fr")
         self.type = media.type
         self.tmdb_id = getattr(media, 'tmdb_id', None)
-        base = settings.c411_url.rstrip("/")
-        self.torrent_download = f"{base}/api?t=get&id={self.info_hash}&apikey={settings.c411_api_key}"
+        # torrent_download and passkey tracker are reconstructed at serve time from settings
+        self.torrent_download = None
         return self
