@@ -199,7 +199,7 @@ class Settings(BaseSettings):
     c411_unique_account: bool = check_env_variable("C411_API_KEY")
 
     # TORR9 TORZNAB
-    torr9_url: str = "https://api.torr9.xyz"
+    torr9_url: str = "https://api.torr9.net"
     torr9_api_key: str | None = None  # Env: TORR9_API_KEY
     torr9_unique_account: bool = check_env_variable("TORR9_API_KEY")
 
