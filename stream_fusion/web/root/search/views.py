@@ -128,7 +128,7 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                         zilean_search_results = await torrent_service.convert_and_process(zilean_search_results)
                         search_results = merge_items(search_results, zilean_search_results)
 
-                if config.get("c411"):
+                if config.get("c411") and settings.c411_enable:
                     try:
                         c411_service = C411Service(config, session=http_session)
                         c411_results = await c411_service.search(next_media)
@@ -144,7 +144,7 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                     except Exception as e:
                         logger.debug(f"Pre-fetch: C411 search failed: {e}")
 
-                if config.get("torr9"):
+                if config.get("torr9") and settings.torr9_enable:
                     try:
                         torr9_service = Torr9Service(config, session=http_session)
                         torr9_results = await torr9_service.search(next_media)
@@ -160,7 +160,7 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                     except Exception as e:
                         logger.debug(f"Pre-fetch: Torr9 search failed: {e}")
 
-                if config.get("lacale"):
+                if config.get("lacale") and settings.lacale_enable:
                     try:
                         lacale_service = LaCaleService(config, session=http_session)
                         lacale_results = await lacale_service.search(next_media)
@@ -413,7 +413,7 @@ async def get_results(
             search_results = []
 
             async def _fetch_c411_raw():
-                if not config.get("c411"):
+                if not config.get("c411") or not settings.c411_enable:
                     return []
                 try:
                     c411_service = C411Service(config, session=http_session)
@@ -428,7 +428,7 @@ async def get_results(
                 return []
 
             async def _fetch_torr9_raw():
-                if not config.get("torr9"):
+                if not config.get("torr9") or not settings.torr9_enable:
                     return []
                 try:
                     torr9_service = Torr9Service(config, session=http_session)
@@ -443,7 +443,7 @@ async def get_results(
                 return []
 
             async def _fetch_lacale_raw():
-                if not config.get("lacale"):
+                if not config.get("lacale") or not settings.lacale_enable:
                     return []
                 try:
                     lacale_service = LaCaleService(config, session=http_session)
@@ -527,7 +527,7 @@ async def get_results(
                     )
                     search_results = merge_items(search_results, zilean_search_results)
 
-            if config["sharewood"] and len(search_results) < int(
+            if config["sharewood"] and settings.sharewood_enable and len(search_results) < int(
                 config["minCachedResults"]
             ):
                 try:

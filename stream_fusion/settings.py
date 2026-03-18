@@ -155,6 +155,14 @@ class Settings(BaseSettings):
     jackett_api_key: str | None = None
     jackett_enable: bool = check_env_variable("JACKETT_API_KEY")
 
+    # SERVER-SIDE INDEXER ENABLE FLAGS
+    # When False, the indexer is disabled for ALL users regardless of their config.
+    # Mirrors the jackett_enable pattern — set True only when server credentials exist.
+    sharewood_enable: bool = check_env_variable("SHAREWOOD_PASSKEY")
+    c411_enable: bool = check_env_variable("C411_API_KEY")
+    torr9_enable: bool = check_env_variable("TORR9_API_KEY")
+    lacale_enable: bool = check_env_variable("LACALE_API_KEY")
+
     # ZILEAN DMM API
     zilean_host: str = "zilean"
     zilean_port: int = 8181

@@ -6,6 +6,9 @@ from stream_fusion.utils.models.media import Media
 from stream_fusion.utils.models.series import Series
 from stream_fusion.logging_config import logger
 
+# Private indexer names that strip credentials before caching
+_PRIVATE_CREDENTIAL_INDEXERS = {"Sharewood - API", "C411 - API", "Torr9 - API"}
+
 
 class TorrentItem:
     def __init__(self, raw_title, size, magnet, info_hash, link, seeders, languages, indexer,
@@ -38,14 +41,53 @@ class TorrentItem:
             parsed_data = parse(raw_title)
         self.parsed_data: ParsedData = parsed_data  # Ranked result
 
-    def to_debrid_stream_query(self, media: Media) -> dict:
+    def to_debrid_stream_query(self, media: Media, config: dict = None) -> dict:
+        """Build the query dict embedded in playback URLs.
+
+        For private indexers (Sharewood, C411, Torr9), credentials were stripped
+        before caching.  Reconstruct them here at serve time using the current
+        user config and server settings so debrid services receive valid URLs.
+        """
+        from stream_fusion.settings import settings
+
+        magnet = self.magnet
+        torrent_download = self.torrent_download
+
+        if self.info_hash and self.indexer in _PRIVATE_CREDENTIAL_INDEXERS:
+            if self.indexer == "C411 - API" and settings.c411_api_key:
+                # Re-add C411 announce tracker to magnet
+                c411_tracker = settings.c411_passkey or ""
+                if c411_tracker and magnet and "&tr=" not in magnet:
+                    magnet = f"{magnet}&tr={quote(c411_tracker, safe='')}"
+                # Reconstruct torrent_download from info_hash + server API key
+                if not torrent_download:
+                    base = settings.c411_url.rstrip("/")
+                    torrent_download = f"{base}/api?t=get&id={self.info_hash}&apikey={settings.c411_api_key}"
+
+            elif self.indexer == "Torr9 - API" and settings.torr9_api_key:
+                # Re-add Torr9 announce tracker to magnet
+                if magnet and "&tr=" not in magnet:
+                    torr9_tracker = f"https://tracker.torr9.xyz/announce/{settings.torr9_api_key}"
+                    magnet = f"{magnet}&tr={quote(torr9_tracker, safe='')}"
+
+            elif self.indexer == "Sharewood - API":
+                # Resolve passkey: server-wide account takes priority over user passkey
+                sharewood_passkey = None
+                if settings.sharewood_unique_account and settings.sharewood_passkey:
+                    sharewood_passkey = settings.sharewood_passkey
+                elif config:
+                    sharewood_passkey = config.get("sharewoodPasskey")
+                if sharewood_passkey and magnet and f"{settings.sharewood_url}/announce/" not in magnet:
+                    tracker = f"{settings.sharewood_url}/announce/{sharewood_passkey}"
+                    magnet = f"{magnet}&tr={quote(tracker, safe='')}"
+
         return {
-            "magnet": self.magnet,
+            "magnet": magnet,
             "type": self.type,
             "file_index": self.file_index,
             "season": media.season if isinstance(media, Series) else None,
             "episode": media.episode if isinstance(media, Series) else None,
-            "torrent_download": quote(self.torrent_download) if (self.torrent_download is not None and not self.availability) else None,
+            "torrent_download": quote(torrent_download) if (torrent_download is not None and not self.availability) else None,
             "service": self.availability if self.availability else "DL",
             "privacy": self.privacy if self.privacy else "private",
         }
