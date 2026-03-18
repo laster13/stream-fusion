@@ -209,27 +209,33 @@ class AllDebrid(BaseDebrid):
         return link
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
-        if len(hashes_or_magnets) == 0:
-            logger.info("AllDebrid: No hashes to check")
-            return {"status": "success", "data": {"magnets": []}}
+        """Check cache availability via StremThru proxy.
 
-        result_magnets = []
-        for hash_or_magnet in hashes_or_magnets:
-            try:
-                result_magnets.append({
-                    "hash": hash_or_magnet,
-                    "instant": True,
-                    "files": []
-                })
-            except Exception as e:
-                logger.error(f"AllDebrid: Error processing hash {hash_or_magnet}: {str(e)}")
-                result_magnets.append({
-                    "hash": hash_or_magnet,
-                    "instant": True,
-                    "files": []
-                })
-
-        return {"status": "success", "data": {"magnets": result_magnets}}
+        The previous implementation optimistically marked every hash as instantly
+        available without querying AllDebrid, leading to unnecessary add-and-wait
+        cycles.  StremThru's /v0/store/magnets/check returns accurate cache status
+        and the same list format handled by TorrentSmartContainer._update_availability_stremthru.
+        """
+        if not hashes_or_magnets:
+            return []
+        if not settings.stremthru_url:
+            logger.warning("AllDebrid: stremthru_url not configured, skipping cache check")
+            return []
+        try:
+            from stream_fusion.utils.debrid.stremthru import StremThru
+            token = settings.ad_token if settings.ad_unique_account else self.config.get("ADToken")
+            if not token:
+                logger.warning("AllDebrid: no token available for StremThru cache check")
+                return []
+            session = await self._get_session()
+            st = StremThru(self.config, session=session)
+            st.set_store_credentials("alldebrid", token)
+            result = await st.get_availability_bulk(hashes_or_magnets, ip)
+            logger.debug(f"AllDebrid: StremThru cache check found {len(result)} cached hashes")
+            return result
+        except Exception as e:
+            logger.warning(f"AllDebrid: StremThru cache check failed ({e}), returning empty")
+            return []
 
     async def add_magnet_or_torrent(self, magnet, torrent_download=None, torrent_file_content=None, ip=None):
         logger.debug(f"AllDebrid: Adding magnet or torrent")
