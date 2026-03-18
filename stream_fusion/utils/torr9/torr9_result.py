@@ -1,10 +1,8 @@
-
 from RTN import parse
 
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
 from stream_fusion.utils.detection import detect_languages
 from urllib.parse import quote
-from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
 
 
@@ -57,6 +55,6 @@ class Torr9Result:
         self.privacy = api_item.privacy or "public"
         self.languages = detect_languages(self.raw_title, default_language="fr")
         self.type = media.type
-        self.tmdb_id = getattr(media, 'tmdb_id', None)
-        self.torrent_download = getattr(api_item, 'torrent_download', None) or api_item.link
+        self.tmdb_id = getattr(media, "tmdb_id", None)
+        self.torrent_download = getattr(api_item, "torrent_download", None) or api_item.link
         return self
