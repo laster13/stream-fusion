@@ -1,16 +1,11 @@
 name: Deploy Documentation
 
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - 'docs/**'
-      - 'mkdocs.yml'
-  
+  workflow_dispatch:
+
 jobs:
   deploy:
-    if: "startsWith(github.event.head_commit.message, 'Docs(deploy):')"
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
