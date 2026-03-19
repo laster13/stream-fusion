@@ -38,6 +38,7 @@ async def configure(request: Request):
         "c411_unique_account": settings.c411_unique_account,
         "torr9_unique_account": settings.torr9_unique_account,
         "lacale_unique_account": settings.lacale_unique_account,
+        "generationfree_unique_account": settings.generationfree_unique_account,
     })
 
 

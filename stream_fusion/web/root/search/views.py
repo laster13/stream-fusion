@@ -44,6 +44,8 @@ from stream_fusion.utils.torr9.torr9_service import Torr9Service
 from stream_fusion.utils.torr9.torr9_result import Torr9Result as Torr9SearchResult
 from stream_fusion.utils.lacale.lacale_service import LaCaleService
 from stream_fusion.utils.lacale.lacale_result import LaCaleResult as LaCaleSearchResult
+from stream_fusion.utils.generationfree.generationfree_service import GenerationFreeService
+from stream_fusion.utils.generationfree.generationfree_result import GenerationFreeResult as GenerationFreeSearchResult
 from stream_fusion.settings import settings
 
 
@@ -170,6 +172,17 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                             logger.debug(f"Pre-fetch: LaCale API: {len(lacale_results)} results")
                     except Exception as e:
                         logger.debug(f"Pre-fetch: LaCale search failed: {e}")
+
+                if config.get("generationfree"):
+                    try:
+                        generationfree_service = GenerationFreeService(config, session=http_session)
+                        generationfree_results = await generationfree_service.search(next_media)
+                        if generationfree_results:
+                            generationfree_results = await torrent_service.convert_and_process(generationfree_results)
+                            search_results = merge_items(search_results, generationfree_results)
+                            logger.debug(f"Pre-fetch: GenerationFree API: {len(generationfree_results)} results")
+                    except Exception as e:
+                        logger.debug(f"Pre-fetch: GenerationFree search failed: {e}")
 
                 if postgres_results:
                     search_results = merge_items(postgres_results, search_results)
@@ -453,6 +466,17 @@ async def get_results(
                     logger.warning(f"Search: LaCale search failed, skipping: {str(e)}")
                 return []
 
+            async def _fetch_generationfree_raw():
+                if not config.get("generationfree"):
+                    return []
+                try:
+                    generationfree_service = GenerationFreeService(config, session=http_session)
+                    raw = await generationfree_service.search(media)
+                    return raw if raw else []
+                except Exception as e:
+                    logger.warning(f"Search: GenerationFree search failed, skipping: {str(e)}")
+                return []
+
             async def _fetch_yggflix_raw():
                 if not config.get("yggflix"):
                     return []
@@ -464,8 +488,12 @@ async def get_results(
                     logger.warning(f"Search: Yggflix search failed, skipping: {str(e)}")
                 return []
 
-            c411_raw, torr9_raw, lacale_raw, yggflix_raw = await asyncio.gather(
-                _fetch_c411_raw(), _fetch_torr9_raw(), _fetch_lacale_raw(), _fetch_yggflix_raw()
+            c411_raw, torr9_raw, lacale_raw, yggflix_raw, generationfree_raw = await asyncio.gather(
+                _fetch_c411_raw(),
+                _fetch_torr9_raw(),
+                _fetch_lacale_raw(),
+                _fetch_yggflix_raw(),
+                _fetch_generationfree_raw(),
             )
 
             if c411_raw:
@@ -480,6 +508,10 @@ async def get_results(
                 lacale_search_results = await torrent_service.convert_and_process(lacale_raw)
                 logger.success(f"Search: Found {len(lacale_search_results)} results from LaCale")
                 search_results = merge_items(search_results, lacale_search_results)
+            if generationfree_raw:
+                generationfree_search_results = await torrent_service.convert_and_process(generationfree_raw)
+                logger.success(f"Search: Found {len(generationfree_search_results)} results from GenerationFree")
+                search_results = merge_items(search_results, generationfree_search_results)
             if yggflix_raw:
                 yggflix_search_results = await torrent_service.convert_and_process(yggflix_raw)
                 logger.success(f"Search: Found {len(yggflix_search_results)} results from Yggflix")
@@ -588,7 +620,7 @@ async def get_results(
                     )
                     torrent_service = TorrentService(config, torrent_dao)
                     for db_item in postgres_items:
-                        if db_item.indexer in ['Yggtorrent - API', 'C411 - API', 'Torr9 - API', 'LaCale - API']:
+                        if db_item.indexer in ['Yggtorrent - API', 'C411 - API', 'Torr9 - API', 'LaCale - API', 'GenerationFree - API']:
                             torrent_item = db_item.to_torrent_item()
                             postgres_results.append(torrent_item)
             except Exception as pg_error:
