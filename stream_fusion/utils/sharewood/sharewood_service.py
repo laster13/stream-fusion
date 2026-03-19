@@ -193,11 +193,10 @@ class SharewoodService:
         return f"{self.sharewood_url}/api/{self.sharewood_passkey}/{id}/download"
 
     def __generate_magnet_link(self, info_hash: str, name: str) -> str:
-        """Generate the magnet link for a given torrent."""
+        """Generate the magnet link for a given torrent (without passkey tracker).
+        The passkey tracker is reconstructed at serve time from config/settings."""
         encoded_name = urllib.parse.quote(name)
-        tracker = f"{self.sharewood_url}/announce/{self.sharewood_passkey}"
-        encoded_tracker = urllib.parse.quote(tracker)
-        return f"magnet:?xt=urn:btih:{info_hash}&dn={encoded_name}&tr={encoded_tracker}"
+        return f"magnet:?xt=urn:btih:{info_hash}&dn={encoded_name}"
 
     def __post_process_results(
         self, results: List[dict], media: Union[Movie, Series]

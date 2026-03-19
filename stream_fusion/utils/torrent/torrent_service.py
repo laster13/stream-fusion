@@ -52,6 +52,30 @@ class TorrentService:
             self.logger.error(f"Error getting cached torrent: {e}")
             return None
 
+    @staticmethod
+    def _strip_private_credentials(item: TorrentItem) -> TorrentItem:
+        """Remove credential-bearing URLs from private-indexer items before caching.
+
+        After stripping, credentials are reconstructed at serve time inside
+        TorrentItem.to_debrid_stream_query() using the current user/server config.
+        This prevents passkeys and API keys from leaking into shared Redis/PostgreSQL.
+        """
+        if item.indexer == "Sharewood - API":
+            # torrent_download is the passkey-bearing download URL
+            item.torrent_download = None
+            # Rebuild a clean magnet (no private announce URL) from info_hash
+            if item.info_hash:
+                raw_name = item.file_name or item.raw_title or ""
+                item.magnet = f"magnet:?xt=urn:btih:{item.info_hash}&dn={urllib.parse.quote(raw_name)}"
+            # Strip the Sharewood announce URL from the trackers list
+            item.trackers = [
+                t for t in (item.trackers or [])
+                if settings.sharewood_url not in str(t)
+            ]
+            # link is no longer useful after processing; point to clean magnet
+            item.link = item.magnet or ""
+        return item
+
     async def cache_torrent(self, torrent_item: TorrentItem, id: str = None):
         unique_id = self.__generate_unique_id(torrent_item.raw_title, torrent_item.indexer)
 
@@ -144,6 +168,7 @@ class TorrentService:
             else:
                 processed_torrent_item = self.__process_web_url(torrent_item)
 
+            self._strip_private_credentials(processed_torrent_item)
             await self.cache_torrent(processed_torrent_item)
             torrent_items_result.append(processed_torrent_item)
 

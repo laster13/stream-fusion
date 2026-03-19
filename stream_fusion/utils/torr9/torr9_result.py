@@ -1,9 +1,7 @@
 from RTN import parse
-from urllib.parse import quote
 
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
 from stream_fusion.utils.detection import detect_languages
-from stream_fusion.settings import settings
 
 
 class Torr9Result:
@@ -48,16 +46,13 @@ class Torr9Result:
         self.raw_title = parsed.raw_title
         self.parsed_data = parsed
         self.size = api_item.size or "0"
-
-        torr9_tracker = f"https://tracker.torr9.net/announce/{settings.torr9_api_key}"
-        self.magnet = f"magnet:?xt=urn:btih:{self.info_hash}&dn={self.raw_title}&tr={quote(torr9_tracker, safe='')}"
-
+        self.magnet = f"magnet:?xt=urn:btih:{self.info_hash}&dn={self.raw_title}"
         self.link = self.magnet
         self.seeders = api_item.seeders or 0
         self.privacy = api_item.privacy or "public"
         self.languages = detect_languages(self.raw_title, default_language="fr")
         self.type = media.type
         self.tmdb_id = getattr(media, "tmdb_id", None)
+        # tracker is reconstructed at serve time from settings; torrent_download set to None for safety
         self.torrent_download = None
-
         return self

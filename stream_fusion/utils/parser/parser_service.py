@@ -97,7 +97,7 @@ class StreamParser:
         title = self._create_stream_title(torrent_item, parsed_data, media)
 
         queryb64 = encodeb64(
-            json.dumps(torrent_item.to_debrid_stream_query(media))
+            json.dumps(torrent_item.to_debrid_stream_query(media, self.config))
         ).replace("=", "%3D")
 
         results = []
