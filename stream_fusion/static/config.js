@@ -232,7 +232,7 @@ function resetADAuthButton() {
 }
 
 function handleUniqueAccounts() {
-    const accounts = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'sharewood', 'yggflix', 'c411', 'torr9', 'lacale'];
+    const accounts = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'sharewood', 'yggflix', 'c411', 'torr9', 'lacale', 'generationfree'];
 
     accounts.forEach(account => {
         const checkbox = document.getElementById(account);
@@ -522,6 +522,7 @@ function updateProviderFields() {
     const c411Checked = document.getElementById('c411')?.checked || document.getElementById('c411')?.disabled;
     const torr9Checked = document.getElementById('torr9')?.checked || document.getElementById('torr9')?.disabled;
     const lacaleChecked = document.getElementById('lacale')?.checked || document.getElementById('lacale')?.disabled;
+    const generationfreeChecked = document.getElementById('generationfree')?.checked || document.getElementById('generationfree')?.disabled;
 
     // Afficher/masquer les champs spécifiques
     setElementDisplay('cache-fields', cacheChecked ? 'block' : 'none');
@@ -530,6 +531,7 @@ function updateProviderFields() {
     setElementDisplay('c411-fields', c411Checked ? 'block' : 'none');
     setElementDisplay('torr9-fields', torr9Checked ? 'block' : 'none');
     setElementDisplay('lacale-fields', lacaleChecked ? 'block' : 'none');
+    setElementDisplay('generationfree-fields', generationfreeChecked ? 'block' : 'none');
 
     // Traiter tous les débrideurs
     allDebrids.forEach(id => {
@@ -711,7 +713,8 @@ function loadData() {
         debrid_order: false,
         c411: true,
         torr9: true,
-        lacale: true
+        lacale: true,
+        generationfree: false,
     };
 
     Object.keys(defaultConfig).forEach(key => {
@@ -754,6 +757,7 @@ function loadData() {
     setElementValue('c411ApiKey', decodedData.c411ApiKey, '');
     setElementValue('torr9ApiKey', decodedData.torr9ApiKey, '');
     setElementValue('lacaleApiKey', decodedData.lacaleApiKey, '');
+    setElementValue('generationfreeApiKey', decodedData.generationfreeApiKey, '');
     setElementValue('ApiKey', decodedData.apiKey, '');
     setElementValue('exclusion-keywords', (decodedData.exclusionKeywords || []).join(', '), '');
     
@@ -834,6 +838,8 @@ function getLink(method) {
         c411ApiKey: document.getElementById('c411ApiKey')?.value || '',
         torr9ApiKey: document.getElementById('torr9ApiKey')?.value || '',
         lacaleApiKey: document.getElementById('lacaleApiKey')?.value || '',
+        generationfree: document.getElementById('generationfree')?.checked || document.getElementById('generationfree')?.disabled || false,
+        generationfreeApiKey: document.getElementById('generationfreeApiKey')?.value || '',
         maxSize: parseInt(document.getElementById('maxSize').value) || 16,
         exclusionKeywords: document.getElementById('exclusion-keywords').value.split(',').map(keyword => keyword.trim()).filter(keyword => keyword !== ''),
         languages: languages.filter(lang => document.getElementById(lang).checked),
@@ -883,6 +889,7 @@ function getLink(method) {
     if (data.c411 && document.getElementById('c411ApiKey') && !data.c411ApiKey) missingRequiredFields.push("C411 API Key");
     if (data.torr9 && document.getElementById('torr9ApiKey') && !data.torr9ApiKey) missingRequiredFields.push("Torr9 API Key");
     if (data.lacale && document.getElementById('lacaleApiKey') && !data.lacaleApiKey) missingRequiredFields.push("LaCale API Key");
+    if (data.generationfree && document.getElementById('generationfreeApiKey') && !data.generationfreeApiKey) missingRequiredFields.push("Generation Free API Key");
     if (data.stremthru && !data.stremthruUrl) missingRequiredFields.push("StremThru URL");
 
     if (missingRequiredFields.length > 0) {

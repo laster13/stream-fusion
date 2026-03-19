@@ -203,9 +203,12 @@ def remove_non_matching_title(items, titles):
     ]
     logger.info(f"Filters: Removing items not matching titles: {cleaned_titles}")
 
+    def normalize_words(text):
+        return [w for w in text.lower().split() if w]
+
     def is_ordered_subset(subset, full_set):
-        subset_words = subset.lower().split()
-        full_set_words = full_set.lower().split()
+        subset_words = normalize_words(subset)
+        full_set_words = normalize_words(full_set)
         subset_index = 0
         for word in full_set_words:
             if subset_index < len(subset_words) and word == subset_words[subset_index]:
@@ -213,51 +216,52 @@ def remove_non_matching_title(items, titles):
         return subset_index == len(subset_words)
 
     for item in items:
-        # Ensure parsed_data is valid before accessing it
-        if hasattr(item, '_ensure_parsed_data_valid'):
+        if hasattr(item, "_ensure_parsed_data_valid"):
             item._ensure_parsed_data_valid()
 
-        # If parsed_data is None or invalid, use raw_title as fallback
-        if item.parsed_data and hasattr(item.parsed_data, 'parsed_title'):
+        if item.parsed_data and hasattr(item.parsed_data, "parsed_title"):
             cleaned_item_title = integrale_pattern.sub(
                 "", item.parsed_data.parsed_title
             ).strip()
         else:
-            # Fallback to raw_title if parsed_data is invalid
-            cleaned_item_title = integrale_pattern.sub(
-                "", item.raw_title
-            ).strip()
+            cleaned_item_title = integrale_pattern.sub("", item.raw_title).strip()
 
-        #if item.indexer and "Yggtorrent" in item.indexer:
-        #    logger.debug(f"Filters: YggFlix item detected, accepting: {cleaned_item_title}")
-        #    filtered_items.append(item)
-        #    continue
-        
+        item_words = normalize_words(cleaned_item_title)
+
         for title in cleaned_titles:
+            title_words = normalize_words(title)
+
             logger.trace(
                 f"Filters: Comparing item title: {cleaned_item_title} with title: {title}"
             )
 
+            # Cas 1: égalité exacte après nettoyage
+            if cleaned_item_title.lower() == title.lower():
+                logger.trace(
+                    f"Filters: Exact cleaned title match. Item accepted: {cleaned_item_title}"
+                )
+                filtered_items.append(item)
+                break
+
+            # Cas 2: le titre de l'item est un sous-ensemble ordonné du titre TMDB
+            # Exemple utile: item un peu tronqué, mais pas plus long que le vrai titre
             if is_ordered_subset(cleaned_item_title, title):
                 logger.trace(
                     f"Filters: Ordered subset match found. Item accepted: {cleaned_item_title}"
                 )
                 filtered_items.append(item)
                 break
-            elif is_ordered_subset(title, cleaned_item_title):
-                logger.trace(
-                    f"Filters: Reverse ordered subset match found. Item accepted: {cleaned_item_title}"
-                )
-                filtered_items.append(item)
-                break
-            else:
-                logger.trace(f"Filters: No ordered subset match. Trying title_match()")
+
+            # Cas 3: matching flou RTN, mais on protège les titres très courts
+            # pour éviter Paradise -> Hell's Paradise
+            if len(title_words) >= 2 or len(item_words) >= 2:
                 if title_match(title, cleaned_item_title):
                     logger.trace(
                         f"Filters: title_match() succeeded. Item accepted: {cleaned_item_title}"
                     )
                     filtered_items.append(item)
                     break
+
         else:
             logger.trace(f"Filters: No match found, item skipped: {cleaned_item_title}")
 
@@ -265,7 +269,6 @@ def remove_non_matching_title(items, titles):
         f"Filters: Title filtering complete. {len(filtered_items)} items kept out of {len(items)} total"
     )
     return filtered_items
-
 
 def filter_items(items, media, config, skip_resolution=False):
     logger.info(f"Filters: Starting item filtering for media: {media.titles[0]}")

@@ -207,7 +207,7 @@ class Settings(BaseSettings):
     c411_unique_account: bool = check_env_variable("C411_API_KEY")
 
     # TORR9 TORZNAB
-    torr9_url: str = "https://api.torr9.xyz"
+    torr9_url: str = "https://api.torr9.net"
     torr9_api_key: str | None = None  # Env: TORR9_API_KEY
     torr9_unique_account: bool = check_env_variable("TORR9_API_KEY")
 
@@ -215,6 +215,11 @@ class Settings(BaseSettings):
     lacale_url: str = "https://la-cale.space/api/external/torznab"
     lacale_api_key: str | None = None  # Env: LACALE_API_KEY
     lacale_unique_account: bool = check_env_variable("LACALE_API_KEY")
+
+    # GENERATIONFREE
+    generationfree_url: str = "https://generation-free.org"
+    generationfree_api_key: str | None = None
+    generationfree_unique_account: bool = check_env_variable("GENERATIONFREE_API_KEY")
 
     # PUBLIC_CACHE
     public_cache_url: str = "https://stremio-jackett-cacher.elfhosted.com/"

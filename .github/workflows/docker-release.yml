@@ -1,4 +1,4 @@
-name: Build and Push Docker image to GitHub Packages on Release
+name: Build and Push Docker image to GHCR on Release
 
 on:
   release:
@@ -6,8 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to build and push as latest (e.g. v2.3.5)'
+        description: "Tag to build and push as latest (e.g. v2.3.5)"
         required: true
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   build:
@@ -15,24 +19,22 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-        with:
-          platforms: all
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -41,8 +43,8 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/telkaoss/stream-fusion:latest
-            ghcr.io/telkaoss/stream-fusion:${{ github.event.inputs.tag || github.event.release.tag_name }}
+            ghcr.io/laster13/stream-fusion:latest
+            ghcr.io/laster13/stream-fusion:${{ github.event.inputs.tag || github.event.release.tag_name }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.description=Docker image for Stream Fusion
