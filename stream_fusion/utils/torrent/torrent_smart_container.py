@@ -197,21 +197,6 @@ class TorrentSmartContainer:
         self.logger.info(
             f"TorrentSmartContainer: Updating availability for {debrid_type.__name__}"
         )
-
-        # RealDebrid and AllDebrid now delegate cache checks to StremThru and return
-        # a list of {"hash": ..., "status": "cached", "files": [...], "debrid": ...} dicts.
-        # Detect this format by shape rather than by debrid_type so existing logic is unaffected.
-        if isinstance(debrid_response, list) and debrid_response and isinstance(debrid_response[0], dict) and "hash" in debrid_response[0]:
-            self.__using_stremthru = True
-            store_name = debrid_response[0].get("store_name", "")
-            underlying_debrid = (
-                StremThru.get_underlying_debrid_code(store_name)
-                or debrid_response[0].get("debrid", "RD")
-            )
-            self.logger.debug(f"TorrentSmartContainer: StremThru list response detected (store={store_name}, debrid={underlying_debrid})")
-            self._update_availability_stremthru(debrid_response, media, underlying_debrid)
-            return
-
         if debrid_type is RealDebrid:
             self._update_availability_realdebrid(debrid_response, media)
         elif debrid_type is AllDebrid:
