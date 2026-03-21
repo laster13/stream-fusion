@@ -216,6 +216,11 @@ class Settings(BaseSettings):
     lacale_api_key: str | None = None  # Env: LACALE_API_KEY
     lacale_unique_account: bool = check_env_variable("LACALE_API_KEY")
 
+    # GENERATIONFREE
+    generationfree_url: str = "https://generation-free.org"
+    generationfree_api_key: str | None = None
+    generationfree_unique_account: bool = check_env_variable("GENERATIONFREE_API_KEY")
+
     # PUBLIC_CACHE
     public_cache_url: str = "https://stremio-jackett-cacher.elfhosted.com/"
 
