@@ -144,33 +144,12 @@ class RealDebrid(BaseDebrid):
         return None
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
-        """Check cache availability via StremThru proxy.
-
-        The native RealDebrid /torrents/instantAvailability endpoint is deprecated
-        and returns 404.  StremThru's /v0/store/magnets/check provides a reliable
-        replacement and returns the same list format used by the StremThru debrid
-        integration, which TorrentSmartContainer already handles.
-        """
-        if not hashes_or_magnets:
-            return []
-        if not settings.stremthru_url:
-            logger.warning("Real-Debrid: stremthru_url not configured, skipping cache check")
-            return []
-        try:
-            from stream_fusion.utils.debrid.stremthru import StremThru
-            token = settings.rd_token if settings.rd_unique_account else self.token_manager.get_access_token()
-            if not token:
-                logger.warning("Real-Debrid: no token available for StremThru cache check")
-                return []
-            session = await self._get_session()
-            st = StremThru(self.config, session=session)
-            st.set_store_credentials("realdebrid", token)
-            result = await st.get_availability_bulk(hashes_or_magnets, ip)
-            logger.debug(f"Real-Debrid: StremThru cache check found {len(result)} cached hashes")
-            return result
-        except Exception as e:
-            logger.warning(f"Real-Debrid: StremThru cache check failed ({e}), returning empty")
-            return []
+        await self._torrent_rate_limit()
+        if len(hashes_or_magnets) == 0:
+            logger.info("Real-Debrid: No hashes to be sent.")
+            return dict()
+        url = f"{self.base_url}torrents/instantAvailability/{'/'.join(hashes_or_magnets)}"
+        return await self.json_response(url, headers=self.get_headers())
 
     async def get_stream_link(self, query, config=None, ip=None):
         # Extract query parameters
