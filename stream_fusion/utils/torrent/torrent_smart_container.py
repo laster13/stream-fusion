@@ -237,28 +237,41 @@ class TorrentSmartContainer:
                 f"TorrentSmartContainer: Debrid type {debrid_type.__name__} not implemented"
             )
 
-    def _update_availability_realdebrid(self, response, media):
-        self.logger.info("TorrentSmartContainer: Updating availability for RealDebrid")
-        for info_hash, details in response.items():
-            if "rd" not in details:
+    def _update_availability_alldebrid(self, response, media):
+        self.logger.info("TorrentSmartContainer: Updating availability for AllDebrid")
+        if not response["status"] == "success":
+            self.logger.error(f"TorrentSmartContainer: AllDebrid API error: {response}")
+            return
+
+        for data in response["data"]["magnets"]:
+            hash_value = str(data.get("hash", "")).strip().lower()
+            torrent_item: TorrentItem = self.__itemsDict.get(hash_value)
+
+            if torrent_item is None:
                 self.logger.debug(
-                    f"TorrentSmartContainer: Skipping hash {info_hash}: no RealDebrid data"
+                    f"TorrentSmartContainer: Unknown AllDebrid hash returned: {hash_value}"
                 )
                 continue
-            torrent_item: TorrentItem = self.__itemsDict[info_hash]
-            self.logger.debug(
-                f"Processing {torrent_item.type}: {torrent_item.raw_title}"
-            )
-            files = []
-            if torrent_item.type == "series":
-                self._process_series_files(
-                    details, media, torrent_item, files, debrid="RD"
+
+            if not data.get("instant", False):
+                torrent_item.availability = False
+                continue
+
+            if "files" in data and data["files"]:
+                files = []
+                self._explore_folders_alldebrid(
+                    data["files"], files, 1, torrent_item.type, media
                 )
+
+                if files:
+                    self._update_file_details(torrent_item, files, debrid="AD")
+                else:
+                    torrent_item.availability = "AD"
             else:
-                self._process_movie_files(details, files)
-            self._update_file_details(torrent_item, files, debrid="RD")
+                torrent_item.availability = "AD"
+
         self.logger.info(
-            "TorrentSmartContainer: RealDebrid availability update completed"
+            "TorrentSmartContainer: AllDebrid availability update completed"
         )
 
     def _process_series_files(
@@ -313,23 +326,27 @@ class TorrentSmartContainer:
 
         for data in response["data"]["magnets"]:
             torrent_item: TorrentItem = self.__itemsDict[data["hash"]]
-            
-            # Set availability to AD immediately for all files
-            torrent_item.availability = "AD"
-            
-            # Process files if they exist
+
+            # Ne considérer dispo que si AllDebrid dit explicitement que c'est instant
+            if not data.get("instant", False):
+                torrent_item.availability = False
+                continue
+
+            # Si instant mais sans fichiers, on marque quand même AD pour les films simples
             if "files" in data and data["files"]:
                 files = []
                 self._explore_folders_alldebrid(
                     data["files"], files, 1, torrent_item.type, media
                 )
-                if files:  # If we found matching files
+
+                if files:
                     self._update_file_details(torrent_item, files, debrid="AD")
+                else:
+                    # Fallback: instant mais pas de fichier matché dans l'exploration
+                    torrent_item.availability = "AD"
             else:
-                # If no files data, still mark as available
-                self.logger.debug(f"No files data for hash {data['hash']}, but marking as available")
                 torrent_item.availability = "AD"
-                
+
         self.logger.info(
             "TorrentSmartContainer: AllDebrid availability update completed"
         )

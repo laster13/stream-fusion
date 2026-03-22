@@ -30,42 +30,65 @@ class StreamParser:
     ) -> List[Dict]:
         """Parse async avec asyncio.gather() au lieu de threading"""
 
-        # Limite le nombre de résultats
-        limited_items = torrent_items[: int(self.config["maxResults"])]
+        try:
+            max_results = int(self.config.get("maxResults", len(torrent_items)))
+        except (TypeError, ValueError):
+            max_results = len(torrent_items)
 
-        # Créer des tâches async pour chaque torrent_item
+        limited_items = torrent_items[:max_results]
+
         tasks = [
             self._parse_to_debrid_stream_async(torrent_item, media)
             for torrent_item in limited_items
         ]
 
-        # Exécuter en parallèle
         stream_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Filtrer les exceptions et aplatir les résultats
         stream_list = []
         for result in stream_results:
             if isinstance(result, Exception):
-                # Log mais continue
                 continue
             if isinstance(result, list):
                 stream_list.extend(result)
             elif result:
                 stream_list.append(result)
 
-        if self.config["debrid"]:
-            is_torbox = (bool(self.config.get("TBToken")) or self.config.get("debridDownloader") == "TorBox")
+        if self.config.get("debrid"):
+            # Ne garder que les torrents instantanément disponibles
+            # et éventuellement les direct torrents si torrenting est activé
+            if self.config.get("torrenting"):
+                stream_list = [
+                    item
+                    for item in stream_list
+                    if item["name"].startswith(DIRECT_TORRENT)
+                    or INSTANTLY_AVAILABLE in item["name"]
+                ]
+            else:
+                stream_list = [
+                    item
+                    for item in stream_list
+                    if INSTANTLY_AVAILABLE in item["name"]
+                ]
+
+            is_torbox = (
+                bool(self.config.get("TBToken"))
+                or self.config.get("debridDownloader") == "TorBox"
+            )
+
+            SPECIAL_INDEXERS = ("C411", "Torr9", "LaCale", "GenerationFree")
 
             def combined_sort_key(item):
                 name = item["name"]
                 desc = item.get("description", "")
+                is_special = any(indexer in desc for indexer in SPECIAL_INDEXERS)
+
                 if name.startswith(DIRECT_TORRENT):
                     return 0
                 if INSTANTLY_AVAILABLE in name:
                     return 1
-                if is_torbox and ("C411" in desc or "Torr9" in desc):
+                if is_torbox and is_special:
                     return 2
-                if "C411" in desc or "Torr9" in desc:
+                if is_special:
                     return 4
                 return 3
 
@@ -85,11 +108,11 @@ class StreamParser:
         self, torrent_item: TorrentItem, media: Media
     ) -> List[Dict]:
         """Version synchrone du parsing (CPU-bound)"""
-        # Ensure parsed_data is valid ParsedData object, not string or dict
         from RTN import parse
 
-        # Force reparsing if not ParsedData
-        if torrent_item.parsed_data is None or not isinstance(torrent_item.parsed_data, ParsedData):
+        if torrent_item.parsed_data is None or not isinstance(
+            torrent_item.parsed_data, ParsedData
+        ):
             torrent_item.parsed_data = parse(torrent_item.raw_title)
 
         parsed_data: ParsedData = torrent_item.parsed_data
@@ -102,21 +125,23 @@ class StreamParser:
 
         results = []
 
-        # Stream principal debrid
-        results.append({
-            "name": name,
-            "description": title,
-            "url": f"{self.config['addonHost']}/playback/{self.configb64}/{queryb64}",
-            "infoHash": torrent_item.info_hash,
-            "behaviorHints": {
-                "bingeGroup": self._generate_binge_group(torrent_item, media),
-                "filename": torrent_item.file_name or torrent_item.raw_title,
-            },
-        })
+        results.append(
+            {
+                "name": name,
+                "description": title,
+                "url": f"{self.config['addonHost']}/playback/{self.configb64}/{queryb64}",
+                "infoHash": torrent_item.info_hash,
+                "behaviorHints": {
+                    "bingeGroup": self._generate_binge_group(torrent_item, media),
+                    "filename": torrent_item.file_name or torrent_item.raw_title,
+                },
+            }
+        )
 
-        # Ajouter le stream direct torrent si applicable
-        if self.config["torrenting"] and torrent_item.privacy == "public":
-            direct_stream = self._create_direct_torrent_stream(torrent_item, parsed_data, title, media)
+        if self.config.get("torrenting") and torrent_item.privacy == "public":
+            direct_stream = self._create_direct_torrent_stream(
+                torrent_item, parsed_data, title, media
+            )
             if direct_stream:
                 results.append(direct_stream)
 
@@ -129,26 +154,30 @@ class StreamParser:
             return f"stream-fusion-{torrent_item.info_hash}"
 
         if media.type == "series":
-            # Pour les séries, utiliser l'ID de la série + résolution + team pour permettre
-            # la lecture automatique même avec des torrents d'épisodes individuels
             series_id = media.id.split(":")[0] if ":" in media.id else media.id
-            resolution = torrent_item.parsed_data.resolution if torrent_item.parsed_data.resolution else "Unknown"
 
-            # Ajouter la team si disponible pour une meilleure granularité
-            team = extract_release_group(torrent_item.raw_title) or torrent_item.parsed_data.group
+            parsed_data = torrent_item.parsed_data
+            resolution = (
+                parsed_data.resolution
+                if parsed_data and parsed_data.resolution
+                else "Unknown"
+            )
+
+            team = extract_release_group(torrent_item.raw_title) or (
+                parsed_data.group if parsed_data else None
+            )
+
             if team:
                 return f"stream-fusion-{series_id}-{resolution}-{team}"
-            else:
-                return f"stream-fusion-{series_id}-{resolution}"
+            return f"stream-fusion-{series_id}-{resolution}"
 
-        # Fallback
         return f"stream-fusion-{torrent_item.info_hash}"
 
     def _create_stream_name(
         self, torrent_item: TorrentItem, parsed_data: ParsedData
     ) -> str:
         resolution = parsed_data.resolution or "Unknown"
-        # Services de debrid principaux
+
         if torrent_item.availability == "RD":
             name = f"{INSTANTLY_AVAILABLE}instant\nReal-Debrid\n({resolution})"
         elif torrent_item.availability == "AD":
@@ -157,7 +186,6 @@ class StreamParser:
             name = f"{INSTANTLY_AVAILABLE}instant\nTorBox\n({resolution})"
         elif torrent_item.availability == "PM":
             name = f"{INSTANTLY_AVAILABLE}instant\nPremiumize\n({resolution})"
-        # Services de debrid additionnels
         elif torrent_item.availability == "OC":
             name = f"{INSTANTLY_AVAILABLE}instant\nOffcloud\n({resolution})"
         elif torrent_item.availability == "DL":
@@ -167,14 +195,21 @@ class StreamParser:
         elif torrent_item.availability == "PK":
             name = f"{INSTANTLY_AVAILABLE}instant\nPikPak\n({resolution})"
         else:
-            name = f"{DOWNLOAD_REQUIRED}download\n{self.config.get("debridDownloader", settings.download_service)}\n({resolution})"
+            name = (
+                f"{DOWNLOAD_REQUIRED}download\n"
+                f"{self.config.get('debridDownloader', settings.download_service)}\n"
+                f"({resolution})"
+            )
         return name
 
     def _create_stream_title(
         self, torrent_item: TorrentItem, parsed_data: ParsedData, media: Media
     ) -> str:
-        title = f"{torrent_item.file_name}\n" if torrent_item.file_name else f"{torrent_item.raw_title}\n"
-
+        title = (
+            f"{torrent_item.file_name}\n"
+            if torrent_item.file_name
+            else f"{torrent_item.raw_title}\n"
+        )
 
         title += self._add_language_info(torrent_item, parsed_data)
         title += self._add_torrent_info(torrent_item)
@@ -202,8 +237,16 @@ class StreamParser:
         return f"{info}\n"
 
     def _add_torrent_info(self, torrent_item: TorrentItem) -> str:
-        size_in_gb = round(int(torrent_item.size) / 1024 / 1024 / 1024, 2)
-        return f"🔍 {torrent_item.indexer} 💾 {size_in_gb}GB 👥 {torrent_item.seeders} \n"
+        try:
+            size_in_gb = round(int(torrent_item.size) / 1024 / 1024 / 1024, 2)
+            size_display = f"{size_in_gb}GB"
+        except (TypeError, ValueError):
+            size_display = "Unknown"
+
+        indexer = torrent_item.indexer or "Unknown"
+        seeders = torrent_item.seeders if torrent_item.seeders is not None else "?"
+
+        return f"🔍 {indexer} 💾 {size_display} 👥 {seeders} \n"
 
     def _add_media_info(self, parsed_data: ParsedData) -> str:
         info = []
@@ -211,12 +254,10 @@ class StreamParser:
             info.append(f"🎥 {parsed_data.codec}")
         if parsed_data.quality:
             info.append(f"📺 {parsed_data.quality}")
-        # Ajouter les informations HDR/Dolby Vision/SDR
         if parsed_data.hdr:
-            hdr_info = ' '.join(parsed_data.hdr)
+            hdr_info = " ".join(parsed_data.hdr)
             info.append(f"🌈 {hdr_info}")
         elif parsed_data.resolution == "2160p":
-            # Si c'est du 4K sans HDR, c'est du SDR
             info.append("🌈 SDR")
         if parsed_data.audio:
             info.append(f"🎧 {' '.join(parsed_data.audio)}")
@@ -230,9 +271,10 @@ class StreamParser:
         media: Media,
     ) -> Dict:
         """Crée un stream direct torrent"""
-        direct_torrent_name = f"{DIRECT_TORRENT}\n{parsed_data.quality}\n"
+        direct_torrent_name = f"{DIRECT_TORRENT}\n"
+
         if parsed_data.quality and parsed_data.quality[0] not in ["Unknown", ""]:
-            direct_torrent_name += f"({'|'.join(parsed_data.quality)})"
+            direct_torrent_name += f"{'|'.join(parsed_data.quality)}\n"
 
         return {
             "name": direct_torrent_name,

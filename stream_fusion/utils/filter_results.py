@@ -52,10 +52,11 @@ def get_indexer_priority_for_sort(indexer, config=None):
     is_torbox = config and (config.get("debridDownloader") == "TorBox" or "TorBox" in config.get("service", []))
     if is_torbox:
         indexer_priority = {
-            "C411": 1,            # C411/Torr9 prioritaires pour TorBox
-            "Torr9": 1,
+            "C411": 3,            # C411/Torr9 prioritaires pour TorBox
+            "Torr9": 2,
             "LaCale": 1,
-            "Yggtorrent": 2,
+            "GenerationFree": 3,
+            "Yggtorrent": 1,
             "DMM": 3,
             "Public": 4,
             "Sharewood": 5,
@@ -63,9 +64,10 @@ def get_indexer_priority_for_sort(indexer, config=None):
         }
     else:
         indexer_priority = {
-            "C411": 1,            # C411/Torr9 prioritaires pour TorBox
-            "Torr9": 1,
-            "LaCale": 1,
+            "C411": 3,            # C411/Torr9 prioritaires pour TorBox
+            "Torr9": 2,
+            "LaCale": 4,
+            "GenerationFree": 4,
             "Yggtorrent": 1,
             "DMM": 3,
             "Public": 4,
