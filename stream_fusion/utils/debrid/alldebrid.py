@@ -209,26 +209,29 @@ class AllDebrid(BaseDebrid):
         return link
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
-        if len(hashes_or_magnets) == 0:
-            logger.info("AllDebrid: No hashes to check")
+        if not hashes_or_magnets:
             return {"status": "success", "data": {"magnets": []}}
 
-        result_magnets = []
-        for hash_or_magnet in hashes_or_magnets:
+        # Use StremThru for real cache check if configured
+        if settings.stremthru_url:
             try:
-                result_magnets.append({
-                    "hash": hash_or_magnet,
-                    "instant": True,
-                    "files": []
-                })
+                from stream_fusion.utils.debrid.stremthru import StremThru
+                token = settings.ad_token if settings.ad_unique_account else self.config.get("ADToken")
+                if token:
+                    session = await self._get_session()
+                    st = StremThru(self.config, session=session)
+                    st.set_store_credentials("alldebrid", token)
+                    result = await st.get_availability_bulk(hashes_or_magnets, ip)
+                    logger.debug(f"AllDebrid: StremThru cache check found {len(result)} cached hashes")
+                    return result
+                else:
+                    logger.warning("AllDebrid: no token available for StremThru cache check, falling back to stub")
             except Exception as e:
-                logger.error(f"AllDebrid: Error processing hash {hash_or_magnet}: {str(e)}")
-                result_magnets.append({
-                    "hash": hash_or_magnet,
-                    "instant": True,
-                    "files": []
-                })
+                logger.warning(f"AllDebrid: StremThru cache check failed ({e}), falling back to stub")
 
+        # Fallback stub: mark everything as instantly available
+        logger.info("AllDebrid: StremThru not configured, using stub (all instant)")
+        result_magnets = [{"hash": h, "instant": True, "files": []} for h in hashes_or_magnets]
         return {"status": "success", "data": {"magnets": result_magnets}}
 
     async def add_magnet_or_torrent(self, magnet, torrent_download=None, torrent_file_content=None, ip=None):

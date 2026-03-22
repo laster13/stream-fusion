@@ -145,11 +145,29 @@ class RealDebrid(BaseDebrid):
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
         await self._torrent_rate_limit()
-        if len(hashes_or_magnets) == 0:
-            logger.info("Real-Debrid: No hashes to be sent.")
-            return dict()
-        url = f"{self.base_url}torrents/instantAvailability/{'/'.join(hashes_or_magnets)}"
-        return await self.json_response(url, headers=self.get_headers())
+        if not hashes_or_magnets:
+            return {}
+
+        # Use StremThru for real cache check if configured
+        # (native RD /torrents/instantAvailability is deprecated and returns 404)
+        if settings.stremthru_url:
+            try:
+                from stream_fusion.utils.debrid.stremthru import StremThru
+                token = settings.rd_token if settings.rd_unique_account else self.token_manager.get_access_token()
+                if token:
+                    session = await self._get_session()
+                    st = StremThru(self.config, session=session)
+                    st.set_store_credentials("realdebrid", token)
+                    result = await st.get_availability_bulk(hashes_or_magnets, ip)
+                    logger.debug(f"Real-Debrid: StremThru cache check found {len(result)} cached hashes")
+                    return result
+                else:
+                    logger.warning("Real-Debrid: no token available for StremThru cache check")
+            except Exception as e:
+                logger.warning(f"Real-Debrid: StremThru cache check failed ({e}), returning empty")
+
+        logger.info("Real-Debrid: StremThru not configured, skipping cache check")
+        return {}
 
     async def get_stream_link(self, query, config=None, ip=None):
         # Extract query parameters
