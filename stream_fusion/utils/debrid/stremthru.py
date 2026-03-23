@@ -55,6 +55,11 @@ class StremThru(BaseDebrid):
         if not self.store_name:
             logger.warning("StremThru: Aucun debrideur détecté automatiquement")
 
+    @property
+    def service_name(self) -> str:
+        # Include store name so caches don't collide across services using StremThru
+        return f"stremthru_{self.store_name or 'generic'}"
+
     def set_store_credentials(self, store_name, token):
         """Configure les informations d'identification du store pour StremThru."""
         self.store_name = store_name

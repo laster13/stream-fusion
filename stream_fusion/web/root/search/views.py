@@ -281,10 +281,11 @@ async def full_prefetch_from_cache(
                         filtered_results, next_media
                     )
 
+                    _avail_redis = await RedisCache(config).get_redis_client()
                     for debrid in debrid_services:
                         hashes = torrent_smart_container.get_unaviable_hashes()
                         ip = get_client_ip(request)
-                        result = await debrid.get_availability_bulk(hashes, ip)
+                        result = await debrid.get_availability_bulk_cached(hashes, ip, _avail_redis)
                         if result:
                             torrent_smart_container.update_availability(
                                 result, type(debrid), next_media
@@ -887,10 +888,11 @@ async def get_results(
         torrent_smart_container = TorrentSmartContainer(search_results, media)
 
         if config["debrid"]:
+            _avail_redis = await RedisCache(config).get_redis_client()
             for debrid in debrid_services:
                 hashes = torrent_smart_container.get_unaviable_hashes()
                 ip = get_client_ip(request)
-                result = await debrid.get_availability_bulk(hashes, ip)
+                result = await debrid.get_availability_bulk_cached(hashes, ip, _avail_redis)
 
                 if result:
                     torrent_smart_container.update_availability(

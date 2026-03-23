@@ -1,8 +1,10 @@
 from collections import deque
 import asyncio
+import re
 import time
 
 import aiohttp
+import jsonpickle as _jp
 from aiohttp_socks import ProxyConnector
 
 from stream_fusion.logging_config import logger
@@ -240,3 +242,141 @@ class BaseDebrid:
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
         raise NotImplementedError
+
+    # ---------------------------------------------------------------------------
+    # Generic Redis availability cache (issue #77)
+    # Results are shared across all users of the instance. Private data (tokenized
+    # links, user-specific URLs) is stripped by _sanitize_for_cache() before storage.
+    # ---------------------------------------------------------------------------
+
+    # TTLs — cached torrents stay available long-term; not-cached re-checked soon
+    _AVAIL_TTL_CACHED     = 3 * 24 * 3600  # 3 days
+    _AVAIL_TTL_NOT_CACHED = 10 * 60         # 10 minutes
+
+    @property
+    def service_name(self) -> str:
+        """Unique provider identifier used as a Redis cache key segment. Override per provider."""
+        return self.__class__.__name__.lower()
+
+    def _avail_cache_key(self, h: str) -> str:
+        return f"debrid_avail:{self.service_name}:{h}"
+
+    def _extract_hash(self, value: str):
+        """Extract a 40-char hex info-hash from a magnet URI or raw hash string."""
+        if not value:
+            return None
+        value = str(value).strip().lower()
+        if value.startswith("magnet:?"):
+            m = re.search(r"btih:([0-9a-f]{40})", value, re.IGNORECASE)
+            return m.group(1).lower() if m else None
+        if len(value) == 40 and all(c in "0123456789abcdef" for c in value):
+            return value
+        return None
+
+    def _sanitize_for_cache(self, item: dict) -> dict:
+        """
+        Strip private/user-specific fields before writing to the shared Redis cache.
+        Fields always removed: link, url, stream_link (may contain tokenized private URLs).
+        Override per provider for a stricter field whitelist.
+        """
+        return {k: v for k, v in item.items() if k not in ("link", "url", "stream_link")}
+
+    def _index_results_by_hash(self, response) -> dict:
+        """
+        Build a {hash: item} mapping from a get_availability_bulk() response.
+        Only available (cached) hashes should be included.
+        Must be overridden per provider — each has its own response format.
+        """
+        raise NotImplementedError
+
+    def _reconstruct_response(self, items: list):
+        """
+        Rebuild a get_availability_bulk()-compatible response from a list of sanitized items.
+        Must be overridden per provider to match the format expected by TorrentSmartContainer.
+        """
+        raise NotImplementedError
+
+    async def get_availability_bulk_cached(self, hashes_or_magnets, ip, redis_client):
+        """
+        Caching wrapper around get_availability_bulk() — shared across all users.
+
+        Flow:
+          1. Batch Redis MGET for all hashes.
+          2. For cache misses: call get_availability_bulk(), sanitize results, write to Redis.
+             Available hashes  → stored with TTL _AVAIL_TTL_CACHED.
+             Unavailable hashes → sentinel {"status": "not_cached"} with TTL _AVAIL_TTL_NOT_CACHED.
+          3. Reconstruct a provider-compatible response from cached + fresh results.
+
+        Security: _sanitize_for_cache() ensures no private token or link leaks into
+        the shared cache (e.g. StremThru tokenized links must be stripped).
+
+        Graceful degradation: if redis_client is None, falls back to a direct API call.
+        """
+        hashes = [h for h in (self._extract_hash(x) for x in hashes_or_magnets) if h]
+        if not hashes:
+            return self._reconstruct_response([])
+
+        hits = []
+        to_check = []
+
+        # Step 1: batch Redis lookup
+        if redis_client:
+            try:
+                raw_values = await redis_client.mget(
+                    [self._avail_cache_key(h) for h in hashes]
+                )
+                for h, raw in zip(hashes, raw_values):
+                    if raw is not None:
+                        val = _jp.decode(raw)
+                        if val.get("status") != "not_cached":
+                            hits.append(val)
+                        # not_cached sentinel → hash stays out of hits (treated as unavailable)
+                    else:
+                        to_check.append(h)
+                hit_count = len(hashes) - len(to_check)
+                if hit_count:
+                    logger.info(
+                        f"{self.__class__.__name__}: Redis cache hit "
+                        f"{hit_count}/{len(hashes)} hashes"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"{self.__class__.__name__}: Redis lookup failed ({e}), skipping cache"
+                )
+                to_check = list(hashes)
+        else:
+            to_check = list(hashes)
+
+        # Step 2: live API call for uncached hashes
+        if to_check:
+            api_response = await self.get_availability_bulk(to_check, ip)
+            by_hash = self._index_results_by_hash(api_response)
+
+            if redis_client:
+                try:
+                    pipe = redis_client.pipeline()
+                    for h in to_check:
+                        if h in by_hash:
+                            safe = self._sanitize_for_cache(by_hash[h])
+                            pipe.set(
+                                self._avail_cache_key(h),
+                                _jp.encode(safe),
+                                ex=self._AVAIL_TTL_CACHED,
+                            )
+                            hits.append(safe)
+                        else:
+                            pipe.set(
+                                self._avail_cache_key(h),
+                                _jp.encode({"status": "not_cached"}),
+                                ex=self._AVAIL_TTL_NOT_CACHED,
+                            )
+                    await pipe.execute()
+                except Exception as e:
+                    logger.warning(
+                        f"{self.__class__.__name__}: Redis write failed ({e})"
+                    )
+                    hits.extend(by_hash.values())
+            else:
+                hits.extend(by_hash.values())
+
+        return self._reconstruct_response(hits)

@@ -38,24 +38,9 @@ class AllDebrid(BaseDebrid):
         super().__init__(config, session)
         self.base_url = f"{settings.ad_base_url}/{settings.ad_api_version}/"
         self.agent = settings.ad_user_app
-        # Aligné avec l'approche précédente: plus permissif sur le bulk check
-        self.rate_limit_limit = 600
-        self.rate_limit_interval = 60
-
-        # Cache local léger de disponibilité
-        self.instant_cache_ttl = getattr(settings, "ad_instant_cache_ttl", 6 * 3600)
-        self.not_instant_cache_ttl = getattr(
-            settings, "ad_not_instant_cache_ttl", 30 * 60
-        )
-
-        # Accélération optionnelle via StremThru
-        self.enable_stremthru_prefetch = bool(
-            self.config.get("debrid", False)
-            and (
-                self.config.get("stremthru")
-                or self.config.get("ADToken")
-            )
-        )
+        # Rate limit: 600 req/60s = 10 req/s, safely under the official 12 req/s AD limit
+        self.global_limit = 600
+        self.global_period = 60
 
     def get_headers(self):
         if settings.ad_unique_account:
@@ -148,87 +133,32 @@ class AllDebrid(BaseDebrid):
             "source": source,
         }
 
-    async def _cache_get_json(self, key):
-        cache = getattr(self, "redis_cache", None) or getattr(settings, "redis_cache", None)
-        if cache is None:
-            return None
-        try:
-            return await cache.get(key)
-        except Exception as e:
-            logger.debug(f"AllDebrid: Cache get failed for {key}: {str(e)}")
-            return None
+    # --- Provider overrides for the generic BaseDebrid cache (issue #77) ---
 
-    async def _cache_set_json(self, key, value, expiration):
-        cache = getattr(self, "redis_cache", None) or getattr(settings, "redis_cache", None)
-        if cache is None:
-            return
-        try:
-            await cache.set(key, value, expiration=expiration)
-        except Exception as e:
-            logger.debug(f"AllDebrid: Cache set failed for {key}: {str(e)}")
+    @property
+    def service_name(self) -> str:
+        return "alldebrid"
 
-    def _instant_cache_key(self, hash_value):
-        return f"alldebrid:instant:{hash_value}"
+    def _index_results_by_hash(self, response) -> dict:
+        if not isinstance(response, dict):
+            return {}
+        # Only include hashes confirmed as instantly available
+        return {
+            m["hash"]: m
+            for m in response.get("data", {}).get("magnets", [])
+            if m.get("hash") and m.get("instant")
+        }
 
-    def _not_instant_cache_key(self, hash_value):
-        return f"alldebrid:not_instant:{hash_value}"
+    def _reconstruct_response(self, items: list):
+        return {"status": "success", "data": {"magnets": items}}
 
-    async def _lookup_local_cache(self, hashes):
-        cached_results = {}
-        remaining = []
-
-        for hash_value in hashes:
-            instant_key = self._instant_cache_key(hash_value)
-            not_instant_key = self._not_instant_cache_key(hash_value)
-
-            cached_instant = await self._cache_get_json(instant_key)
-            if cached_instant:
-                cached_results[hash_value] = self._build_result_item(
-                    hash_value,
-                    instant=True,
-                    files=cached_instant.get("files", []),
-                    source="local_cache",
-                )
-                continue
-
-            cached_not_instant = await self._cache_get_json(not_instant_key)
-            if cached_not_instant:
-                cached_results[hash_value] = self._build_result_item(
-                    hash_value,
-                    instant=False,
-                    files=[],
-                    source="local_cache",
-                )
-                continue
-
-            remaining.append(hash_value)
-
-        if cached_results:
-            logger.info(
-                f"AllDebrid: Local cache found {sum(1 for x in cached_results.values() if x.get('instant'))} instant, "
-                f"{sum(1 for x in cached_results.values() if not x.get('instant'))} non-instant"
-            )
-
-        return cached_results, remaining
-
-    async def _write_local_cache(self, result_items):
-        for item in result_items:
-            hash_value = item.get("hash")
-            if not hash_value:
-                continue
-
-            if item.get("instant") is True:
-                await self._cache_set_json(
-                    self._instant_cache_key(hash_value),
-                    {"files": item.get("files", [])},
-                    expiration=self.instant_cache_ttl,
-                )
-            else:
-                await self._cache_set_json(
-                    self._not_instant_cache_key(hash_value),
-                    {"instant": False},
-                    expiration=self.not_instant_cache_ttl,
-                )
+    def _sanitize_for_cache(self, item: dict) -> dict:
+        # AD availability items contain no private links — whitelist safe fields only
+        return {
+            "hash": item.get("hash"),
+            "instant": item.get("instant", False),
+            "files": item.get("files", []),
+        }
 
     async def _lookup_stremthru(self, hashes, ip=None):
         if not hashes:
@@ -563,11 +493,9 @@ class AllDebrid(BaseDebrid):
                 raw_hash_value = magnet_data.get("hash") or magnet_data.get("magnet")
                 hash_value = self._normalize_hash_value(raw_hash_value)
 
+                # Only `ready` is available in the /magnet/upload response.
+                # `statusCode` only exists in /magnet/status — never use it here.
                 ready = magnet_data.get("ready", False)
-                status_code = magnet_data.get("statusCode")
-
-                if not ready and status_code == 4:
-                    ready = True
 
                 if hash_value:
                     seen_hashes.add(hash_value)
@@ -610,46 +538,42 @@ class AllDebrid(BaseDebrid):
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
         """
-        Philosophie gardée:
-        - AllDebrid est la source de vérité finale
-        - cache local = accélération
-        - StremThru = accélération positive uniquement
-        - fallback final = upload direct AllDebrid
+        AllDebrid availability check — called by get_availability_bulk_cached() in BaseDebrid.
+
+        Strategy:
+          1. StremThru community cache (positive results only, never cached locally —
+             StremThru manages its own cache and must always be queried fresh).
+          2. Direct AllDebrid bulk upload/check/delete for remaining hashes.
+
+        Caching is handled by the BaseDebrid wrapper — do not add Redis logic here.
         """
-        if len(hashes_or_magnets) == 0:
-            logger.info("AllDebrid: No hashes to check")
+        if not hashes_or_magnets:
             return {"status": "success", "data": {"magnets": []}}
 
-        cleaned_hashes = []
-        for value in hashes_or_magnets:
-            normalized = self._normalize_hash_value(value)
-            if normalized:
-                cleaned_hashes.append(normalized)
-
-        # unique en gardant l'ordre
-        cleaned_hashes = list(dict.fromkeys(cleaned_hashes))
+        # Normalize and deduplicate inputs while preserving order
+        cleaned_hashes = list(
+            dict.fromkeys(
+                h for h in (self._normalize_hash_value(v) for v in hashes_or_magnets) if h
+            )
+        )
 
         if not cleaned_hashes:
-            logger.info("AllDebrid: No valid hashes to check")
             return {"status": "success", "data": {"magnets": []}}
 
         result_by_hash = {}
 
-        # 1) Cache local
-        local_cached, remaining_hashes = await self._lookup_local_cache(cleaned_hashes)
-        result_by_hash.update(local_cached)
-
-        # 2) StremThru positif seulement
-        if remaining_hashes and self.enable_stremthru_prefetch:
+        # Step 1: StremThru community cache (positive results only)
+        if settings.stremthru_url:
             stremthru_cached, remaining_hashes = await self._lookup_stremthru(
-                remaining_hashes, ip
+                cleaned_hashes, ip
             )
             result_by_hash.update(stremthru_cached)
+            # StremThru results are NOT stored in Redis — StremThru manages its own
+            # community cache and must always be queried fresh for up-to-date data.
+        else:
+            remaining_hashes = cleaned_hashes
 
-            # écrire le positif StremThru dans le cache local
-            await self._write_local_cache(list(stremthru_cached.values()))
-
-        # 3) Check direct AllDebrid pour le reste
+        # Step 2: direct AllDebrid bulk upload/check/delete for remaining hashes
         batch_size = 20
         direct_results = []
 
@@ -658,43 +582,41 @@ class AllDebrid(BaseDebrid):
             batch_results = await self._check_availability_batch_direct(batch, ip)
             direct_results.extend(batch_results)
 
-            # mini pause défensive entre batches
+            # Small defensive pause between batches to stay within rate limits
             if i + batch_size < len(remaining_hashes):
                 await asyncio.sleep(0.15)
 
         for item in direct_results:
-            hash_value = item.get("hash")
-            if hash_value:
-                result_by_hash[hash_value] = item
+            h = item.get("hash")
+            if h:
+                result_by_hash[h] = item
 
-        # 4) Compléter les manquants
-        for hash_value in cleaned_hashes:
-            if hash_value not in result_by_hash:
-                result_by_hash[hash_value] = self._build_result_item(
-                    hash_value, instant=False, files=[], source="fallback"
+        # Fill in hashes absent from the API response as not-cached
+        for h in cleaned_hashes:
+            if h not in result_by_hash:
+                result_by_hash[h] = self._build_result_item(
+                    h, instant=False, files=[], source="fallback"
                 )
 
         ordered_results = [result_by_hash[h] for h in cleaned_hashes]
-
-        # 5) Écriture du cache local
-        await self._write_local_cache(ordered_results)
-
-        ready_count = sum(1 for item in ordered_results if item.get("instant") is True)
+        ready_count = sum(1 for item in ordered_results if item.get("instant"))
         logger.info(
             f"AllDebrid: Cache check complete — {ready_count}/{len(ordered_results)} cached"
         )
 
-        # Format compatible avec le reste du pipeline
-        final_magnets = [
-            {
-                "hash": item["hash"],
-                "instant": item["instant"],
-                "files": item.get("files", []),
-            }
-            for item in ordered_results
-        ]
-
-        return {"status": "success", "data": {"magnets": final_magnets}}
+        # Normalize to the format expected by _update_availability_alldebrid
+        # in TorrentSmartContainer — only instantly available hashes are included
+        # so that non-cached hashes are not incorrectly marked as "AD" available.
+        return {
+            "status": "success",
+            "data": {
+                "magnets": [
+                    {"hash": item["hash"], "instant": item["instant"], "files": item.get("files", [])}
+                    for item in ordered_results
+                    if item.get("instant")
+                ]
+            },
+        }
 
     async def add_magnet_or_torrent(
         self, magnet, torrent_download=None, torrent_file_content=None, ip=None
