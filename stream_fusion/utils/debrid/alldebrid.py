@@ -311,9 +311,12 @@ class AllDebrid(BaseDebrid):
                 for h in batch:
                     results[h] = {"hash": h, "instant": False, "files": []}
 
-        cached_count = sum(1 for v in results.values() if v.get("instant"))
-        logger.info(f"AllDebrid: Cache check complete — {cached_count}/{len(hashes)} cached")
-        return {"status": "success", "data": {"magnets": list(results.values())}}
+        # Only return cached items — _update_availability_alldebrid marks every item in the
+        # response as "AD" available without checking the `instant` field, so non-cached
+        # hashes must be excluded (they stay with availability=False in TorrentSmartContainer)
+        cached_magnets = [v for v in results.values() if v.get("instant")]
+        logger.info(f"AllDebrid: Cache check complete — {len(cached_magnets)}/{len(hashes)} cached")
+        return {"status": "success", "data": {"magnets": cached_magnets}}
 
     async def add_magnet_or_torrent(self, magnet, torrent_download=None, torrent_file_content=None, ip=None):
         logger.debug(f"AllDebrid: Adding magnet or torrent")
