@@ -258,19 +258,18 @@ class AllDebrid(BaseDebrid):
                 unchecked_hashes = list(hashes)
 
         # --- Step 2: Bulk upload/delete for unchecked hashes ---
-        # Stripped magnet (no trackers) → AllDebrid checks its cache without starting a download
+        # Raw hashes accepted natively by the API — shorter and unambiguous vs magnet URIs
         # Batch of 20 stays safely under the 30-slot limit
-        # asyncio.gather for deletes — the rate limiter in json_response throttles automatically
         batch_size = 20
         for i in range(0, len(unchecked_hashes), batch_size):
             batch = unchecked_hashes[i:i + batch_size]
-            stripped = [f"magnet:?xt=urn:btih:{h}" for h in batch]
+            ids_to_delete = []
             try:
                 upload_resp = await self.json_response(
                     f"{self.base_url}magnet/upload?agent={self.agent}",
                     method='post',
                     headers=self.get_headers(),
-                    data={"magnets[]": stripped},
+                    data={"magnets[]": batch},
                 )
                 if not upload_resp or upload_resp.get("status") != "success":
                     error_code = (upload_resp or {}).get("error", {}).get("code", "UNKNOWN")
@@ -282,18 +281,32 @@ class AllDebrid(BaseDebrid):
                         results[h] = {"hash": h, "instant": False, "files": []}
                     continue
 
-                ids_to_delete = []
+                seen_hashes = set()
                 for m in upload_resp.get("data", {}).get("magnets", []):
-                    if "error" in m:
-                        mh = (m.get("hash") or "").lower()
-                        results[mh] = {"hash": mh, "instant": False, "files": []}
-                        continue
                     mh = (m.get("hash") or "").lower()
-                    results[mh] = {"hash": mh, "instant": bool(m.get("ready", False)), "files": []}
+                    if not mh:
+                        continue
                     if m.get("id"):
                         ids_to_delete.append(m["id"])
+                    if "error" in m:
+                        results[mh] = {"hash": mh, "instant": False, "files": []}
+                    else:
+                        # statusCode 4 = "Ready" — safety net when ready field is missing/False
+                        is_ready = bool(m.get("ready", False)) or m.get("statusCode") == 4
+                        results[mh] = {"hash": mh, "instant": is_ready, "files": []}
+                    seen_hashes.add(mh)
 
-                # Delete all uploaded magnets in parallel (rate limiter throttles automatically)
+                # Mark any hash missing from the response as not cached
+                for h in batch:
+                    if h not in seen_hashes:
+                        results[h] = {"hash": h, "instant": False, "files": []}
+
+            except Exception as e:
+                logger.error(f"AllDebrid: Bulk check batch failed: {e}")
+                for h in batch:
+                    results[h] = {"hash": h, "instant": False, "files": []}
+            finally:
+                # Always delete uploaded magnets — even if an exception occurred after upload
                 if ids_to_delete:
                     await asyncio.gather(*[
                         self.json_response(
@@ -305,11 +318,6 @@ class AllDebrid(BaseDebrid):
                         for mid in ids_to_delete
                     ], return_exceptions=True)
                     logger.debug(f"AllDebrid: Deleted {len(ids_to_delete)} temporary magnets")
-
-            except Exception as e:
-                logger.error(f"AllDebrid: Bulk check batch failed: {e}")
-                for h in batch:
-                    results[h] = {"hash": h, "instant": False, "files": []}
 
         # Only return cached items — _update_availability_alldebrid marks every item in the
         # response as "AD" available without checking the `instant` field, so non-cached
