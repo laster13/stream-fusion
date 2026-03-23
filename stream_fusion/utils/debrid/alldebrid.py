@@ -326,15 +326,19 @@ class AllDebrid(BaseDebrid):
 
                 seen_hashes = set()
                 for m in upload_resp.get("data", {}).get("magnets", []):
-                    mh = (m.get("hash") or "").lower()
-                    if not mh:
+                    # Error responses have no "hash" field — only "magnet" (the original input).
+                    # Since we send raw hashes as input, "magnet" IS the hash in that case.
+                    mh = (m.get("hash") or m.get("magnet") or "").lower()
+                    if not mh or len(mh) != 40:
                         continue
                     if m.get("id"):
                         ids_to_delete.append(m["id"])
                     if "error" in m:
-                        # Per-magnet error (e.g. invalid hash) — confirmed False, safe to cache
+                        # MAGNET_INVALID_URI on a valid hash likely means AD doesn't know it
+                        # (no trackers → can't verify unknown hashes). Do NOT cache this result
+                        # as it's an API limitation, not a confirmed "not in cache" state.
                         results[mh] = {"hash": mh, "instant": False, "files": []}
-                        api_confirmed[mh] = False
+                        # intentionally NOT added to api_confirmed → not stored in Redis
                     else:
                         # The upload response only contains `ready: bool` — no statusCode field
                         is_ready = bool(m.get("ready", False))
