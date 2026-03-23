@@ -144,12 +144,47 @@ class RealDebrid(BaseDebrid):
         return None
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
-        await self._torrent_rate_limit()
-        if len(hashes_or_magnets) == 0:
-            logger.info("Real-Debrid: No hashes to be sent.")
-            return dict()
-        url = f"{self.base_url}torrents/instantAvailability/{'/'.join(hashes_or_magnets)}"
-        return await self.json_response(url, headers=self.get_headers())
+        if not hashes_or_magnets:
+            return {"status": "success", "data": {"magnets": []}}
+
+        # Normalise inputs: accept both plain hashes and magnet URIs
+        def _extract_hash(value):
+            import re as _re
+            if _re.match(r'^[a-fA-F0-9]{40}$', value):
+                return value.lower()
+            m = _re.search(r'urn:btih:([a-fA-F0-9]{40})', value, _re.IGNORECASE)
+            return m.group(1).lower() if m else None
+
+        hashes = [h for h in (_extract_hash(v) for v in hashes_or_magnets) if h]
+
+        # --- StremThru (community cache) if configured ---
+        # Native RD /torrents/instantAvailability no longer returns usable data
+        if settings.stremthru_url:
+            try:
+                from stream_fusion.utils.debrid.stremthru import StremThru
+                token = settings.rd_token if settings.rd_unique_account else self.token_manager.get_access_token()
+                if token:
+                    session = await self._get_session()
+                    st = StremThru(self.config, session=session)
+                    st.set_store_credentials("realdebrid", token)
+                    result = await st.get_availability_bulk(hashes_or_magnets, ip)
+                    logger.info(f"Real-Debrid: StremThru found {len(result)} cached hashes")
+                    return result  # list format — handled by __using_stremthru in TorrentSmartContainer
+                else:
+                    logger.warning("Real-Debrid: no token available for StremThru cache check, falling back to stub")
+            except Exception as e:
+                logger.warning(f"Real-Debrid: StremThru cache check failed ({e}), falling back to stub")
+
+        # --- Stub fallback: mark everything as available ---
+        # Return StremThru list format so TorrentSmartContainer routes through
+        # _update_availability_stremthru (which handles this shape correctly).
+        # _update_availability_realdebrid expects the old {hash: {"rd": [...]}} format
+        # and would silently skip our dict — using the list format avoids that mismatch.
+        logger.warning("Real-Debrid: StremThru not configured or failed — marking all hashes as available (stub)")
+        return [
+            {"hash": h, "status": "cached", "files": [], "store_name": "realdebrid", "debrid": "RD"}
+            for h in (hashes or hashes_or_magnets)
+        ]
 
     async def get_stream_link(self, query, config=None, ip=None):
         # Extract query parameters
