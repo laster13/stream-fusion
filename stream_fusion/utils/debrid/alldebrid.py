@@ -336,8 +336,8 @@ class AllDebrid(BaseDebrid):
                         results[mh] = {"hash": mh, "instant": False, "files": []}
                         api_confirmed[mh] = False
                     else:
-                        # statusCode 4 = "Ready" — safety net when ready field is missing/False
-                        is_ready = bool(m.get("ready", False)) or m.get("statusCode") == 4
+                        # The upload response only contains `ready: bool` — no statusCode field
+                        is_ready = bool(m.get("ready", False))
                         results[mh] = {"hash": mh, "instant": is_ready, "files": []}
                         api_confirmed[mh] = is_ready
                     seen_hashes.add(mh)
