@@ -112,13 +112,8 @@ async def get_manifest(config: str, apikey_dao: APIKeyDAO = Depends()):
     if api_key:
         await check_api_key(api_key, apikey_dao)
     else:
-        # Check if anonymous access is allowed
-        if not settings.allow_anonymous_access: # If NOT allowed
-            logger.warning("Anonymous access denied and API key not found in config.")
-            raise HTTPException(status_code=401, detail="API key required or anonymous access disabled.")
-        else: # If anonymous access IS allowed, just log and continue
-            logger.info("Proceeding without API key (anonymous access allowed).")
-            # No exception is raised, execution continues
+        logger.warning("Manifest: API key not found in config.")
+        raise HTTPException(status_code=401, detail="API key not found in config.")
 
     yggflix_ctg = config.get("yggflixCtg", True)
     yggtorrent_ctg = config.get("yggtorrentCtg", True)
