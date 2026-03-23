@@ -334,11 +334,10 @@ class AllDebrid(BaseDebrid):
                     if m.get("id"):
                         ids_to_delete.append(m["id"])
                     if "error" in m:
-                        # MAGNET_INVALID_URI on a valid hash likely means AD doesn't know it
-                        # (no trackers → can't verify unknown hashes). Do NOT cache this result
-                        # as it's an API limitation, not a confirmed "not in cache" state.
+                        # MAGNET_INVALID_URI on a valid 40-char hash = AD doesn't have it in
+                        # cache. Treat as a confirmed "not cached" response and store in Redis.
                         results[mh] = {"hash": mh, "instant": False, "files": []}
-                        # intentionally NOT added to api_confirmed → not stored in Redis
+                        api_confirmed[mh] = False
                     else:
                         # The upload response only contains `ready: bool` — no statusCode field
                         is_ready = bool(m.get("ready", False))
