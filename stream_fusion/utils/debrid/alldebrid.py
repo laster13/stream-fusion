@@ -289,15 +289,8 @@ class AllDebrid(BaseDebrid):
                         f"AllDebrid: StremThru found {len(st_found)} cached, "
                         f"{len(unchecked_hashes)} remaining for bulk check"
                     )
-                    # Store StremThru confirmed results in Redis (always True)
-                    if redis_client and st_found:
-                        try:
-                            pipe = redis_client.pipeline()
-                            for h in st_found:
-                                pipe.set(self._ad_cache_key(h), _jp.encode(True), ex=self._CACHE_TTL_CACHED)
-                            await pipe.execute()
-                        except Exception as e:
-                            logger.debug(f"AllDebrid: Redis store (StremThru) failed: {e}")
+                    # StremThru results are NOT stored in Redis — StremThru manages its own
+                    # community cache and keeps it up to date; we always call it fresh.
                 else:
                     logger.warning("AllDebrid: no token for StremThru, falling back to bulk check for all hashes")
             except Exception as e:
