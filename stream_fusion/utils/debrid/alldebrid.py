@@ -212,6 +212,14 @@ class AllDebrid(BaseDebrid):
 
         return link
 
+    # Redis TTLs for shared availability cache
+    _CACHE_TTL_CACHED     = 7 * 24 * 3600   # 7 days  — cached torrents stay available a long time
+    _CACHE_TTL_NOT_CACHED = 1 * 3600         # 1 hour  — may become available soon
+
+    @staticmethod
+    def _ad_cache_key(hash_value: str) -> str:
+        return f"debrid:availability:ad:{hash_value}"
+
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
         if not hashes_or_magnets:
             return {"status": "success", "data": {"magnets": []}}
@@ -230,10 +238,38 @@ class AllDebrid(BaseDebrid):
             return {"status": "success", "data": {"magnets": []}}
 
         results = {}   # hash → {"hash": h, "instant": bool, "files": []}
-        unchecked_hashes = list(hashes)
+
+        # --- Step 0: Shared Redis cache lookup (one mget for all hashes) ---
+        # Safety: only True/False values explicitly set by this method are trusted.
+        # A missing key simply means "unknown" — never treated as False.
+        to_check = list(hashes)
+        try:
+            from stream_fusion.utils.cache.local_redis import RedisCache
+            import jsonpickle as _jp
+            redis = RedisCache(self.config)
+            redis_client = await redis.get_redis_client()
+            if redis_client:
+                keys = [self._ad_cache_key(h) for h in hashes]
+                raw_values = await redis_client.mget(keys)
+                for h, raw in zip(hashes, raw_values):
+                    if raw is not None:
+                        try:
+                            cached_val = _jp.decode(raw)
+                            results[h] = {"hash": h, "instant": bool(cached_val), "files": []}
+                        except Exception:
+                            pass  # corrupted entry — treat as unknown
+                to_check = [h for h in hashes if h not in results]
+                redis_hits = len(hashes) - len(to_check)
+                if redis_hits:
+                    logger.info(f"AllDebrid: Redis cache hit for {redis_hits}/{len(hashes)} hashes")
+        except Exception as e:
+            logger.warning(f"AllDebrid: Redis cache lookup failed ({e}), continuing without cache")
+            redis_client = None
+
+        unchecked_hashes = list(to_check)
 
         # --- Step 1: StremThru (community cache) if configured ---
-        if settings.stremthru_url:
+        if unchecked_hashes and settings.stremthru_url:
             try:
                 from stream_fusion.utils.debrid.stremthru import StremThru
                 token = settings.ad_token if settings.ad_unique_account else self.config.get("ADToken")
@@ -241,36 +277,41 @@ class AllDebrid(BaseDebrid):
                     session = await self._get_session()
                     st = StremThru(self.config, session=session)
                     st.set_store_credentials("alldebrid", token)
-                    st_results = await st.get_availability_bulk(hashes, ip)
+                    st_results = await st.get_availability_bulk(unchecked_hashes, ip)
+                    st_found = []
                     for item in st_results:
                         h = item.get("hash", "").lower()
                         if h:
                             results[h] = {"hash": h, "instant": True, "files": item.get("files", [])}
-                    unchecked_hashes = [h for h in hashes if h not in results]
+                            st_found.append(h)
+                    unchecked_hashes = [h for h in unchecked_hashes if h not in results]
                     logger.info(
-                        f"AllDebrid: StremThru found {len(results)} cached, "
+                        f"AllDebrid: StremThru found {len(st_found)} cached, "
                         f"{len(unchecked_hashes)} remaining for bulk check"
                     )
+                    # StremThru results are NOT stored in Redis — StremThru manages its own
+                    # community cache and keeps it up to date; we always call it fresh.
                 else:
                     logger.warning("AllDebrid: no token for StremThru, falling back to bulk check for all hashes")
             except Exception as e:
                 logger.warning(f"AllDebrid: StremThru failed ({e}), bulk-checking all hashes")
-                unchecked_hashes = list(hashes)
 
         # --- Step 2: Bulk upload/delete for unchecked hashes ---
-        # Stripped magnet (no trackers) → AllDebrid checks its cache without starting a download
+        # Raw hashes accepted natively by the AD API — shorter and unambiguous vs magnet URIs
         # Batch of 20 stays safely under the 30-slot limit
-        # asyncio.gather for deletes — the rate limiter in json_response throttles automatically
+        # SAFETY RULE: only cache False when the API returned status:success AND the hash
+        # was present in the response — never cache False from errors or exceptions.
         batch_size = 20
         for i in range(0, len(unchecked_hashes), batch_size):
             batch = unchecked_hashes[i:i + batch_size]
-            stripped = [f"magnet:?xt=urn:btih:{h}" for h in batch]
+            ids_to_delete = []
+            api_confirmed = {}   # hash → bool, only filled from valid API responses
             try:
                 upload_resp = await self.json_response(
                     f"{self.base_url}magnet/upload?agent={self.agent}",
                     method='post',
                     headers=self.get_headers(),
-                    data={"magnets[]": stripped},
+                    data={"magnets[]": batch},
                 )
                 if not upload_resp or upload_resp.get("status") != "success":
                     error_code = (upload_resp or {}).get("error", {}).get("code", "UNKNOWN")
@@ -278,22 +319,60 @@ class AllDebrid(BaseDebrid):
                         logger.warning("AllDebrid: Too many active magnets (30 slot limit), skipping batch")
                     else:
                         logger.error(f"AllDebrid: Bulk upload error ({error_code}): {upload_resp}")
+                    # API failed — do NOT cache anything, mark locally as False only
                     for h in batch:
                         results[h] = {"hash": h, "instant": False, "files": []}
                     continue
 
-                ids_to_delete = []
+                seen_hashes = set()
                 for m in upload_resp.get("data", {}).get("magnets", []):
-                    if "error" in m:
-                        mh = (m.get("hash") or "").lower()
-                        results[mh] = {"hash": mh, "instant": False, "files": []}
+                    # Error responses have no "hash" field — only "magnet" (the original input).
+                    # Since we send raw hashes as input, "magnet" IS the hash in that case.
+                    mh = (m.get("hash") or m.get("magnet") or "").lower()
+                    if not mh or len(mh) != 40:
                         continue
-                    mh = (m.get("hash") or "").lower()
-                    results[mh] = {"hash": mh, "instant": bool(m.get("ready", False)), "files": []}
                     if m.get("id"):
                         ids_to_delete.append(m["id"])
+                    if "error" in m:
+                        # MAGNET_INVALID_URI on a valid 40-char hash = AD doesn't have it in
+                        # cache. Treat as a confirmed "not cached" response and store in Redis.
+                        results[mh] = {"hash": mh, "instant": False, "files": []}
+                        api_confirmed[mh] = False
+                    else:
+                        # The upload response only contains `ready: bool` — no statusCode field
+                        is_ready = bool(m.get("ready", False))
+                        results[mh] = {"hash": mh, "instant": is_ready, "files": []}
+                        api_confirmed[mh] = is_ready
+                    seen_hashes.add(mh)
 
-                # Delete all uploaded magnets in parallel (rate limiter throttles automatically)
+                # Hashes absent from the response — unknown, do NOT cache
+                for h in batch:
+                    if h not in seen_hashes:
+                        results[h] = {"hash": h, "instant": False, "files": []}
+
+                # Store API-confirmed results in Redis
+                if redis_client and api_confirmed:
+                    try:
+                        pipe = redis_client.pipeline()
+                        for h, is_cached in api_confirmed.items():
+                            ttl = self._CACHE_TTL_CACHED if is_cached else self._CACHE_TTL_NOT_CACHED
+                            pipe.set(self._ad_cache_key(h), _jp.encode(is_cached), ex=ttl)
+                        await pipe.execute()
+                        logger.debug(
+                            f"AllDebrid: Stored {len(api_confirmed)} results in Redis "
+                            f"({sum(api_confirmed.values())} cached, "
+                            f"{len(api_confirmed) - sum(api_confirmed.values())} not cached)"
+                        )
+                    except Exception as e:
+                        logger.debug(f"AllDebrid: Redis store (bulk) failed: {e}")
+
+            except Exception as e:
+                logger.error(f"AllDebrid: Bulk check batch failed: {e}")
+                # Exception — do NOT cache anything
+                for h in batch:
+                    results[h] = {"hash": h, "instant": False, "files": []}
+            finally:
+                # Always delete uploaded magnets — even if an exception occurred after upload
                 if ids_to_delete:
                     await asyncio.gather(*[
                         self.json_response(
@@ -305,11 +384,6 @@ class AllDebrid(BaseDebrid):
                         for mid in ids_to_delete
                     ], return_exceptions=True)
                     logger.debug(f"AllDebrid: Deleted {len(ids_to_delete)} temporary magnets")
-
-            except Exception as e:
-                logger.error(f"AllDebrid: Bulk check batch failed: {e}")
-                for h in batch:
-                    results[h] = {"hash": h, "instant": False, "files": []}
 
         # Only return cached items — _update_availability_alldebrid marks every item in the
         # response as "AD" available without checking the `instant` field, so non-cached
