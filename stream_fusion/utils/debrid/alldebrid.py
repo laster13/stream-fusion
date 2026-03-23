@@ -1,4 +1,5 @@
 # alldebrid.py - AllDebrid v4.1 API (using magnet/status for files)
+import asyncio
 import uuid
 import aiohttp
 from urllib.parse import unquote
@@ -36,6 +37,9 @@ class AllDebrid(BaseDebrid):
         super().__init__(config, session)
         self.base_url = f"{settings.ad_base_url}/{settings.ad_api_version}/"
         self.agent = settings.ad_user_app
+        # AllDebrid allows 12 req/s — increase global limit from default 250/60 to 600/60 (10 req/s)
+        self.global_limit = 600
+        self.global_period = 60
 
     def get_headers(self):
         if settings.ad_unique_account:
@@ -212,7 +216,23 @@ class AllDebrid(BaseDebrid):
         if not hashes_or_magnets:
             return {"status": "success", "data": {"magnets": []}}
 
-        # Use StremThru for real cache check if configured
+        # Normalise inputs: accept both plain hashes and magnet URIs
+        import re as _re
+        def _extract_hash(value):
+            if _re.match(r'^[a-fA-F0-9]{40}$', value):
+                return value.lower()
+            m = _re.search(r'urn:btih:([a-fA-F0-9]{40})', value, _re.IGNORECASE)
+            return m.group(1).lower() if m else None
+
+        hashes = [h for h in (_extract_hash(v) for v in hashes_or_magnets) if h]
+        if not hashes:
+            logger.warning("AllDebrid: No valid hashes found in input")
+            return {"status": "success", "data": {"magnets": []}}
+
+        results = {}   # hash → {"hash": h, "instant": bool, "files": []}
+        unchecked_hashes = list(hashes)
+
+        # --- Step 1: StremThru (community cache) if configured ---
         if settings.stremthru_url:
             try:
                 from stream_fusion.utils.debrid.stremthru import StremThru
@@ -221,18 +241,79 @@ class AllDebrid(BaseDebrid):
                     session = await self._get_session()
                     st = StremThru(self.config, session=session)
                     st.set_store_credentials("alldebrid", token)
-                    result = await st.get_availability_bulk(hashes_or_magnets, ip)
-                    logger.debug(f"AllDebrid: StremThru cache check found {len(result)} cached hashes")
-                    return result
+                    st_results = await st.get_availability_bulk(hashes, ip)
+                    for item in st_results:
+                        h = item.get("hash", "").lower()
+                        if h:
+                            results[h] = {"hash": h, "instant": True, "files": item.get("files", [])}
+                    unchecked_hashes = [h for h in hashes if h not in results]
+                    logger.info(
+                        f"AllDebrid: StremThru found {len(results)} cached, "
+                        f"{len(unchecked_hashes)} remaining for bulk check"
+                    )
                 else:
-                    logger.warning("AllDebrid: no token available for StremThru cache check, falling back to stub")
+                    logger.warning("AllDebrid: no token for StremThru, falling back to bulk check for all hashes")
             except Exception as e:
-                logger.warning(f"AllDebrid: StremThru cache check failed ({e}), falling back to stub")
+                logger.warning(f"AllDebrid: StremThru failed ({e}), bulk-checking all hashes")
+                unchecked_hashes = list(hashes)
 
-        # Fallback stub: mark everything as instantly available
-        logger.info("AllDebrid: StremThru not configured, using stub (all instant)")
-        result_magnets = [{"hash": h, "instant": True, "files": []} for h in hashes_or_magnets]
-        return {"status": "success", "data": {"magnets": result_magnets}}
+        # --- Step 2: Bulk upload/delete for unchecked hashes ---
+        # Stripped magnet (no trackers) → AllDebrid checks its cache without starting a download
+        # Batch of 20 stays safely under the 30-slot limit
+        # asyncio.gather for deletes — the rate limiter in json_response throttles automatically
+        batch_size = 20
+        for i in range(0, len(unchecked_hashes), batch_size):
+            batch = unchecked_hashes[i:i + batch_size]
+            stripped = [f"magnet:?xt=urn:btih:{h}" for h in batch]
+            try:
+                upload_resp = await self.json_response(
+                    f"{self.base_url}magnet/upload?agent={self.agent}",
+                    method='post',
+                    headers=self.get_headers(),
+                    data={"magnets[]": stripped},
+                )
+                if not upload_resp or upload_resp.get("status") != "success":
+                    error_code = (upload_resp or {}).get("error", {}).get("code", "UNKNOWN")
+                    if error_code == "MAGNET_TOO_MANY_ACTIVE":
+                        logger.warning("AllDebrid: Too many active magnets (30 slot limit), skipping batch")
+                    else:
+                        logger.error(f"AllDebrid: Bulk upload error ({error_code}): {upload_resp}")
+                    for h in batch:
+                        results[h] = {"hash": h, "instant": False, "files": []}
+                    continue
+
+                ids_to_delete = []
+                for m in upload_resp.get("data", {}).get("magnets", []):
+                    if "error" in m:
+                        mh = (m.get("hash") or "").lower()
+                        results[mh] = {"hash": mh, "instant": False, "files": []}
+                        continue
+                    mh = (m.get("hash") or "").lower()
+                    results[mh] = {"hash": mh, "instant": bool(m.get("ready", False)), "files": []}
+                    if m.get("id"):
+                        ids_to_delete.append(m["id"])
+
+                # Delete all uploaded magnets in parallel (rate limiter throttles automatically)
+                if ids_to_delete:
+                    await asyncio.gather(*[
+                        self.json_response(
+                            f"{self.base_url}magnet/delete?agent={self.agent}",
+                            method='post',
+                            headers=self.get_headers(),
+                            data={"id": mid},
+                        )
+                        for mid in ids_to_delete
+                    ], return_exceptions=True)
+                    logger.debug(f"AllDebrid: Deleted {len(ids_to_delete)} temporary magnets")
+
+            except Exception as e:
+                logger.error(f"AllDebrid: Bulk check batch failed: {e}")
+                for h in batch:
+                    results[h] = {"hash": h, "instant": False, "files": []}
+
+        cached_count = sum(1 for v in results.values() if v.get("instant"))
+        logger.info(f"AllDebrid: Cache check complete — {cached_count}/{len(hashes)} cached")
+        return {"status": "success", "data": {"magnets": list(results.values())}}
 
     async def add_magnet_or_torrent(self, magnet, torrent_download=None, torrent_file_content=None, ip=None):
         logger.debug(f"AllDebrid: Adding magnet or torrent")

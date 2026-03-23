@@ -144,12 +144,21 @@ class RealDebrid(BaseDebrid):
         return None
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
-        await self._torrent_rate_limit()
         if not hashes_or_magnets:
-            return {}
+            return {"status": "success", "data": {"magnets": []}}
 
-        # Use StremThru for real cache check if configured
-        # (native RD /torrents/instantAvailability is deprecated and returns 404)
+        # Normalise inputs: accept both plain hashes and magnet URIs
+        def _extract_hash(value):
+            import re as _re
+            if _re.match(r'^[a-fA-F0-9]{40}$', value):
+                return value.lower()
+            m = _re.search(r'urn:btih:([a-fA-F0-9]{40})', value, _re.IGNORECASE)
+            return m.group(1).lower() if m else None
+
+        hashes = [h for h in (_extract_hash(v) for v in hashes_or_magnets) if h]
+
+        # --- StremThru (community cache) if configured ---
+        # Native RD /torrents/instantAvailability no longer returns usable data
         if settings.stremthru_url:
             try:
                 from stream_fusion.utils.debrid.stremthru import StremThru
@@ -159,15 +168,19 @@ class RealDebrid(BaseDebrid):
                     st = StremThru(self.config, session=session)
                     st.set_store_credentials("realdebrid", token)
                     result = await st.get_availability_bulk(hashes_or_magnets, ip)
-                    logger.debug(f"Real-Debrid: StremThru cache check found {len(result)} cached hashes")
-                    return result
+                    logger.info(f"Real-Debrid: StremThru found {len(result)} cached hashes")
+                    return result  # list format — handled by __using_stremthru in TorrentSmartContainer
                 else:
-                    logger.warning("Real-Debrid: no token available for StremThru cache check")
+                    logger.warning("Real-Debrid: no token available for StremThru cache check, falling back to stub")
             except Exception as e:
-                logger.warning(f"Real-Debrid: StremThru cache check failed ({e}), returning empty")
+                logger.warning(f"Real-Debrid: StremThru cache check failed ({e}), falling back to stub")
 
-        logger.info("Real-Debrid: StremThru not configured, skipping cache check")
-        return {}
+        # --- Stub fallback: mark everything as available ---
+        logger.warning("Real-Debrid: StremThru not configured or failed — marking all hashes as available (stub)")
+        return {
+            "status": "success",
+            "data": {"magnets": [{"hash": h, "instant": True, "files": []} for h in (hashes or hashes_or_magnets)]},
+        }
 
     async def get_stream_link(self, query, config=None, ip=None):
         # Extract query parameters
