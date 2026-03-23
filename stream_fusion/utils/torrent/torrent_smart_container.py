@@ -21,20 +21,91 @@ class TorrentSmartContainer:
         self.logger.info(
             f"Initializing TorrentSmartContainer with {len(torrent_items)} items"
         )
-        self.__itemsDict: Dict[TorrentItem] = self._build_items_dict_by_infohash(
+        self.__itemsDict: Dict[str, TorrentItem] = self._build_items_dict_by_infohash(
             torrent_items
         )
         self.__media = media
-        # Variable d'utilisation de StremThru maintenue pour la rétrocompatibilité
         self.__using_stremthru = False
-        # Log pour indiquer que tous les torrents sont inclus
-        self.logger.info("TorrentSmartContainer: Including all torrents regardless of seeders count")
+        self.logger.info(
+            "TorrentSmartContainer: Including all torrents regardless of seeders count"
+        )
+
+    def _normalize_hash(self, value):
+        if not value:
+            return None
+        return str(value).strip().lower()
+
+    def _is_video_filename(self, name: str) -> bool:
+        if not name:
+            return False
+        return name.lower().endswith(
+            (".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts")
+        )
+
+    def _build_file_info(self, file_index, title, size):
+        return {
+            "file_index": file_index if file_index is not None else 0,
+            "title": title or "",
+            "size": size or 0,
+        }
+
+    def _extract_local_movie_candidates(self, item: TorrentItem):
+        candidates = []
+
+        if getattr(item, "file_name", None):
+            candidates.append(
+                self._build_file_info(
+                    getattr(item, "file_index", 0),
+                    item.file_name,
+                    getattr(item, "size", 0),
+                )
+            )
+
+        if getattr(item, "full_index", None):
+            for entry in item.full_index:
+                if not isinstance(entry, dict):
+                    continue
+                file_name = entry.get("file_name") or entry.get("title") or ""
+                if not file_name:
+                    continue
+                candidates.append(
+                    self._build_file_info(
+                        entry.get("file_index", 0),
+                        file_name,
+                        entry.get("size", 0),
+                    )
+                )
+
+        return candidates
+
+    def _extract_local_series_candidate(self, item: TorrentItem, media):
+        if not getattr(item, "full_index", None):
+            return None
+
+        clean_season = media.season.replace("S", "")
+        clean_episode = media.episode.replace("E", "")
+        numeric_season = int(clean_season)
+        numeric_episode = int(clean_episode)
+
+        for entry in item.full_index:
+            if not isinstance(entry, dict):
+                continue
+            seasons = entry.get("seasons", [])
+            episodes = entry.get("episodes", [])
+            if numeric_season in seasons and numeric_episode in episodes:
+                return self._build_file_info(
+                    entry.get("file_index", 0),
+                    entry.get("file_name", ""),
+                    entry.get("size", 0),
+                )
+
+        return None
 
     def get_unaviable_hashes(self):
         hashes = []
-        for hash, item in self.__itemsDict.items():
+        for info_hash, item in self.__itemsDict.items():
             if item.availability is False:
-                hashes.append(hash)
+                hashes.append(info_hash)
         self.logger.debug(
             f"TorrentSmartContainer: Retrieved {len(hashes)} hashes to process"
         )
@@ -62,19 +133,23 @@ class TorrentSmartContainer:
         self.logger.debug(
             f"TorrentSmartContainer: Total items to process: {len(self.__itemsDict)}"
         )
+
         for torrent_item in self.__itemsDict.values():
             self.logger.trace(
                 f"TorrentSmartContainer: Processing item: {torrent_item.raw_title} - Has torrent: {torrent_item.torrent_download is not None}"
             )
+
             if torrent_item.torrent_download is not None:
                 self.logger.trace(
                     f"TorrentSmartContainer: Has file index: {torrent_item.file_index is not None}"
                 )
+
                 if torrent_item.file_index is not None:
                     best_matching.append(torrent_item)
                     self.logger.trace(
                         "TorrentSmartContainer: Item added to best matching (has file index)"
                     )
+
                 elif self.__media.type == "series":
                     if torrent_item.full_index:
                         matching_file = self._find_matching_file(
@@ -95,32 +170,32 @@ class TorrentSmartContainer:
                                 "TorrentSmartContainer: No matching file found in full_index, item not added to best matching"
                             )
                     else:
-                        # No full_index available, add series torrent anyway - AllDebrid will extract files
                         best_matching.append(torrent_item)
                         self.logger.trace(
                             "TorrentSmartContainer: Item added to best matching (series without full_index, will be extracted by debrid)"
                         )
                 else:
-                    # For movies without file_index, still add them
                     best_matching.append(torrent_item)
                     self.logger.trace(
                         "TorrentSmartContainer: Item added to best matching (movie without file_index)"
                     )
+
             else:
-                # Toujours inclure tous les torrents DMM - API et autres
                 best_matching.append(torrent_item)
-                seeders_info = f"with {torrent_item.seeders} seeders" if torrent_item.seeders is not None else "with unknown seeders"
+                seeders_info = (
+                    f"with {torrent_item.seeders} seeders"
+                    if torrent_item.seeders is not None
+                    else "with unknown seeders"
+                )
                 self.logger.trace(
                     f"TorrentSmartContainer: Item added to best matching (magnet link) - {seeders_info}"
                 )
 
-        # Ensure all items have parsed_data before returning
         for item in best_matching:
             if item.parsed_data is None:
                 self.logger.debug(
                     f"TorrentSmartContainer.get_best_matching: Item '{item.raw_title[:60]}' missing parsed_data, parsing now"
                 )
-                from RTN import parse
                 item.parsed_data = parse(item.raw_title)
 
         self.logger.success(
@@ -138,6 +213,7 @@ class TorrentSmartContainer:
                 "TorrentSmartContainer: Full index is empty, cannot find matching file"
             )
             return None
+
         try:
             target_season = int(season.replace("S", ""))
             target_episode = int(episode.replace("E", ""))
@@ -164,11 +240,11 @@ class TorrentSmartContainer:
                 f"TorrentSmartContainer: Best matching file found: {best_match['file_name']}"
             )
             return best_match
-        else:
-            self.logger.warning(
-                f"TorrentSmartContainer: No matching file found for Season {season}, Episode {episode}"
-            )
-            return None
+
+        self.logger.warning(
+            f"TorrentSmartContainer: No matching file found for Season {season}, Episode {episode}"
+        )
+        return None
 
     def cache_container_items(self):
         self.logger.info(
@@ -194,22 +270,29 @@ class TorrentSmartContainer:
                 + str(debrid_response)
             )
             return
+
         self.logger.info(
             f"TorrentSmartContainer: Updating availability for {debrid_type.__name__}"
         )
 
-        # RealDebrid and AllDebrid delegate cache checks to StremThru when configured,
-        # and return a list of {"hash": ..., "status": "cached", "files": [...]} dicts.
-        # Detect this format by shape so existing handlers remain unaffected.
-        if isinstance(debrid_response, list) and debrid_response and isinstance(debrid_response[0], dict) and "hash" in debrid_response[0]:
+        if (
+            isinstance(debrid_response, list)
+            and debrid_response
+            and isinstance(debrid_response[0], dict)
+            and "hash" in debrid_response[0]
+        ):
             self.__using_stremthru = True
             store_name = debrid_response[0].get("store_name", "")
             underlying_debrid = (
                 StremThru.get_underlying_debrid_code(store_name)
                 or debrid_response[0].get("debrid", "RD")
             )
-            self.logger.debug(f"TorrentSmartContainer: StremThru list response detected (store={store_name}, debrid={underlying_debrid})")
-            self._update_availability_stremthru(debrid_response, media, underlying_debrid)
+            self.logger.debug(
+                f"TorrentSmartContainer: StremThru list response detected (store={store_name}, debrid={underlying_debrid})"
+            )
+            self._update_availability_stremthru(
+                debrid_response, media, underlying_debrid
+            )
             return
 
         if debrid_type is RealDebrid:
@@ -221,29 +304,43 @@ class TorrentSmartContainer:
         elif debrid_type is Premiumize:
             self._update_availability_premiumize(debrid_response)
         elif debrid_type is StremThru or debrid_type.__name__ == "StremThru":
-            # Marquer que StremThru est utilisé
             self.__using_stremthru = True
-            
-            # Récupérer l'instance depuis le tableau de debrid_response
-            if debrid_response and isinstance(debrid_response[0], dict) and "store_name" in debrid_response[0]:
+
+            if (
+                debrid_response
+                and isinstance(debrid_response[0], dict)
+                and "store_name" in debrid_response[0]
+            ):
                 store_name = debrid_response[0]["store_name"]
             else:
-                # Tenter de récupérer depuis le Logger
                 try:
-                    log_entries = [line for line in self.logger.get_entries() if "StremThru: Vérification de" in line and "magnets sur StremThru-" in line]
+                    log_entries = [
+                        line
+                        for line in self.logger.get_entries()
+                        if "StremThru: Vérification de" in line
+                        and "magnets sur StremThru-" in line
+                    ]
                     if log_entries:
                         latest_log = log_entries[-1]
                         store_name = latest_log.split("StremThru-")[-1].strip()
                     else:
-                        # Fallback sur les stores courants si on ne peut pas détecter
-                        store_name = "torbox" if "TBToken" in str(debrid_response) else "alldebrid"
-                except:
-                    # Fallback sur "torbox" s'il y a TB dans les logs
-                    store_name = "torbox" if "TBToken" in str(debrid_response) else "alldebrid"
-            
+                        store_name = (
+                            "torbox"
+                            if "TBToken" in str(debrid_response)
+                            else "alldebrid"
+                        )
+                except Exception:
+                    store_name = (
+                        "torbox" if "TBToken" in str(debrid_response) else "alldebrid"
+                    )
+
             underlying_debrid = StremThru.get_underlying_debrid_code(store_name)
-            self.logger.debug(f"TorrentSmartContainer: StremThru utilise le store: {store_name}, code: {underlying_debrid}")
-            self._update_availability_stremthru(debrid_response, media, underlying_debrid)
+            self.logger.debug(
+                f"TorrentSmartContainer: StremThru utilise le store: {store_name}, code: {underlying_debrid}"
+            )
+            self._update_availability_stremthru(
+                debrid_response, media, underlying_debrid
+            )
         else:
             self.logger.error(
                 f"TorrentSmartContainer: Unsupported debrid type: {debrid_type.__name__}"
@@ -255,12 +352,20 @@ class TorrentSmartContainer:
     def _update_availability_realdebrid(self, response, media):
         self.logger.info("TorrentSmartContainer: Updating availability for RealDebrid")
         for info_hash, details in response.items():
+            normalized_hash = self._normalize_hash(info_hash)
             if "rd" not in details:
                 self.logger.debug(
-                    f"TorrentSmartContainer: Skipping hash {info_hash}: no RealDebrid data"
+                    f"TorrentSmartContainer: Skipping hash {normalized_hash}: no RealDebrid data"
                 )
                 continue
-            torrent_item: TorrentItem = self.__itemsDict[info_hash]
+
+            torrent_item = self.__itemsDict.get(normalized_hash)
+            if torrent_item is None:
+                self.logger.debug(
+                    f"TorrentSmartContainer: Unknown RealDebrid hash returned: {normalized_hash}"
+                )
+                continue
+
             self.logger.debug(
                 f"Processing {torrent_item.type}: {torrent_item.raw_title}"
             )
@@ -272,6 +377,7 @@ class TorrentSmartContainer:
             else:
                 self._process_movie_files(details, files)
             self._update_file_details(torrent_item, files, debrid="RD")
+
         self.logger.info(
             "TorrentSmartContainer: RealDebrid availability update completed"
         )
@@ -286,6 +392,7 @@ class TorrentSmartContainer:
                 clean_episode = media.episode.replace("E", "")
                 numeric_season = int(clean_season)
                 numeric_episode = int(clean_episode)
+
                 if season_episode_in_filename(
                     file["filename"], numeric_season, numeric_episode
                 ):
@@ -322,29 +429,59 @@ class TorrentSmartContainer:
 
     def _update_availability_alldebrid(self, response, media):
         self.logger.info("TorrentSmartContainer: Updating availability for AllDebrid")
-        if not response["status"] == "success":
-            self.logger.error(f"TorrentSmartContainer: AllDebrid API error: {response}")
+
+        if not isinstance(response, dict) or response.get("status") != "success":
+            self.logger.error(
+                f"TorrentSmartContainer: AllDebrid API error: {response}"
+            )
             return
 
-        for data in response["data"]["magnets"]:
-            torrent_item: TorrentItem = self.__itemsDict[data["hash"]]
-            
-            # Set availability to AD immediately for all files
-            torrent_item.availability = "AD"
-            
-            # Process files if they exist
-            if "files" in data and data["files"]:
+        magnets = response.get("data", {}).get("magnets", [])
+        if not isinstance(magnets, list):
+            self.logger.error(
+                f"TorrentSmartContainer: Invalid AllDebrid magnets payload: {response}"
+            )
+            return
+
+        for data in magnets:
+            if not isinstance(data, dict):
+                self.logger.warning(
+                    f"TorrentSmartContainer: Invalid AllDebrid magnet entry ignored: {data}"
+                )
+                continue
+
+            hash_value = self._normalize_hash(data.get("hash"))
+            if not hash_value:
+                self.logger.warning(
+                    f"TorrentSmartContainer: AllDebrid entry without hash ignored: {data}"
+                )
+                continue
+
+            torrent_item = self.__itemsDict.get(hash_value)
+            if torrent_item is None:
+                self.logger.debug(
+                    f"TorrentSmartContainer: Unknown AllDebrid hash returned: {hash_value}"
+                )
+                continue
+
+            if not data.get("instant", False):
+                torrent_item.availability = False
+                continue
+
+            files_payload = data.get("files", [])
+            if files_payload:
                 files = []
                 self._explore_folders_alldebrid(
-                    data["files"], files, 1, torrent_item.type, media
+                    files_payload, files, 1, torrent_item.type, media
                 )
-                if files:  # If we found matching files
+
+                if files:
                     self._update_file_details(torrent_item, files, debrid="AD")
+                else:
+                    torrent_item.availability = "AD"
             else:
-                # If no files data, still mark as available
-                self.logger.debug(f"No files data for hash {data['hash']}, but marking as available")
                 torrent_item.availability = "AD"
-                
+
         self.logger.info(
             "TorrentSmartContainer: AllDebrid availability update completed"
         )
@@ -356,7 +493,14 @@ class TorrentSmartContainer:
             return
 
         for data in response["data"]:
-            torrent_item: TorrentItem = self.__itemsDict[data["hash"]]
+            hash_value = self._normalize_hash(data.get("hash"))
+            torrent_item = self.__itemsDict.get(hash_value)
+            if torrent_item is None:
+                self.logger.debug(
+                    f"TorrentSmartContainer: Unknown Torbox hash returned: {hash_value}"
+                )
+                continue
+
             files = self._process_torbox_files(data["files"], torrent_item.type, media)
             self._update_file_details(torrent_item, files, debrid="TB")
 
@@ -385,92 +529,101 @@ class TorrentSmartContainer:
         return processed_files
 
     def _is_matching_episode_torbox(self, filepath, media):
-            # Extract only the filename from the full path
-            filename = os.path.basename(filepath)
-            
-            clean_season = media.season.replace("S", "")
-            clean_episode = media.episode.replace("E", "")
-            numeric_season = int(clean_season)
-            numeric_episode = int(clean_episode)
-            
-            return season_episode_in_filename(filename, numeric_season, numeric_episode)
+        filename = os.path.basename(filepath)
+
+        clean_season = media.season.replace("S", "")
+        clean_episode = media.episode.replace("E", "")
+        numeric_season = int(clean_season)
+        numeric_episode = int(clean_episode)
+
+        return season_episode_in_filename(filename, numeric_season, numeric_episode)
 
     def _update_availability_premiumize(self, response):
         self.logger.info("TorrentSmartContainer: Updating availability for Premiumize")
         if not response:
             self.logger.error(
-                f"TorrentSmartContainer: Empty response from Premiumize API"
+                "TorrentSmartContainer: Empty response from Premiumize API"
             )
             return
 
         torrent_items = self.get_items()
-        for hash, status in response.items():
+        for hash_value, status in response.items():
+            normalized_hash = self._normalize_hash(hash_value)
             for item in torrent_items:
-                if item.info_hash.lower() == hash.lower():
+                if item.info_hash and item.info_hash.lower() == normalized_hash:
                     is_available = status.get("transcoded", False)
                     item.availability = "PM" if is_available else None
-                    
-                    # Mettre à jour les détails du fichier si disponible
+
                     if is_available:
                         if item.type == "series":
-                            # Pour les séries, vérifier si le fichier sélectionné correspond à l'épisode
                             if "full_index" in item.__dict__ and item.full_index:
-                                # Si nous avons l'index complet des fichiers, l'utiliser
-                                matching_files = []
                                 for file_info in item.full_index:
                                     clean_season = self.__media.season.replace("S", "")
                                     clean_episode = self.__media.episode.replace("E", "")
                                     numeric_season = int(clean_season)
                                     numeric_episode = int(clean_episode)
-                                    
-                                    if (numeric_season in file_info.get("seasons", []) and 
-                                        numeric_episode in file_info.get("episodes", [])):
+
+                                    if (
+                                        numeric_season in file_info.get("seasons", [])
+                                        and numeric_episode in file_info.get(
+                                            "episodes", []
+                                        )
+                                    ):
                                         matched_file_info = {
-                                            "file_index": file_info.get("file_index", 0),
+                                            "file_index": file_info.get(
+                                                "file_index", 0
+                                            ),
                                             "title": file_info.get("file_name", ""),
                                             "size": file_info.get("size", 0),
                                         }
-                                        self._update_file_details(item, [matched_file_info], debrid="PM")
+                                        self._update_file_details(
+                                            item, [matched_file_info], debrid="PM"
+                                        )
                                         self.logger.debug(
                                             f"TorrentSmartContainer: Updated series file details for {item.raw_title}: {matched_file_info}"
                                         )
                                         break
+
                         elif item.type == "movie":
-                            # Process movie files
                             self.logger.debug(
                                 f"TorrentSmartContainer: Processing movie files for {item.raw_title}"
                             )
-                            
-                            # Vérifier si nous avons des informations sur le fichier dans le status
+
                             file_info = None
-                            
-                            # Si nous avons des fichiers dans le status
+
                             if "files" in status:
                                 cached_files = [
-                                    f for f in status["files"] if f.get("cached", False) is True
+                                    f
+                                    for f in status["files"]
+                                    if f.get("cached", False) is True
                                 ]
                                 if cached_files:
-                                    # Find the largest cached file
                                     largest_file = max(
                                         cached_files, key=lambda f: f.get("size", 0)
                                     )
                                     file_info = {
-                                        "file_index": largest_file.get("file_index", 0),
+                                        "file_index": largest_file.get(
+                                            "file_index", 0
+                                        ),
                                         "title": largest_file.get("title", ""),
                                         "size": largest_file.get("size", 0),
                                     }
-                            
-                            # Si nous n'avons pas d'infos de fichiers mais un nom de fichier et une taille
-                            if not file_info and "filename" in status and "filesize" in status:
+
+                            if (
+                                not file_info
+                                and "filename" in status
+                                and "filesize" in status
+                            ):
                                 file_info = {
                                     "file_index": 0,
                                     "title": status.get("filename", ""),
                                     "size": int(status.get("filesize", 0)),
                                 }
-                            
-                            # Si nous avons des informations sur le fichier, mettre à jour
+
                             if file_info:
-                                self._update_file_details(item, [file_info], debrid="PM")
+                                self._update_file_details(
+                                    item, [file_info], debrid="PM"
+                                )
                                 self.logger.debug(
                                     f"TorrentSmartContainer: Updated movie file details for {item.raw_title}: {file_info}"
                                 )
@@ -480,117 +633,220 @@ class TorrentSmartContainer:
         )
 
     def _update_availability_stremthru(self, response, media, underlying_debrid="AD"):
-        self.logger.info(f"TorrentSmartContainer: Updating StremThru availability (via {underlying_debrid})")
+        self.logger.info(
+            f"TorrentSmartContainer: Updating StremThru availability (via {underlying_debrid})"
+        )
+
         for result in response:
-            hash_value = result.get("hash", "").lower()
-            
-            # Utiliser le code debrid fourni par StremThru si disponible
+            if not isinstance(result, dict):
+                continue
+
+            hash_value = self._normalize_hash(result.get("hash"))
+            if not hash_value:
+                continue
+
+            item = self.__itemsDict.get(hash_value)
+            if item is None:
+                self.logger.debug(
+                    f"TorrentSmartContainer: Unknown StremThru hash returned: {hash_value}"
+                )
+                continue
+
             result_debrid = result.get("debrid")
             if result_debrid:
                 debrid_code = result_debrid
-                self.logger.debug(f"TorrentSmartContainer: Utilisation du code debrid spécifique: {debrid_code} pour {hash_value}")
+                self.logger.debug(
+                    f"TorrentSmartContainer: Utilisation du code debrid spécifique: {debrid_code} pour {hash_value}"
+                )
             else:
                 debrid_code = underlying_debrid
-            
-            if hash_value in self.__itemsDict:
-                item = self.__itemsDict[hash_value]
-                item.availability = debrid_code  # Utiliser le code du service spécifique à ce résultat
-                
-                # Récupérer les fichiers du torrent
-                files = result.get("files", [])
-                
-                # Détecter si c'est un pack de saison (plus de 5 fichiers vidéo)
-                video_files = [f for f in files if f.get("name", "").lower().endswith((".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"))]
-                is_season_pack = item.type == "series" and len(video_files) > 5
-                
-                if is_season_pack:
-                    self.logger.debug(f"TorrentSmartContainer: Détection d'un pack de saison avec {len(video_files)} fichiers vidéo pour {item.raw_title}")
-                    self.logger.debug(f"TorrentSmartContainer: Video files detected: {[f.get("name") for f in video_files]}")
-                
-                if item.type == "series":
-                    # Version originale simple : chercher les fichiers qui correspondent à l'épisode
-                    self.logger.debug(
-                        f"TorrentSmartContainer: Processing series files for {item.raw_title}"
-                    )
-                    matching_files = []
-                    clean_season = media.season.replace("S", "")
-                    clean_episode = media.episode.replace("E", "")
-                    numeric_season = int(clean_season)
-                    numeric_episode = int(clean_episode)
-                    
-                    for file in files:
-                        file_name = file.get("name", "")
-                        if season_episode_in_filename(file_name, numeric_season, numeric_episode):
-                            file_info = {
-                                "file_index": file.get("index", 0),
-                                "title": file_name,
-                                "size": file.get("size", 0),
-                            }
-                            matching_files.append(file_info)
-                            self.logger.debug(f"TorrentSmartContainer: Match found: {file_name}")
-                    
-                    if matching_files:
-                        self._update_file_details(item, matching_files, debrid=debrid_code, skip_file_name_for_series=False)
-                    else:
-                        self.logger.debug(f"TorrentSmartContainer: No matching episode files found for {item.raw_title}")
-                        from stream_fusion.utils.general import smart_episode_fallback
 
-                        fallback_file = smart_episode_fallback(files, numeric_season, numeric_episode)
-                        if fallback_file:
-                            file_info = {
-                                "file_index": fallback_file.get("index", 0),
-                                "title": fallback_file.get("name", ""),
-                                "size": fallback_file.get("size", 0),
-                            }
-                            self._update_file_details(item, [file_info], debrid=debrid_code, skip_file_name_for_series=False)
-                            self.logger.info(f"TorrentSmartContainer: Fallback intelligent utilisé pour {item.raw_title}: {fallback_file.get('name')}")
-                        else:
-                            # Vraiment aucun fichier trouvé - marquer comme disponible mais sans file_index
-                            item.availability = debrid_code
-                        
-                elif item.type == "movie":
-                    self.logger.debug(
-                        f"TorrentSmartContainer: Processing movie files for {item.raw_title}"
-                    )
-                    
-                    if files:
-                        file_infos = [
-                            {
-                                "file_index": file.get("index", 0),
-                                "title": file.get("name", ""),
-                                "size": file.get("size", 0),
-                            }
-                            for file in files
-                        ]
-                        self._update_file_details(item, file_infos, debrid=debrid_code)
-                        self.logger.debug(
-                            f"TorrentSmartContainer: Updated movie file details for {item.raw_title}"
-                        )
-                
-                self.logger.debug(
-                    f"TorrentSmartContainer: Updated availability for {item.raw_title}: {item.availability}"
+            item.availability = debrid_code
+
+            files = result.get("files", [])
+            if not isinstance(files, list):
+                files = []
+
+            normalized_files = []
+            for file in files:
+                if not isinstance(file, dict):
+                    continue
+                file_name = file.get("name", "") or file.get("title", "")
+                normalized_files.append(
+                    {
+                        "index": file.get("index", 0),
+                        "name": file_name,
+                        "size": file.get("size", 0),
+                    }
                 )
-        
+
+            if item.type == "series":
+                self.logger.debug(
+                    f"TorrentSmartContainer: Processing series files for {item.raw_title}"
+                )
+                clean_season = media.season.replace("S", "")
+                clean_episode = media.episode.replace("E", "")
+                numeric_season = int(clean_season)
+                numeric_episode = int(clean_episode)
+
+                matching_files = []
+                for file in normalized_files:
+                    file_name = file.get("name", "")
+                    if file_name and season_episode_in_filename(
+                        file_name, numeric_season, numeric_episode
+                    ):
+                        matching_files.append(
+                            self._build_file_info(
+                                file.get("index", 0),
+                                file_name,
+                                file.get("size", 0),
+                            )
+                        )
+                        self.logger.debug(
+                            f"TorrentSmartContainer: Match found: {file_name}"
+                        )
+
+                if matching_files:
+                    self._update_file_details(
+                        item,
+                        matching_files,
+                        debrid=debrid_code,
+                        skip_file_name_for_series=False,
+                    )
+                    self.logger.debug(
+                        f"TorrentSmartContainer: StremThru updated matching series files for {item.raw_title}"
+                    )
+                    continue
+
+                self.logger.debug(
+                    f"TorrentSmartContainer: No direct episode match found for {item.raw_title}"
+                )
+
+                try:
+                    from stream_fusion.utils.general import smart_episode_fallback
+
+                    fallback_file = smart_episode_fallback(
+                        normalized_files, numeric_season, numeric_episode
+                    )
+                except Exception:
+                    fallback_file = None
+
+                if fallback_file:
+                    file_info = self._build_file_info(
+                        fallback_file.get("index", 0),
+                        fallback_file.get("name", ""),
+                        fallback_file.get("size", 0),
+                    )
+                    self._update_file_details(
+                        item,
+                        [file_info],
+                        debrid=debrid_code,
+                        skip_file_name_for_series=False,
+                    )
+                    self.logger.info(
+                        f"TorrentSmartContainer: Fallback intelligent utilisé pour {item.raw_title}: {fallback_file.get('name')}"
+                    )
+                    continue
+
+                local_series_candidate = self._extract_local_series_candidate(item, media)
+                if local_series_candidate:
+                    self._update_file_details(
+                        item,
+                        [local_series_candidate],
+                        debrid=debrid_code,
+                        skip_file_name_for_series=False,
+                    )
+                    self.logger.info(
+                        f"TorrentSmartContainer: Local full_index fallback utilisé pour {item.raw_title}: {local_series_candidate.get('title')}"
+                    )
+                    continue
+
+                if normalized_files:
+                    video_files = [
+                        f for f in normalized_files if self._is_video_filename(f.get("name", ""))
+                    ]
+                    if video_files:
+                        best_video = max(video_files, key=lambda f: f.get("size", 0))
+                        file_info = self._build_file_info(
+                            best_video.get("index", 0),
+                            best_video.get("name", ""),
+                            best_video.get("size", 0),
+                        )
+                        self._update_file_details(
+                            item,
+                            [file_info],
+                            debrid=debrid_code,
+                            skip_file_name_for_series=False,
+                        )
+                        self.logger.info(
+                            f"TorrentSmartContainer: Generic video fallback utilisé pour {item.raw_title}: {best_video.get('name')}"
+                        )
+                        continue
+
+                item.availability = debrid_code
+
+            elif item.type == "movie":
+                self.logger.debug(
+                    f"TorrentSmartContainer: Processing movie files for {item.raw_title}"
+                )
+
+                file_infos = [
+                    self._build_file_info(
+                        file.get("index", 0),
+                        file.get("name", ""),
+                        file.get("size", 0),
+                    )
+                    for file in normalized_files
+                    if file.get("name")
+                ]
+
+                if file_infos:
+                    self._update_file_details(item, file_infos, debrid=debrid_code)
+                    self.logger.debug(
+                        f"TorrentSmartContainer: Updated movie file details for {item.raw_title}"
+                    )
+                    continue
+
+                local_movie_candidates = self._extract_local_movie_candidates(item)
+                if local_movie_candidates:
+                    self._update_file_details(
+                        item, local_movie_candidates, debrid=debrid_code
+                    )
+                    self.logger.info(
+                        f"TorrentSmartContainer: Local movie fallback utilisé pour {item.raw_title}"
+                    )
+                    continue
+
+                item.availability = debrid_code
+
+            self.logger.debug(
+                f"TorrentSmartContainer: Updated availability for {item.raw_title}: {item.availability}"
+            )
+
         self.logger.info(
             "TorrentSmartContainer: StremThru availability update completed"
         )
 
-    def _update_file_details(self, torrent_item, files, debrid: str = "??", skip_file_name_for_series=False):
+    def _update_file_details(
+        self, torrent_item, files, debrid: str = "??", skip_file_name_for_series=False
+    ):
         if not files:
             self.logger.debug(
                 f"TorrentSmartContainer: No files to update for {torrent_item.raw_title}"
             )
             return
+
         file = max(files, key=lambda file: file["size"])
         torrent_item.availability = debrid
-        # Only update file_index if it wasn't set to None for intelligent selection
-        if torrent_item.file_index is not None:
-            torrent_item.file_index = file["file_index"]
-        # For series, assign file title to raw_title to avoid StremThru duplication
+        torrent_item.file_index = file["file_index"]
+
         if torrent_item.type == "series":
-            torrent_item.raw_title = file["title"]
+            if not skip_file_name_for_series:
+                torrent_item.raw_title = file["title"]
+            torrent_item.file_name = file["title"]
         else:
             torrent_item.file_name = file["title"]
+
         torrent_item.size = file["size"]
         self.logger.debug(
             f"TorrentSmartContainer: Updated file details for {torrent_item.raw_title}: {file['title']}"
@@ -603,20 +859,23 @@ class TorrentSmartContainer:
         items_dict = {}
         for item in items:
             if item.info_hash is not None:
-                if item.info_hash not in items_dict:
-                    self.logger.debug(f"Adding {item.info_hash} to items dict")
-                    items_dict[item.info_hash] = item
+                normalized_hash = self._normalize_hash(item.info_hash)
+                if normalized_hash not in items_dict:
+                    self.logger.debug(f"Adding {normalized_hash} to items dict")
+                    items_dict[normalized_hash] = item
                 else:
-                    # Garder Yggtorrent si présent, sinon garder le premier
-                    existing_item = items_dict[item.info_hash]
-                    if item.indexer == "Yggtorrent - API" and existing_item.indexer != "Yggtorrent - API":
+                    existing_item = items_dict[normalized_hash]
+                    if (
+                        item.indexer == "Yggtorrent - API"
+                        and existing_item.indexer != "Yggtorrent - API"
+                    ):
                         self.logger.debug(
-                            f"TorrentSmartContainer: Replacing {existing_item.indexer} with Yggtorrent for hash: {item.info_hash}"
+                            f"TorrentSmartContainer: Replacing {existing_item.indexer} with Yggtorrent for hash: {normalized_hash}"
                         )
-                        items_dict[item.info_hash] = item
+                        items_dict[normalized_hash] = item
                     else:
                         self.logger.debug(
-                            f"TorrentSmartContainer: Skipping duplicate info hash: {item.info_hash} (keeping {existing_item.indexer})"
+                            f"TorrentSmartContainer: Skipping duplicate info hash: {normalized_hash} (keeping {existing_item.indexer})"
                         )
         self.logger.info(
             f"TorrentSmartContainer: Built dictionary with {len(items_dict)} unique items"
@@ -624,51 +883,94 @@ class TorrentSmartContainer:
         return items_dict
 
     def _explore_folders_alldebrid(self, folder, files, file_index, type, media):
+        if not isinstance(folder, list):
+            self.logger.warning(
+                f"TorrentSmartContainer: Invalid AllDebrid folder payload ignored: {folder}"
+            )
+            return file_index
 
         if type == "series":
             for file in folder:
-                if "e" in file:
+                if not isinstance(file, dict):
+                    self.logger.warning(
+                        f"TorrentSmartContainer: Invalid AllDebrid entry ignored (not a dict): {file}"
+                    )
+                    continue
+
+                if "e" in file and isinstance(file["e"], list):
                     file_index = self._explore_folders_alldebrid(
                         file["e"], files, file_index, type, media
                     )
                     continue
-                parsed_file = parse(file["n"])
+
+                file_name = file.get("n")
+                if not file_name:
+                    self.logger.warning(
+                        f"TorrentSmartContainer: AllDebrid entry without filename ignored: {file}"
+                    )
+                    continue
+
+                try:
+                    parsed_file = parse(file_name)
+                except Exception as exc:
+                    self.logger.warning(
+                        f"TorrentSmartContainer: Failed to parse AllDebrid filename '{file_name}': {exc}"
+                    )
+                    file_index += 1
+                    continue
+
                 clean_season = media.season.replace("S", "")
                 clean_episode = media.episode.replace("E", "")
                 numeric_season = int(clean_season)
                 numeric_episode = int(clean_episode)
+
                 if (
                     numeric_season in parsed_file.seasons
                     and numeric_episode in parsed_file.episodes
                 ):
                     self.logger.debug(
-                        f"TorrentSmartContainer: Matching series file found: {file['n']}"
+                        f"TorrentSmartContainer: Matching series file found: {file_name}"
                     )
                     files.append(
                         {
                             "file_index": file_index,
-                            "title": file["n"],
-                            "size": file["s"] if "s" in file else 0,
+                            "title": file_name,
+                            "size": file.get("s", 0),
                         }
                     )
                 file_index += 1
+
         elif type == "movie":
-            file_index = 1
             for file in folder:
-                if "e" in file:
+                if not isinstance(file, dict):
+                    self.logger.warning(
+                        f"TorrentSmartContainer: Invalid AllDebrid entry ignored (not a dict): {file}"
+                    )
+                    continue
+
+                if "e" in file and isinstance(file["e"], list):
                     file_index = self._explore_folders_alldebrid(
                         file["e"], files, file_index, type, media
                     )
                     continue
+
+                file_name = file.get("n")
+                if not file_name:
+                    self.logger.warning(
+                        f"TorrentSmartContainer: AllDebrid entry without filename ignored: {file}"
+                    )
+                    continue
+
                 self.logger.debug(
-                    f"TorrentSmartContainer: Adding movie file: {file['n']}"
+                    f"TorrentSmartContainer: Adding movie file: {file_name}"
                 )
                 files.append(
                     {
                         "file_index": file_index,
-                        "title": file["n"],
-                        "size": file["s"] if "s" in file else 0,
+                        "title": file_name,
+                        "size": file.get("s", 0),
                     }
                 )
                 file_index += 1
+
         return file_index

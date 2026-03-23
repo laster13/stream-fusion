@@ -27,7 +27,7 @@ class C411API:
         self.api_key = api_key if api_key is not None else settings.c411_api_key
         self._external_session = session is not None
         self._session = session
-        self._timeout = aiohttp.ClientTimeout(sock_read=2)
+        self._timeout = aiohttp.ClientTimeout(sock_read=8, total=15)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -39,22 +39,26 @@ class C411API:
         if not self.api_key:
             logger.warning("C411: API key not configured (C411_API_KEY), skipping request")
             return None
-        # Torznab standard : apikey en query param (pas Bearer header)
+
         params["apikey"] = self.api_key
         session = await self._get_session()
-        try:
-            async with session.get(
-                self.base_url, params=params, allow_redirects=True,
-                timeout=aiohttp.ClientTimeout(sock_read=2, total=5)
-            ) as response:
-                response.raise_for_status()
-                return await response.text()
-        except aiohttp.ClientError as e:
-            logger.error(f"C411: HTTP error: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"C411: Unexpected error: {e}")
-            return None
+
+        for attempt in range(2):
+            try:
+                async with session.get(
+                    self.base_url,
+                    params=params,
+                    allow_redirects=True,
+                    timeout=self._timeout,
+                ) as response:
+                    response.raise_for_status()
+                    return await response.text()
+            except aiohttp.ClientError as e:
+                logger.error(f"C411: HTTP error (attempt {attempt + 1}/2): {e}")
+            except Exception as e:
+                logger.error(f"C411: Unexpected error (attempt {attempt + 1}/2): {e}")
+
+        return None
 
     def _parse_xml(self, xml_content: str) -> List[C411RawResult]:
         results = []
@@ -97,7 +101,6 @@ class C411API:
                 type_el = item.find("type")
                 result.privacy = type_el.text if type_el is not None else "public"
 
-                # Extraire hash depuis magnet si manquant
                 if not result.info_hash and result.magnet:
                     m = re.search(r"btih:([a-fA-F0-9]{40})", result.magnet, re.IGNORECASE)
                     if m:
@@ -117,16 +120,20 @@ class C411API:
         tmdb_id: Optional[str] = None,
         title: Optional[str] = None,
     ) -> List[C411RawResult]:
-        params = {"t": "movie", "cat": "2000"}
+        results = []
+
         if tmdb_id:
-            params["tmdbid"] = tmdb_id
-        elif title:
-            params["q"] = title
-        else:
-            return []
-        xml = await self._request_xml(params)
-        results = self._parse_xml(xml) if xml else []
-        logger.info(f"C411: search_movie tmdb={tmdb_id} → {len(results)} results")
+            params = {"t": "movie", "cat": "2000", "tmdbid": tmdb_id}
+            xml = await self._request_xml(params)
+            results = self._parse_xml(xml) if xml else []
+            logger.info(f"C411: search_movie tmdb={tmdb_id} → {len(results)} results")
+
+        if not results and title:
+            params = {"t": "movie", "cat": "2000", "q": title}
+            xml = await self._request_xml(params)
+            results = self._parse_xml(xml) if xml else []
+            logger.info(f"C411: search_movie title={title} → {len(results)} results")
+
         return results
 
     async def search_series(
@@ -136,18 +143,28 @@ class C411API:
         season: Optional[int] = None,
         episode: Optional[int] = None,
     ) -> List[C411RawResult]:
-        params = {"t": "tvsearch", "cat": "5000"}
+        results = []
+
         if tmdb_id:
-            params["tmdbid"] = tmdb_id
-        elif title:
-            params["q"] = title
-        else:
-            return []
-        if season is not None:
-            params["season"] = season
-        if episode is not None:
-            params["ep"] = episode
-        xml = await self._request_xml(params)
-        results = self._parse_xml(xml) if xml else []
-        logger.info(f"C411: search_series tmdb={tmdb_id} s={season} e={episode} → {len(results)} results")
+            params = {"t": "tvsearch", "cat": "5000", "tmdbid": tmdb_id}
+            if season is not None:
+                params["season"] = season
+            if episode is not None:
+                params["ep"] = episode
+
+            xml = await self._request_xml(params)
+            results = self._parse_xml(xml) if xml else []
+            logger.info(f"C411: search_series tmdb={tmdb_id} s={season} e={episode} → {len(results)} results")
+
+        if not results and title:
+            params = {"t": "tvsearch", "cat": "5000", "q": title}
+            if season is not None:
+                params["season"] = season
+            if episode is not None:
+                params["ep"] = episode
+
+            xml = await self._request_xml(params)
+            results = self._parse_xml(xml) if xml else []
+            logger.info(f"C411: search_series title={title} s={season} e={episode} → {len(results)} results")
+
         return results

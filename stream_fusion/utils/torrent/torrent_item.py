@@ -7,7 +7,13 @@ from stream_fusion.utils.models.series import Series
 from stream_fusion.logging_config import logger
 
 # Private indexer names that strip credentials before caching
-_PRIVATE_CREDENTIAL_INDEXERS = {"Sharewood - API", "C411 - API", "Torr9 - API"}
+_PRIVATE_CREDENTIAL_INDEXERS = {
+    "Sharewood - API",
+    "C411 - API",
+    "Torr9 - API",
+    "LaCale - API",
+    "GenerationFree - API",
+}
 
 
 class TorrentItem:
@@ -15,38 +21,37 @@ class TorrentItem:
                  privacy, type=None, parsed_data=None, torrent_download=None, tmdb_id=None):
         self.logger = logger
 
-        self.raw_title = raw_title  # Raw title of the torrent
-        self.size = size  # Size of the video file inside the torrent - it may be updated during __process_torrent()
-        self.magnet = magnet  # Magnet to torrent
-        self.info_hash = info_hash  # Hash of the torrent
-        self.link = link  # Link to download torrent file or magnet link
-        self.seeders = seeders  # The number of seeders
-        self.languages = languages  # Language of the torrent
-        self.indexer = indexer  # Indexer of the torrent
-        self.type = type  # "series" or "movie"
-        self.privacy = privacy  # "public" or "private"
-        self.tmdb_id = tmdb_id  # TMDB ID for linking with metadata
+        self.raw_title = raw_title
+        self.size = size
+        self.magnet = magnet
+        self.info_hash = info_hash
+        self.link = link
+        self.seeders = seeders
+        self.languages = languages
+        self.indexer = indexer
+        self.type = type
+        self.privacy = privacy
+        self.tmdb_id = tmdb_id
 
-        self.file_name = None  # it may be updated during __process_torrent()
-        self.files = None  # The files inside of the torrent. If it's None, it means that there is only one file inside of the torrent
-        self.torrent_download = torrent_download  # The torrent jackett download url if its None, it means that there is only a magnet link provided by Jackett. It also means, that we cant do series file filtering before debrid.
-        self.trackers = []  # Trackers of the torrent
-        self.file_index = None  # Index of the file inside of the torrent - it may be updated durring __process_torrent() and update_availability(). If the index is None and torrent is not None, it means that the series episode is not inside of the torrent.
-        self.full_index = None  # Case where we cannot call RD to get the full index. Else None
-        self.availability = False  # If it's instantly available on the debrid service
+        self.file_name = None
+        self.files = None
+        self.torrent_download = torrent_download
+        self.trackers = []
+        self.file_index = None
+        self.full_index = None
+        self.availability = False
 
-        # Ensure parsed_data is always set (parse if not provided)
         if parsed_data is None:
             from RTN import parse
             parsed_data = parse(raw_title)
-        self.parsed_data: ParsedData = parsed_data  # Ranked result
+        self.parsed_data: ParsedData = parsed_data
 
     def to_debrid_stream_query(self, media: Media, config: dict = None) -> dict:
         """Build the query dict embedded in playback URLs.
 
-        For private indexers (Sharewood, C411, Torr9), credentials were stripped
-        before caching.  Reconstruct them here at serve time using the current
-        user config and server settings so debrid services receive valid URLs.
+        For private indexers, credentials were stripped before caching.
+        Reconstruct them here at serve time using the current user config
+        and server settings so debrid services receive valid URLs.
         """
         from stream_fusion.settings import settings
 
@@ -55,23 +60,29 @@ class TorrentItem:
 
         if self.info_hash and self.indexer in _PRIVATE_CREDENTIAL_INDEXERS:
             if self.indexer == "C411 - API" and settings.c411_api_key:
-                # Re-add C411 announce tracker to magnet
                 c411_tracker = settings.c411_passkey or ""
                 if c411_tracker and magnet and "&tr=" not in magnet:
                     magnet = f"{magnet}&tr={quote(c411_tracker, safe='')}"
-                # Reconstruct torrent_download from info_hash + server API key
                 if not torrent_download:
                     base = settings.c411_url.rstrip("/")
                     torrent_download = f"{base}/api?t=get&id={self.info_hash}&apikey={settings.c411_api_key}"
 
             elif self.indexer == "Torr9 - API" and settings.torr9_api_key:
-                # Re-add Torr9 announce tracker to magnet
                 if magnet and "&tr=" not in magnet:
                     torr9_tracker = f"https://tracker.torr9.xyz/announce/{settings.torr9_api_key}"
                     magnet = f"{magnet}&tr={quote(torr9_tracker, safe='')}"
 
+            elif self.indexer == "LaCale - API" and settings.lacale_api_key:
+                if magnet and "&tr=" not in magnet:
+                    lacale_tracker = f"https://tracker.lacale.fr/announce/{settings.lacale_api_key}"
+                    magnet = f"{magnet}&tr={quote(lacale_tracker, safe='')}"
+
+            elif self.indexer == "GenerationFree - API" and settings.generationfree_api_key:
+                if magnet and "&tr=" not in magnet:
+                    generationfree_tracker = f"https://tracker.generationfree.fr/announce/{settings.generationfree_api_key}"
+                    magnet = f"{magnet}&tr={quote(generationfree_tracker, safe='')}"
+
             elif self.indexer == "Sharewood - API":
-                # Resolve passkey: server-wide account takes priority over user passkey
                 sharewood_passkey = None
                 if settings.sharewood_unique_account and settings.sharewood_passkey:
                     sharewood_passkey = settings.sharewood_passkey
@@ -91,12 +102,11 @@ class TorrentItem:
             "service": self.availability if self.availability else "DL",
             "privacy": self.privacy if self.privacy else "private",
         }
-    
+
     def to_dict(self):
         resolution = getattr(self.parsed_data, 'resolution', 'UNKNOWN') if self.parsed_data else 'NONE'
         logger.debug(f"TorrentItem.to_dict(): '{self.raw_title[:60]}' → resolution='{resolution}' (caching)")
 
-        # Convert parsed_data to dict if it exists
         parsed_data_dict = None
         if self.parsed_data:
             if isinstance(self.parsed_data, ParsedData):
@@ -125,7 +135,7 @@ class TorrentItem:
             'availability': self.availability,
             'parsed_data': parsed_data_dict,
         }
-    
+
     @classmethod
     def from_dict(cls, data):
         if not isinstance(data, dict):
@@ -154,24 +164,20 @@ class TorrentItem:
         instance.full_index = data['full_index']
         instance.availability = data['availability']
 
-        # Use cached parsed_data if available, otherwise parse raw_title
         if data.get('parsed_data'):
             try:
-                # Try to reconstruct ParsedData from dict
                 reconstructed = ParsedData(**data['parsed_data'])
                 logger.debug(f"TorrentItem.from_dict(): Reconstructed ParsedData: {reconstructed}, resolution={getattr(reconstructed, 'resolution', 'UNKNOWN')}")
-                # Validate that reconstruction was successful (not an empty/default object)
                 if reconstructed is not None:
                     instance.parsed_data = reconstructed
                 else:
-                    logger.warning(f"TorrentItem.from_dict(): Reconstructed ParsedData is None, will re-parse")
+                    logger.warning("TorrentItem.from_dict(): Reconstructed ParsedData is None, will re-parse")
                     instance.parsed_data = parse(instance.raw_title)
             except Exception as e:
                 logger.warning(f"Failed to reconstruct ParsedData from cache: {e}, will re-parse")
                 instance.parsed_data = parse(instance.raw_title)
         else:
-            # Fallback to parsing if no cached parsed_data
-            logger.debug(f"TorrentItem.from_dict(): No parsed_data in cache dict, will parse")
+            logger.debug("TorrentItem.from_dict(): No parsed_data in cache dict, will parse")
             instance.parsed_data = parse(instance.raw_title)
 
         resolution = getattr(instance.parsed_data, 'resolution', 'UNKNOWN') if instance.parsed_data else 'NONE'

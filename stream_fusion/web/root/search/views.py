@@ -1,9 +1,7 @@
 import hashlib
 import time
 from fastapi import APIRouter, Depends, HTTPException, Request
-from uuid import UUID
 import asyncio
-
 
 from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
 from stream_fusion.services.postgresql.dao.torrentitem_dao import TorrentItemDAO
@@ -25,7 +23,6 @@ from stream_fusion.utils.jackett.jackett_service import JackettService
 from stream_fusion.utils.parser.parser_service import StreamParser
 from stream_fusion.utils.sharewood.sharewood_service import SharewoodService
 from stream_fusion.utils.yggfilx.yggflix_service import YggflixService
-from stream_fusion.utils.yggfilx.yggflix_result import YggflixResult
 from stream_fusion.utils.metdata.cinemeta import Cinemeta
 from stream_fusion.utils.metdata.tmdb import TMDB
 from stream_fusion.utils.models.movie import Movie
@@ -43,9 +40,7 @@ from stream_fusion.utils.c411.c411_result import C411Result as C411SearchResult
 from stream_fusion.utils.torr9.torr9_service import Torr9Service
 from stream_fusion.utils.torr9.torr9_result import Torr9Result as Torr9SearchResult
 from stream_fusion.utils.lacale.lacale_service import LaCaleService
-from stream_fusion.utils.lacale.lacale_result import LaCaleResult as LaCaleSearchResult
 from stream_fusion.utils.generationfree.generationfree_service import GenerationFreeService
-from stream_fusion.utils.generationfree.generationfree_result import GenerationFreeResult as GenerationFreeSearchResult
 from stream_fusion.settings import settings
 
 
@@ -62,16 +57,50 @@ def get_client_ip(request: Request) -> str:
     return request.client.host
 
 
-async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key, get_metadata, stream_type, debrid_services, torrent_dao, request):
+def serialize_streams_for_cache(streams):
+    return [
+        stream.model_dump() if hasattr(stream, "model_dump")
+        else stream.dict() if hasattr(stream, "dict")
+        else stream.__dict__
+        for stream in streams
+    ]
+
+
+def deserialize_streams_from_cache(cached_streams):
+    if not isinstance(cached_streams, list):
+        return []
+    return [
+        Stream(**item) if not isinstance(item, Stream) else item
+        for item in cached_streams
+    ]
+
+
+def has_stremthru_enabled(debrid_services):
+    return any(type(debrid).__name__ == "StremThru" for debrid in debrid_services)
+
+
+async def full_prefetch_from_cache(
+    media,
+    config,
+    redis_cache,
+    stream_cache_key,
+    get_metadata,
+    stream_type,
+    debrid_services,
+    torrent_dao,
+    request,
+):
     try:
         await asyncio.sleep(1.0)
-        http_session = getattr(request.app.state, 'http_session', None)
+        http_session = getattr(request.app.state, "http_session", None)
 
         current_season_num = int(media.season.replace("S", ""))
         current_episode_num = int(media.episode.replace("E", ""))
         next_episode_num = current_episode_num + 1
 
-        next_episode_id = f"{media.id.split(':')[0]}:{current_season_num}:{next_episode_num}"
+        next_episode_id = (
+            f"{media.id.split(':')[0]}:{current_season_num}:{next_episode_num}"
+        )
 
         next_media_mock = type(media)(
             id=next_episode_id,
@@ -79,21 +108,28 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
             titles=media.titles,
             season=f"S{current_season_num:02d}",
             episode=f"E{next_episode_num:02d}",
-            languages=media.languages
+            languages=media.languages,
         )
 
         next_stream_key = stream_cache_key(next_media_mock)
         cached_next = await redis_cache.get(next_stream_key)
 
         if cached_next is None:
-            logger.debug(f"Pre-fetch: Starting full background search for next episode {next_episode_id}")
+            logger.debug(
+                f"Pre-fetch: Starting full background search for next episode {next_episode_id}"
+            )
 
             async def fetch_next_metadata():
                 return await get_metadata(next_episode_id, stream_type)
 
             next_media = await asyncio.wait_for(
-                redis_cache.get_or_set(fetch_next_metadata, next_episode_id, stream_type, config["metadataProvider"]),
-                timeout=5.0
+                redis_cache.get_or_set(
+                    fetch_next_metadata,
+                    next_episode_id,
+                    stream_type,
+                    config["metadataProvider"],
+                ),
+                timeout=5.0,
             )
 
             search_results = []
@@ -104,18 +140,32 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                 background_torrent_dao = TorrentItemDAO(background_session)
                 torrent_service = TorrentService(config, background_torrent_dao)
 
-                if hasattr(next_media, 'tmdb_id') and next_media.tmdb_id:
+                if hasattr(next_media, "tmdb_id") and next_media.tmdb_id:
                     try:
-                        postgres_items = await background_torrent_dao.search_by_tmdb_id(int(next_media.tmdb_id))
+                        postgres_items = await background_torrent_dao.search_by_tmdb_id(
+                            int(next_media.tmdb_id)
+                        )
                         if postgres_items:
-                            logger.debug(f"Pre-fetch: Found {len(postgres_items)} results from Postgres for TMDB ID {next_media.tmdb_id}")
+                            logger.debug(
+                                f"Pre-fetch: Found {len(postgres_items)} results from Postgres for TMDB ID {next_media.tmdb_id}"
+                            )
                             for db_item in postgres_items:
-                                if db_item.indexer in ['Yggtorrent - API', 'C411 - API', 'Torr9 - API']:
+                                if db_item.indexer in [
+                                    "Yggtorrent - API",
+                                    "C411 - API",
+                                    "Torr9 - API",
+                                ]:
                                     postgres_results.append(db_item.to_torrent_item())
-                            postgres_results = filter_items(postgres_results, next_media, config=config)
-                            logger.debug(f"Pre-fetch: After filtering: {len(postgres_results)} Postgres results for {next_media.season}{next_media.episode}")
+                            postgres_results = filter_items(
+                                postgres_results, next_media, config=config
+                            )
+                            logger.debug(
+                                f"Pre-fetch: After filtering: {len(postgres_results)} Postgres results for {next_media.season}{next_media.episode}"
+                            )
                     except Exception as pg_error:
-                        logger.debug(f"Pre-fetch: Postgres search failed: {str(pg_error)}")
+                        logger.debug(
+                            f"Pre-fetch: Postgres search failed: {str(pg_error)}"
+                        )
 
                 if config["zilean"]:
                     zilean_service = ZileanService(config, session=http_session)
@@ -126,9 +176,15 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                             for torrent in zilean_search_results
                             if len(getattr(torrent, "info_hash", "")) == 40
                         ]
-                        zilean_search_results = filter_items(zilean_search_results, next_media, config=config)
-                        zilean_search_results = await torrent_service.convert_and_process(zilean_search_results)
-                        search_results = merge_items(search_results, zilean_search_results)
+                        zilean_search_results = filter_items(
+                            zilean_search_results, next_media, config=config
+                        )
+                        zilean_search_results = await torrent_service.convert_and_process(
+                            zilean_search_results
+                        )
+                        search_results = merge_items(
+                            search_results, zilean_search_results
+                        )
 
                 if config.get("c411") and settings.c411_enable:
                     try:
@@ -138,11 +194,16 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                             c411_results = [
                                 C411SearchResult().from_api_item(item, next_media)
                                 for item in c411_results
-                                if getattr(item, "info_hash", None) and len(item.info_hash) == 40
+                                if getattr(item, "info_hash", None)
+                                and len(item.info_hash) == 40
                             ]
-                            c411_results = await torrent_service.convert_and_process(c411_results)
+                            c411_results = await torrent_service.convert_and_process(
+                                c411_results
+                            )
                             search_results = merge_items(search_results, c411_results)
-                            logger.debug(f"Pre-fetch: C411 API: {len(c411_results)} results")
+                            logger.debug(
+                                f"Pre-fetch: C411 API: {len(c411_results)} results"
+                            )
                     except Exception as e:
                         logger.debug(f"Pre-fetch: C411 search failed: {e}")
 
@@ -154,11 +215,16 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                             torr9_results = [
                                 Torr9SearchResult().from_api_item(item, next_media)
                                 for item in torr9_results
-                                if getattr(item, "info_hash", None) and len(item.info_hash) == 40
+                                if getattr(item, "info_hash", None)
+                                and len(item.info_hash) == 40
                             ]
-                            torr9_results = await torrent_service.convert_and_process(torr9_results)
+                            torr9_results = await torrent_service.convert_and_process(
+                                torr9_results
+                            )
                             search_results = merge_items(search_results, torr9_results)
-                            logger.debug(f"Pre-fetch: Torr9 API: {len(torr9_results)} results")
+                            logger.debug(
+                                f"Pre-fetch: Torr9 API: {len(torr9_results)} results"
+                            )
                     except Exception as e:
                         logger.debug(f"Pre-fetch: Torr9 search failed: {e}")
 
@@ -167,40 +233,62 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                         lacale_service = LaCaleService(config, session=http_session)
                         lacale_results = await lacale_service.search(next_media)
                         if lacale_results:
-                            lacale_results = await torrent_service.convert_and_process(lacale_results)
+                            lacale_results = await torrent_service.convert_and_process(
+                                lacale_results
+                            )
                             search_results = merge_items(search_results, lacale_results)
-                            logger.debug(f"Pre-fetch: LaCale API: {len(lacale_results)} results")
+                            logger.debug(
+                                f"Pre-fetch: LaCale API: {len(lacale_results)} results"
+                            )
                     except Exception as e:
                         logger.debug(f"Pre-fetch: LaCale search failed: {e}")
 
                 if config.get("generationfree"):
                     try:
-                        generationfree_service = GenerationFreeService(config, session=http_session)
-                        generationfree_results = await generationfree_service.search(next_media)
+                        generationfree_service = GenerationFreeService(
+                            config, session=http_session
+                        )
+                        generationfree_results = await generationfree_service.search(
+                            next_media
+                        )
                         if generationfree_results:
-                            generationfree_results = await torrent_service.convert_and_process(generationfree_results)
-                            search_results = merge_items(search_results, generationfree_results)
-                            logger.debug(f"Pre-fetch: GenerationFree API: {len(generationfree_results)} results")
+                            generationfree_results = (
+                                await torrent_service.convert_and_process(
+                                    generationfree_results
+                                )
+                            )
+                            search_results = merge_items(
+                                search_results, generationfree_results
+                            )
+                            logger.debug(
+                                f"Pre-fetch: GenerationFree API: {len(generationfree_results)} results"
+                            )
                     except Exception as e:
                         logger.debug(f"Pre-fetch: GenerationFree search failed: {e}")
 
                 if postgres_results:
                     search_results = merge_items(postgres_results, search_results)
-                    logger.debug(f"Pre-fetch: Merged {len(postgres_results)} Postgres + {len(search_results)} external = {len(search_results)} total")
+                    logger.debug(
+                        f"Pre-fetch: Merged {len(postgres_results)} Postgres + {len(search_results)} external = {len(search_results)} total"
+                    )
 
                 if search_results:
-                    # Sort by indexer priority (C411/Torr9=1 before Yggtorrent=2)
-                    # so ResultsPerQualityFilter keeps complete packs first
                     search_results = filter_items(search_results, next_media, config=config)
-                    filtered_results = ResultsPerQualityFilter(config).filter(search_results)
-                    torrent_smart_container = TorrentSmartContainer(filtered_results, next_media)
+                    filtered_results = ResultsPerQualityFilter(config).filter(
+                        search_results
+                    )
+                    torrent_smart_container = TorrentSmartContainer(
+                        filtered_results, next_media
+                    )
 
                     for debrid in debrid_services:
                         hashes = torrent_smart_container.get_unaviable_hashes()
                         ip = get_client_ip(request)
                         result = await debrid.get_availability_bulk(hashes, ip)
                         if result:
-                            torrent_smart_container.update_availability(result, type(debrid), next_media)
+                            torrent_smart_container.update_availability(
+                                result, type(debrid), next_media
+                            )
 
                     if config["cache"]:
                         torrent_smart_container.cache_container_items()
@@ -209,121 +297,178 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                     best_matching_results = sort_items(best_matching_results, config)
 
                     parser = StreamParser(config)
-                    stream_list = await parser.parse_to_stremio_streams(best_matching_results, next_media)
+                    stream_list = await parser.parse_to_stremio_streams(
+                        best_matching_results, next_media
+                    )
                     next_stream_objects = [Stream(**stream) for stream in stream_list]
+                    next_stream_cache = serialize_streams_for_cache(next_stream_objects)
 
-                    await redis_cache.set(stream_cache_key(next_media), next_stream_objects, expiration=1200)
-                    logger.success(f"Pre-fetch: Successfully background pre-cached {len(next_stream_objects)} streams for episode {next_episode_id}")
+                    expiration_time = 600 if has_stremthru_enabled(debrid_services) else 1200
+
+                    await redis_cache.set(
+                        stream_cache_key(next_media),
+                        next_stream_cache,
+                        expiration=expiration_time,
+                    )
+                    logger.success(
+                        f"Pre-fetch: Successfully background pre-cached {len(next_stream_objects)} streams for episode {next_episode_id}"
+                    )
                 else:
-                    logger.debug(f"Pre-fetch: No results found for episode {next_episode_id}")
-                    
+                    logger.debug(
+                        f"Pre-fetch: No results found for episode {next_episode_id}"
+                    )
+
             finally:
                 await background_session.commit()
                 await background_session.close()
-                
+
         else:
             logger.debug(f"Pre-fetch: Next episode {next_episode_id} already cached")
-            
+
     except Exception as e:
         logger.debug(f"Pre-fetch: Error during full background pre-fetch: {str(e)}")
 
 
-async def simple_prefetch_next_episode(media, config, redis_cache, stream_cache_key, get_metadata, stream_type):
+async def simple_prefetch_next_episode(
+    media, config, redis_cache, stream_cache_key, get_metadata, stream_type
+):
     try:
         await asyncio.sleep(0.5)
-        
+
         current_season_num = int(media.season.replace("S", ""))
         current_episode_num = int(media.episode.replace("E", ""))
         next_episode_num = current_episode_num + 1
-        
-        next_episode_id = f"{media.id.split(':')[0]}:{current_season_num}:{next_episode_num}"
-        
+
+        next_episode_id = (
+            f"{media.id.split(':')[0]}:{current_season_num}:{next_episode_num}"
+        )
+
         next_media_mock = type(media)(
             id=next_episode_id,
             tmdb_id=media.tmdb_id,
             titles=media.titles,
             season=f"S{current_season_num:02d}",
             episode=f"E{next_episode_num:02d}",
-            languages=media.languages
+            languages=media.languages,
         )
-        
+
         next_stream_key = stream_cache_key(next_media_mock)
         cached_next = await redis_cache.get(next_stream_key)
-        
+
         if cached_next is None:
-            logger.debug(f"Pre-fetch: Starting simple background search for next episode {next_episode_id}")
+            logger.debug(
+                f"Pre-fetch: Starting simple background search for next episode {next_episode_id}"
+            )
 
             async def fetch_next_metadata():
                 return await get_metadata(next_episode_id, stream_type)
 
             await asyncio.wait_for(
-                redis_cache.get_or_set(fetch_next_metadata, next_episode_id, stream_type, config["metadataProvider"]),
-                timeout=3.0
+                redis_cache.get_or_set(
+                    fetch_next_metadata,
+                    next_episode_id,
+                    stream_type,
+                    config["metadataProvider"],
+                ),
+                timeout=3.0,
             )
             logger.debug(f"Pre-fetch: Metadata cached for episode {next_episode_id}")
-            
+
         else:
             logger.debug(f"Pre-fetch: Next episode {next_episode_id} already cached")
-            
+
     except asyncio.TimeoutError:
-        logger.debug(f"Pre-fetch: Timeout during simple background pre-fetch")
+        logger.debug("Pre-fetch: Timeout during simple background pre-fetch")
     except Exception as e:
         logger.debug(f"Pre-fetch: Error during simple background pre-fetch: {str(e)}")
 
 
-async def prefetch_next_episode(media, config, redis_cache, stream_cache_key, get_metadata, get_and_filter_results, stream_processing, ResultsPerQualityFilter, Stream, stream_type):
+async def prefetch_next_episode(
+    media,
+    config,
+    redis_cache,
+    stream_cache_key,
+    get_metadata,
+    get_and_filter_results,
+    stream_processing,
+    ResultsPerQualityFilter,
+    Stream,
+    stream_type,
+    debrid_services,
+):
     try:
         current_season_num = int(media.season.replace("S", ""))
         current_episode_num = int(media.episode.replace("E", ""))
         next_episode_num = current_episode_num + 1
-        
-        next_episode_id = f"{media.id.split(':')[0]}:{current_season_num}:{next_episode_num}"
-        
+
+        next_episode_id = (
+            f"{media.id.split(':')[0]}:{current_season_num}:{next_episode_num}"
+        )
+
         next_media_mock = type(media)(
             id=next_episode_id,
             tmdb_id=media.tmdb_id,
             titles=media.titles,
             season=f"S{current_season_num:02d}",
             episode=f"E{next_episode_num:02d}",
-            languages=media.languages
+            languages=media.languages,
         )
-        
+
         next_stream_key = stream_cache_key(next_media_mock)
         cached_next = await redis_cache.get(next_stream_key)
-        
-        if cached_next is None:
-            logger.info(f"Pre-fetch: Starting background search for next episode {next_episode_id}")
 
-            expiration_time = 1200
+        if cached_next is None:
+            logger.info(
+                f"Pre-fetch: Starting background search for next episode {next_episode_id}"
+            )
+
+            expiration_time = 600 if has_stremthru_enabled(debrid_services) else 1200
 
             async def fetch_next_metadata():
                 return await get_metadata(next_episode_id, stream_type)
 
             next_media = await asyncio.wait_for(
-                redis_cache.get_or_set(fetch_next_metadata, next_episode_id, stream_type, config["metadataProvider"]),
-                timeout=8.0
+                redis_cache.get_or_set(
+                    fetch_next_metadata,
+                    next_episode_id,
+                    stream_type,
+                    config["metadataProvider"],
+                ),
+                timeout=8.0,
             )
-            
+
             raw_results = await asyncio.wait_for(
                 get_and_filter_results(next_media, config),
-                timeout=12.0
+                timeout=12.0,
             )
             filtered_results = ResultsPerQualityFilter(config).filter(raw_results)
-            next_streams = stream_processing(filtered_results, next_media, config)
+            next_streams = await stream_processing(filtered_results, next_media, config)
             next_stream_objects = [Stream(**stream) for stream in next_streams]
-            
-            await redis_cache.set(stream_cache_key(next_media), next_stream_objects, expiration=expiration_time)
-            logger.success(f"Pre-fetch: Successfully background pre-cached {len(next_stream_objects)} streams for episode {next_episode_id}")
-            
+            next_stream_cache = serialize_streams_for_cache(next_stream_objects)
+
+            await redis_cache.set(
+                stream_cache_key(next_media),
+                next_stream_cache,
+                expiration=expiration_time,
+            )
+            logger.success(
+                f"Pre-fetch: Successfully background pre-cached {len(next_stream_objects)} streams for episode {next_episode_id}"
+            )
+
         else:
             logger.debug(f"Pre-fetch: Next episode {next_episode_id} already cached")
-            
+
     except asyncio.TimeoutError:
-        logger.debug(f"Pre-fetch: Timeout during background pre-fetch")
+        logger.debug("Pre-fetch: Timeout during background pre-fetch")
     except Exception as e:
         error_msg = str(e).lower()
-        if any(keyword in error_msg for keyword in ["connection", "timeout", "reset", "closed"]):
-            logger.debug(f"Pre-fetch: Network issue during background pre-fetch: {str(e)}")
+        if any(
+            keyword in error_msg
+            for keyword in ["connection", "timeout", "reset", "closed"]
+        ):
+            logger.debug(
+                f"Pre-fetch: Network issue during background pre-fetch: {str(e)}"
+            )
         else:
             logger.warning(f"Pre-fetch: Error during background pre-fetch: {str(e)}")
 
@@ -345,21 +490,21 @@ async def get_results(
     config = parse_config(config)
     api_key = config.get("apiKey")
     ip_address = get_client_ip(request)
-    # Only validate the API key if it exists
+
     if api_key:
         await check_api_key(api_key, apikey_dao)
     else:
         logger.warning("Search: API key not found in config.")
         raise HTTPException(status_code=401, detail="API key not found in config.")
 
-    debrid_session = getattr(request.app.state, 'debrid_session', None)
+    debrid_session = getattr(request.app.state, "debrid_session", None)
     debrid_services = get_all_debrid_services(config, debrid_session)
     logger.debug(f"Search: Found {len(debrid_services)} debrid services")
     logger.info(
         f"Search: Debrid services: {[debrid.__class__.__name__ for debrid in debrid_services]}"
     )
 
-    http_session = getattr(request.app.state, 'http_session', None)
+    http_session = getattr(request.app.state, "http_session", None)
 
     async def get_metadata(episode_id=None, media_type=None):
         logger.info(f"Search: Fetching metadata from {config['metadataProvider']}")
@@ -371,7 +516,9 @@ async def get_results(
                 metadata_provider = TMDB(config, session=http_session)
                 return await metadata_provider.get_metadata(actual_id, actual_type)
             except (ValueError, IndexError, KeyError) as e:
-                logger.warning(f"Search: TMDB metadata fetch failed ({str(e)}), falling back to Cinemeta")
+                logger.warning(
+                    f"Search: TMDB metadata fetch failed ({str(e)}), falling back to Cinemeta"
+                )
 
         metadata_provider = Cinemeta(config, session=http_session)
         return await metadata_provider.get_metadata(actual_id, actual_type)
@@ -398,20 +545,35 @@ async def get_results(
     cached_result = await redis_cache.get(stream_cache_key(media))
     if cached_result is not None:
         logger.info("Search: Returning cached processed results")
+        cached_streams = deserialize_streams_from_cache(cached_result)
 
         if isinstance(media, Series):
-            asyncio.create_task(full_prefetch_from_cache(media, config, redis_cache, stream_cache_key, get_metadata, stream_type, debrid_services, torrent_dao, request))
-            await asyncio.sleep(0.5)  # 500ms de délai pour les séries
+            asyncio.create_task(
+                full_prefetch_from_cache(
+                    media,
+                    config,
+                    redis_cache,
+                    stream_cache_key,
+                    get_metadata,
+                    stream_type,
+                    debrid_services,
+                    torrent_dao,
+                    request,
+                )
+            )
+            await asyncio.sleep(0.5)
 
         total_time = time.time() - start
         logger.success(f"Search: Request completed in {total_time:.2f} seconds")
-        return SearchResponse(streams=cached_result)
+        return SearchResponse(streams=cached_streams)
 
     def media_cache_key(media):
         if isinstance(media, Movie):
             key_string = f"media:{media.titles[0]}:{media.year}:{media.languages[0]}"
         elif isinstance(media, Series):
-            key_string = f"media:{media.titles[0]}:{media.languages[0]}:{media.season}{media.episode}"
+            key_string = (
+                f"media:{media.titles[0]}:{media.languages[0]}:{media.season}{media.episode}"
+            )
         else:
             raise TypeError("Only Movie and Series are allowed as media!")
         hashed_key = hashlib.sha256(key_string.encode("utf-8")).hexdigest()
@@ -470,11 +632,15 @@ async def get_results(
                 if not config.get("generationfree"):
                     return []
                 try:
-                    generationfree_service = GenerationFreeService(config, session=http_session)
+                    generationfree_service = GenerationFreeService(
+                        config, session=http_session
+                    )
                     raw = await generationfree_service.search(media)
                     return raw if raw else []
                 except Exception as e:
-                    logger.warning(f"Search: GenerationFree search failed, skipping: {str(e)}")
+                    logger.warning(
+                        f"Search: GenerationFree search failed, skipping: {str(e)}"
+                    )
                 return []
 
             async def _fetch_yggflix_raw():
@@ -488,36 +654,57 @@ async def get_results(
                     logger.warning(f"Search: Yggflix search failed, skipping: {str(e)}")
                 return []
 
-            c411_raw, torr9_raw, lacale_raw, yggflix_raw, generationfree_raw = await asyncio.gather(
-                _fetch_c411_raw(),
-                _fetch_torr9_raw(),
-                _fetch_lacale_raw(),
-                _fetch_yggflix_raw(),
-                _fetch_generationfree_raw(),
+            c411_raw, torr9_raw, lacale_raw, yggflix_raw, generationfree_raw = (
+                await asyncio.gather(
+                    _fetch_c411_raw(),
+                    _fetch_torr9_raw(),
+                    _fetch_lacale_raw(),
+                    _fetch_yggflix_raw(),
+                    _fetch_generationfree_raw(),
+                )
             )
 
             if c411_raw:
                 c411_search_results = await torrent_service.convert_and_process(c411_raw)
-                logger.success(f"Search: Found {len(c411_search_results)} results from C411")
+                logger.success(
+                    f"Search: Found {len(c411_search_results)} results from C411"
+                )
                 search_results = merge_items(search_results, c411_search_results)
             if torr9_raw:
-                torr9_search_results = await torrent_service.convert_and_process(torr9_raw)
-                logger.success(f"Search: Found {len(torr9_search_results)} results from Torr9")
+                torr9_search_results = await torrent_service.convert_and_process(
+                    torr9_raw
+                )
+                logger.success(
+                    f"Search: Found {len(torr9_search_results)} results from Torr9"
+                )
                 search_results = merge_items(search_results, torr9_search_results)
             if lacale_raw:
-                lacale_search_results = await torrent_service.convert_and_process(lacale_raw)
-                logger.success(f"Search: Found {len(lacale_search_results)} results from LaCale")
+                lacale_search_results = await torrent_service.convert_and_process(
+                    lacale_raw
+                )
+                logger.success(
+                    f"Search: Found {len(lacale_search_results)} results from LaCale"
+                )
                 search_results = merge_items(search_results, lacale_search_results)
             if generationfree_raw:
-                generationfree_search_results = await torrent_service.convert_and_process(generationfree_raw)
-                logger.success(f"Search: Found {len(generationfree_search_results)} results from GenerationFree")
-                search_results = merge_items(search_results, generationfree_search_results)
+                generationfree_search_results = (
+                    await torrent_service.convert_and_process(generationfree_raw)
+                )
+                logger.success(
+                    f"Search: Found {len(generationfree_search_results)} results from GenerationFree"
+                )
+                search_results = merge_items(
+                    search_results, generationfree_search_results
+                )
             if yggflix_raw:
-                yggflix_search_results = await torrent_service.convert_and_process(yggflix_raw)
-                logger.success(f"Search: Found {len(yggflix_search_results)} results from Yggflix")
+                yggflix_search_results = await torrent_service.convert_and_process(
+                    yggflix_raw
+                )
+                logger.success(
+                    f"Search: Found {len(yggflix_search_results)} results from Yggflix"
+                )
                 search_results = merge_items(search_results, yggflix_search_results)
 
-            # 2. Public cache (DMM etc.)
             if config["cache"] and not update_cache and len(search_results) < int(
                 config["minCachedResults"]
             ):
@@ -536,7 +723,6 @@ async def get_results(
                     )
                     search_results = merge_items(search_results, public_cached_results)
 
-            # 3. Zilean si pas assez de résultats
             if config["zilean"] and len(search_results) < int(
                 config["minCachedResults"]
             ):
@@ -559,9 +745,9 @@ async def get_results(
                     )
                     search_results = merge_items(search_results, zilean_search_results)
 
-            if config["sharewood"] and settings.sharewood_enable and len(search_results) < int(
-                config["minCachedResults"]
-            ):
+            if config["sharewood"] and settings.sharewood_enable and len(
+                search_results
+            ) < int(config["minCachedResults"]):
                 try:
                     sharewood_service = SharewoodService(config, session=http_session)
                     sharewood_search_results = await sharewood_service.search(media)
@@ -574,9 +760,13 @@ async def get_results(
                                 sharewood_search_results
                             )
                         )
-                        search_results = merge_items(search_results, sharewood_search_results)
+                        search_results = merge_items(
+                            search_results, sharewood_search_results
+                        )
                 except Exception as e:
-                    logger.warning(f"Search: Sharewood search failed, skipping: {str(e)}")
+                    logger.warning(
+                        f"Search: Sharewood search failed, skipping: {str(e)}"
+                    )
 
             if config["jackett"] and len(search_results) < int(
                 config["minCachedResults"]
@@ -593,13 +783,15 @@ async def get_results(
                     search_results = merge_items(search_results, torrent_results)
 
             if update_cache and search_results:
-                logger.info(
-                    f"Search: Updating cache with {len(search_results)} results"
-                )
+                logger.info(f"Search: Updating cache with {len(search_results)} results")
                 try:
                     cache_key = media_cache_key(media)
                     search_results_dict = [item.to_dict() for item in search_results]
-                    await redis_cache.set(cache_key, search_results_dict, expiration=settings.redis_expiration)
+                    await redis_cache.set(
+                        cache_key,
+                        search_results_dict,
+                        expiration=settings.redis_expiration,
+                    )
                     logger.success("Search: Cache update successful")
                 except Exception as e:
                     logger.error(f"Search: Error updating cache: {e}")
@@ -608,19 +800,22 @@ async def get_results(
         return search_results
 
     async def get_and_filter_results(media, config):
-        # Postgres acts as a local cache for private indexers (Yggtorrent, C411, Torr9)
-        # and is always queried directly, bypassing Redis
         postgres_results = []
-        if hasattr(media, 'tmdb_id') and media.tmdb_id:
+        if hasattr(media, "tmdb_id") and media.tmdb_id:
             try:
                 postgres_items = await torrent_dao.search_by_tmdb_id(int(media.tmdb_id))
                 if postgres_items:
                     logger.success(
                         f"Search: Found {len(postgres_items)} results from Postgres (local cache) for TMDB ID {media.tmdb_id}"
                     )
-                    torrent_service = TorrentService(config, torrent_dao)
                     for db_item in postgres_items:
-                        if db_item.indexer in ['Yggtorrent - API', 'C411 - API', 'Torr9 - API', 'LaCale - API', 'GenerationFree - API']:
+                        if db_item.indexer in [
+                            "Yggtorrent - API",
+                            "C411 - API",
+                            "Torr9 - API",
+                            "LaCale - API",
+                            "GenerationFree - API",
+                        ]:
                             torrent_item = db_item.to_torrent_item()
                             postgres_results.append(torrent_item)
             except Exception as pg_error:
@@ -630,10 +825,16 @@ async def get_results(
         external_results = await redis_cache.get(cache_key)
 
         if external_results is None:
-            logger.info("Search: No external sources in Redis cache. Performing new search.")
+            logger.info(
+                "Search: No external sources in Redis cache. Performing new search."
+            )
             external_results = await get_search_results(media, config)
             external_results_dict = [item.to_dict() for item in external_results]
-            await redis_cache.set(cache_key, external_results_dict, expiration=settings.redis_expiration)
+            await redis_cache.set(
+                cache_key,
+                external_results_dict,
+                expiration=settings.redis_expiration,
+            )
             logger.success(
                 f"Search: Cached {len(external_results)} external results in Redis (Sharewood/Zilean/Jackett)"
             )
@@ -646,7 +847,9 @@ async def get_results(
             ]
 
         all_results = merge_items(postgres_results, external_results)
-        logger.info(f"Search: Merged Postgres ({len(postgres_results)}) + External ({len(external_results)}) = {len(all_results)} total results")
+        logger.info(
+            f"Search: Merged Postgres ({len(postgres_results)}) + External ({len(external_results)}) = {len(all_results)} total results"
+        )
 
         filtered_results = filter_items(all_results, media, config=config)
 
@@ -659,7 +862,11 @@ async def get_results(
             await redis_cache.delete(cache_key)
             external_results = await get_search_results(media, config)
             external_results_dict = [item.to_dict() for item in external_results]
-            await redis_cache.set(cache_key, external_results_dict, expiration=settings.redis_expiration)
+            await redis_cache.set(
+                cache_key,
+                external_results_dict,
+                expiration=settings.redis_expiration,
+            )
             logger.success(
                 f"Search: Recreated external cache with {len(external_results)} results"
             )
@@ -684,20 +891,20 @@ async def get_results(
                 hashes = torrent_smart_container.get_unaviable_hashes()
                 ip = get_client_ip(request)
                 result = await debrid.get_availability_bulk(hashes, ip)
+
                 if result:
                     torrent_smart_container.update_availability(
                         result, type(debrid), media
                     )
-                    if isinstance(result, dict):
-                        count = len(result.items())
-                    else:
-                        count = len(result)
 
-                    is_stremthru = (type(debrid).__name__ == "StremThru" or
-                                   hasattr(debrid, 'store_name') and getattr(debrid, 'store_name', None) is not None)
-                    
+                    checked_count = len(hashes)
+                    if isinstance(result, dict):
+                        returned_count = len(result.get("data", {}).get("magnets", []))
+                    else:
+                        returned_count = len(result)
+
                     logger.info(
-                        f"Search: Checked availability for {count} items with {type(debrid).__name__}"
+                        f"Search: Checked availability for {checked_count} items with {type(debrid).__name__} (returned {returned_count})"
                     )
                 else:
                     logger.warning(
@@ -712,7 +919,9 @@ async def get_results(
         logger.info(f"Search: Found {len(best_matching_results)} best matching results")
 
         parser = StreamParser(config)
-        stream_list = await parser.parse_to_stremio_streams(best_matching_results, media)
+        stream_list = await parser.parse_to_stremio_streams(
+            best_matching_results, media
+        )
         logger.success(f"Search: Processed {len(stream_list)} streams for Stremio")
 
         return stream_list
@@ -720,19 +929,34 @@ async def get_results(
     stream_list = await stream_processing(search_results, media, config)
     streams = [Stream(**stream) for stream in stream_list]
 
-    expiration_time = 1200
-    has_stremthru = any(
-        type(debrid).__name__ == "StremThru" or hasattr(debrid, 'store_name')
-        for debrid in debrid_services
-    )
-    if has_stremthru:
-        expiration_time = 600
-        logger.info(f"Search: Using reduced cache expiration ({expiration_time}s) for StremThru")
+    stream_cache_value = serialize_streams_for_cache(streams)
 
-    await redis_cache.set(stream_cache_key(media), streams, expiration=expiration_time)
+    expiration_time = 600 if has_stremthru_enabled(debrid_services) else 1200
+    if expiration_time == 600:
+        logger.info(
+            f"Search: Using reduced cache expiration ({expiration_time}s) for StremThru"
+        )
+
+    await redis_cache.set(
+        stream_cache_key(media),
+        stream_cache_value,
+        expiration=expiration_time,
+    )
 
     if isinstance(media, Series):
-        asyncio.create_task(full_prefetch_from_cache(media, config, redis_cache, stream_cache_key, get_metadata, stream_type, debrid_services, torrent_dao, request))
+        asyncio.create_task(
+            full_prefetch_from_cache(
+                media,
+                config,
+                redis_cache,
+                stream_cache_key,
+                get_metadata,
+                stream_type,
+                debrid_services,
+                torrent_dao,
+                request,
+            )
+        )
 
     total_time = time.time() - start
     logger.info(f"Search: Request completed in {total_time:.2f} seconds")

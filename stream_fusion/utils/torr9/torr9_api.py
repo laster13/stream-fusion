@@ -27,7 +27,7 @@ class Torr9API:
         self.api_key = api_key if api_key is not None else settings.torr9_api_key
         self._external_session = session is not None
         self._session = session
-        self._timeout = aiohttp.ClientTimeout(sock_read=2)
+        self._timeout = aiohttp.ClientTimeout(sock_read=8, total=15)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -39,21 +39,26 @@ class Torr9API:
         if not self.api_key:
             logger.warning("Torr9: API key not configured (TORR9_API_KEY), skipping request")
             return None
+
         params["apikey"] = self.api_key
         session = await self._get_session()
-        try:
-            async with session.get(
-                self.base_url, params=params, allow_redirects=True,
-                timeout=aiohttp.ClientTimeout(sock_read=2, total=5)
-            ) as response:
-                response.raise_for_status()
-                return await response.text()
-        except aiohttp.ClientError as e:
-            logger.error(f"Torr9: HTTP error: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Torr9: Unexpected error: {e}")
-            return None
+
+        for attempt in range(2):
+            try:
+                async with session.get(
+                    self.base_url,
+                    params=params,
+                    allow_redirects=True,
+                    timeout=self._timeout,
+                ) as response:
+                    response.raise_for_status()
+                    return await response.text()
+            except aiohttp.ClientError as e:
+                logger.error(f"Torr9: HTTP error (attempt {attempt + 1}/2): {e}")
+            except Exception as e:
+                logger.error(f"Torr9: Unexpected error (attempt {attempt + 1}/2): {e}")
+
+        return None
 
     def _parse_xml(self, xml_content: str) -> List[Torr9RawResult]:
         results = []
@@ -96,7 +101,6 @@ class Torr9API:
                 type_el = item.find("type")
                 result.privacy = type_el.text if type_el is not None else "public"
 
-                # Extract hash from magnet if missing
                 if not result.info_hash and result.magnet:
                     m = re.search(r"btih:([a-fA-F0-9]{40})", result.magnet, re.IGNORECASE)
                     if m:
@@ -116,16 +120,20 @@ class Torr9API:
         imdb_id: Optional[str] = None,
         title: Optional[str] = None,
     ) -> List[Torr9RawResult]:
-        params = {"t": "movie", "cat": "2000"}
+        results = []
+
         if imdb_id:
-            params["imdbid"] = imdb_id
-        elif title:
-            params["q"] = title
-        else:
-            return []
-        xml = await self._request_xml(params)
-        results = self._parse_xml(xml) if xml else []
-        logger.info(f"Torr9: search_movie imdb={imdb_id} -> {len(results)} results")
+            params = {"t": "movie", "cat": "2000", "imdbid": imdb_id}
+            xml = await self._request_xml(params)
+            results = self._parse_xml(xml) if xml else []
+            logger.info(f"Torr9: search_movie imdb={imdb_id} -> {len(results)} results")
+
+        if not results and title:
+            params = {"t": "movie", "cat": "2000", "q": title}
+            xml = await self._request_xml(params)
+            results = self._parse_xml(xml) if xml else []
+            logger.info(f"Torr9: search_movie title={title} -> {len(results)} results")
+
         return results
 
     async def search_series(
@@ -135,18 +143,32 @@ class Torr9API:
         season: Optional[int] = None,
         episode: Optional[int] = None,
     ) -> List[Torr9RawResult]:
-        params = {"t": "tvsearch", "cat": "5000"}
+        results = []
+
         if imdb_id:
-            params["imdbid"] = imdb_id
-        elif title:
-            params["q"] = title
-        else:
-            return []
-        if season is not None:
-            params["season"] = season
-        if episode is not None:
-            params["ep"] = episode
-        xml = await self._request_xml(params)
-        results = self._parse_xml(xml) if xml else []
-        logger.info(f"Torr9: search_series imdb={imdb_id} q={title} s={season} e={episode} -> {len(results)} results")
+            params = {"t": "tvsearch", "cat": "5000", "imdbid": imdb_id}
+            if season is not None:
+                params["season"] = season
+            if episode is not None:
+                params["ep"] = episode
+
+            xml = await self._request_xml(params)
+            results = self._parse_xml(xml) if xml else []
+            logger.info(
+                f"Torr9: search_series imdb={imdb_id} s={season} e={episode} -> {len(results)} results"
+            )
+
+        if not results and title:
+            params = {"t": "tvsearch", "cat": "5000", "q": title}
+            if season is not None:
+                params["season"] = season
+            if episode is not None:
+                params["ep"] = episode
+
+            xml = await self._request_xml(params)
+            results = self._parse_xml(xml) if xml else []
+            logger.info(
+                f"Torr9: search_series title={title} s={season} e={episode} -> {len(results)} results"
+            )
+
         return results
