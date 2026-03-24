@@ -207,7 +207,7 @@ class Torr9Service:
             url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
             response = requests.get(
                 url,
-                params={"api_key": settings.tmdb_api_key, "language": "fr-FR"},
+                params={"api_key": settings.tmdb_api_key, "language": settings.tmdb_language},
                 timeout=10,
             )
             response.raise_for_status()

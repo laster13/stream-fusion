@@ -1,5 +1,4 @@
 import os
-import threading
 
 from typing import List, Dict
 from RTN import parse
@@ -250,7 +249,7 @@ class TorrentSmartContainer:
         self.logger.info(
             "TorrentSmartContainer: Starting cache process for container items"
         )
-        threading.Thread(target=self._save_to_cache).start()
+        self._save_to_cache()
 
     def _save_to_cache(self):
         self.logger.info("TorrentSmartContainer: Saving public items to cache")

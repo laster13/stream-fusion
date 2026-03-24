@@ -323,9 +323,11 @@ async def get_catalog(
                     item_type = "movie"
                     imdb_id = getattr(details, 'imdb_id', None)
                 else:
-                    details = await get_tv_details(tmdb_id)
                     item_type = "series"
-                    cached_imdb_id = await asyncio.to_thread(redis_client.get, f"tmdbid_to_imdbid:{tmdb_id}")
+                    details, cached_imdb_id = await asyncio.gather(
+                        get_tv_details(tmdb_id),
+                        asyncio.to_thread(redis_client.get, f"tmdbid_to_imdbid:{tmdb_id}"),
+                    )
                     if cached_imdb_id:
                         imdb_id = cached_imdb_id.decode('utf-8') if isinstance(cached_imdb_id, bytes) else cached_imdb_id
                         logger.debug(f"IMDb ID found in cache for TMDB ID {tmdb_id}: {imdb_id}")
