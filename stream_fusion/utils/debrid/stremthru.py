@@ -55,6 +55,21 @@ class StremThru(BaseDebrid):
         if not self.store_name:
             logger.warning("StremThru: Aucun debrideur détecté automatiquement")
 
+    @property
+    def service_name(self) -> str:
+        # Include store name so caches don't collide across services using StremThru
+        return f"stremthru_{self.store_name or 'generic'}"
+
+    def _index_results_by_hash(self, response) -> dict:
+        # StremThru returns a list of {"hash": ..., "status": "cached", ...}
+        if not isinstance(response, list):
+            return {}
+        return {item["hash"]: item for item in response if item.get("hash")}
+
+    def _reconstruct_response(self, items: list):
+        # StremThru-based providers consume a plain list
+        return items
+
     def set_store_credentials(self, store_name, token):
         """Configure les informations d'identification du store pour StremThru."""
         self.store_name = store_name

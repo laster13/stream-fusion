@@ -125,7 +125,6 @@ class Settings(BaseSettings):
     # SECURITY
     secret_api_key: str | None = None
     security_hide_docs: bool = True
-    allow_anonymous_access: bool = True  # Allow access without API key
 
     # POSTGRESQL_DB
     # TODO: Change the values, but break dev environment
@@ -156,16 +155,23 @@ class Settings(BaseSettings):
     jackett_enable: bool = check_env_variable("JACKETT_API_KEY")
 
     # SERVER-SIDE INDEXER ENABLE FLAGS
-    # When False, the indexer is disabled for ALL users regardless of their config.
-    # Mirrors the jackett_enable pattern — set True only when server credentials exist.
-    sharewood_enable: bool = check_env_variable("SHAREWOOD_PASSKEY")
-    c411_enable: bool = check_env_variable("C411_API_KEY")
-    torr9_enable: bool = check_env_variable("TORR9_API_KEY")
-    lacale_enable: bool = check_env_variable("LACALE_API_KEY")
+    # Controls whether an indexer is available on this server instance.
+    # When False, the indexer is hidden from the config page and disabled for ALL users,
+    # regardless of their personal config (even if they have their own credentials).
+    # When True (default), users can enable the indexer and optionally provide their own
+    # credentials — unless a server-side unique account is configured, in which case
+    # the server credentials are used for everyone.
+    # Can be overridden via environment variable (e.g. SHAREWOOD_ENABLE=false).
+    sharewood_enable: bool = True
+    c411_enable: bool = True
+    torr9_enable: bool = True
+    lacale_enable: bool = True
+    generationfree_enable: bool = True
 
     # ZILEAN DMM API
-    zilean_host: str = "zilean"
-    zilean_port: int = 8181
+    zilean_schema: str = "https"
+    zilean_host: str = "zileanfortheweebs.midnightignite.me" # use direct docker container name for internal communication, but can be overridden by environment variable ZILEAN_HOST
+    zilean_port: int | None = None # default port is 8181, but can be overridden by environment variable ZILEAN_PORT
     
     # DEBRIDLINK
     dl_token: str | None = None
@@ -182,7 +188,6 @@ class Settings(BaseSettings):
     # PIKPAK
     pp_credentials: str | None = None
     pp_unique_account: bool = check_env_variable("PP_CREDENTIALS")
-    zilean_schema: str = "http"
     zilean_max_workers: int = 4
     zilean_pool_connections: int = 10
     zilean_api_pool_maxsize: int = 10

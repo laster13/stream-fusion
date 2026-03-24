@@ -161,6 +161,33 @@ class Torbox(BaseDebrid):
         logger.info(f"Torbox: Got download link: {download_link_response['data']}")
         return download_link_response['data']
 
+    # --- Provider overrides for the generic BaseDebrid cache (issue #77) ---
+
+    @property
+    def service_name(self) -> str:
+        return "torbox"
+
+    def _index_results_by_hash(self, response) -> dict:
+        if not isinstance(response, dict):
+            return {}
+        return {
+            item["hash"]: item
+            for item in response.get("data", [])
+            if item.get("hash")
+        }
+
+    def _reconstruct_response(self, items: list):
+        return {"success": True, "detail": "From cache.", "data": items}
+
+    def _sanitize_for_cache(self, item: dict) -> dict:
+        return {
+            "hash": item.get("hash"),
+            "files": [
+                {k: v for k, v in f.items() if k in ("name", "id", "size")}
+                for f in item.get("files", [])
+            ],
+        }
+
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
         logger.info(f"Torbox: Checking availability for {len(hashes_or_magnets)} hashes/magnets")
 

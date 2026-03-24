@@ -143,6 +143,38 @@ class RealDebrid(BaseDebrid):
             await asyncio.sleep(interval)
         return None
 
+    # --- Provider overrides for the generic BaseDebrid cache (issue #77) ---
+
+    @property
+    def service_name(self) -> str:
+        return "realdebrid"
+
+    def _index_results_by_hash(self, response) -> dict:
+        # RD returns either a StremThru list (cached) or an AD-style dict (stub)
+        if isinstance(response, list):
+            return {item["hash"]: item for item in response if item.get("hash")}
+        if isinstance(response, dict):
+            return {
+                m["hash"]: m
+                for m in response.get("data", {}).get("magnets", [])
+                if m.get("hash")
+            }
+        return {}
+
+    def _reconstruct_response(self, items: list):
+        # Return list format so TorrentSmartContainer routes via __using_stremthru
+        return items
+
+    def _sanitize_for_cache(self, item: dict) -> dict:
+        # Strip tokenized private links from StremThru responses before shared storage
+        safe = {k: v for k, v in item.items() if k not in ("link", "url", "stream_link")}
+        if "files" in safe:
+            safe["files"] = [
+                {k2: v2 for k2, v2 in f.items() if k2 in ("name", "index", "size")}
+                for f in (safe["files"] or [])
+            ]
+        return safe
+
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
         if not hashes_or_magnets:
             return {"status": "success", "data": {"magnets": []}}

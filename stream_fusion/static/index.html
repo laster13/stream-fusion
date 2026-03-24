@@ -351,6 +351,7 @@
                             </div>
                         </div>
 
+                        {% if sharewood_enable %}
                         <div class="relative flex gap-x-3">
                             <div class="flex h-6 items-center">
                                 <input id="sharewood" name="sharewood" type="checkbox"
@@ -369,7 +370,9 @@
                                 </p>
                             </div>
                         </div>
+                        {% endif %}
 
+                        {% if c411_enable %}
                         <div class="relative flex gap-x-3">
                             <div class="flex h-6 items-center">
                                 <input id="c411" name="c411" type="checkbox" checked
@@ -382,7 +385,9 @@
                                 <p class="text-gray-500 dark:text-gray-300">Use C411 Torznab API to find more results.</p>
                             </div>
                         </div>
+                        {% endif %}
 
+                        {% if torr9_enable %}
                         <div class="relative flex gap-x-3">
                             <div class="flex h-6 items-center">
                                 <input id="torr9" name="torr9" type="checkbox" checked
@@ -395,7 +400,9 @@
                                 <p class="text-gray-500 dark:text-gray-300">Use Torr9 Torznab API to find more results.</p>
                             </div>
                         </div>
+                        {% endif %}
 
+                        {% if lacale_enable %}
                         <div class="relative flex gap-x-3">
                             <div class="flex h-6 items-center">
                                 <input id="lacale" name="lacale" type="checkbox" checked
@@ -408,7 +415,9 @@
                                 <p class="text-gray-500 dark:text-gray-300">Use LaCale Torznab API to find more results.</p>
                             </div>
                         </div>
+                        {% endif %}
 
+                        {% if generationfree_enable %}
                         <div class="relative flex gap-x-3">
                             <div class="flex h-6 items-center">
                                 <input id="generationfree" name="generationfree" type="checkbox"
@@ -421,6 +430,7 @@
                                 <p class="text-gray-500 dark:text-gray-300">Use Generation Free UNIT3D API to find more results.</p>
                             </div>
                         </div>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -564,7 +574,7 @@
                     </div>
                 </div>
 
-                {% if not sharewood_unique_account %}
+                {% if sharewood_enable and not sharewood_unique_account %}
                 <div id="sharewood-fields" style="display: none;">
                     <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
                         <div class="flex flex-col items-center">
@@ -582,7 +592,7 @@
                 </div>
                 {% endif %}
 
-                {% if not c411_unique_account %}
+                {% if c411_enable and not c411_unique_account %}
                 <div id="c411-fields" style="display: none;">
                     <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
                         <div class="flex flex-col items-center">
@@ -600,7 +610,7 @@
                 </div>
                 {% endif %}
 
-                {% if not torr9_unique_account %}
+                {% if torr9_enable and not torr9_unique_account %}
                 <div id="torr9-fields" style="display: none;">
                     <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
                         <div class="flex flex-col items-center">
@@ -618,7 +628,7 @@
                 </div>
                 {% endif %}
 
-                {% if not lacale_unique_account %}
+                {% if lacale_enable and not lacale_unique_account %}
                 <div id="lacale-fields" style="display: none;">
                     <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
                         <div class="flex flex-col items-center">
@@ -636,7 +646,7 @@
                 </div>
                 {% endif %}
 
-                {% if not generationfree_unique_account %}
+                {% if generationfree_enable and not generationfree_unique_account %}
                 <div id="generationfree-fields" style="display: none;">
                     <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
                         <div class="flex flex-col items-center">
