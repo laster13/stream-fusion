@@ -35,9 +35,14 @@ async def configure(request: Request):
         "ygg_unique_account": settings.ygg_unique_account,
         "jackett_enable": settings.jackett_enable,
         "tb_unique_account": settings.tb_unique_account,
+        "sharewood_enable": settings.sharewood_enable,
+        "c411_enable": settings.c411_enable,
+        "torr9_enable": settings.torr9_enable,
+        "lacale_enable": settings.lacale_enable,
         "c411_unique_account": settings.c411_unique_account,
         "torr9_unique_account": settings.torr9_unique_account,
         "lacale_unique_account": settings.lacale_unique_account,
+        "generationfree_enable": settings.generationfree_enable,
         "generationfree_unique_account": settings.generationfree_unique_account,
     })
 
