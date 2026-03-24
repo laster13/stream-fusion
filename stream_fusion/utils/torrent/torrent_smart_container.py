@@ -903,7 +903,8 @@ class TorrentSmartContainer:
                     )
                     continue
 
-                file_name = file.get("n")
+                # Handle both AllDebrid upload API format (n, s) and status/files API format (name, size, index)
+                file_name = file.get("n") or file.get("name")
                 if not file_name:
                     self.logger.warning(
                         f"TorrentSmartContainer: AllDebrid entry without filename ignored: {file}"
@@ -931,11 +932,13 @@ class TorrentSmartContainer:
                     self.logger.debug(
                         f"TorrentSmartContainer: Matching series file found: {file_name}"
                     )
+                    explicit_index = file.get("index")
+                    effective_index = explicit_index if isinstance(explicit_index, int) and explicit_index >= 0 else file_index
                     files.append(
                         {
-                            "file_index": file_index,
+                            "file_index": effective_index,
                             "title": file_name,
-                            "size": file.get("s", 0),
+                            "size": file.get("s") or file.get("size", 0),
                         }
                     )
                 file_index += 1
@@ -954,7 +957,8 @@ class TorrentSmartContainer:
                     )
                     continue
 
-                file_name = file.get("n")
+                # Handle both AllDebrid upload API format (n, s) and status/files API format (name, size, index)
+                file_name = file.get("n") or file.get("name")
                 if not file_name:
                     self.logger.warning(
                         f"TorrentSmartContainer: AllDebrid entry without filename ignored: {file}"
@@ -964,11 +968,13 @@ class TorrentSmartContainer:
                 self.logger.debug(
                     f"TorrentSmartContainer: Adding movie file: {file_name}"
                 )
+                explicit_index = file.get("index")
+                effective_index = explicit_index if isinstance(explicit_index, int) and explicit_index >= 0 else file_index
                 files.append(
                     {
-                        "file_index": file_index,
+                        "file_index": effective_index,
                         "title": file_name,
-                        "size": file.get("s", 0),
+                        "size": file.get("s") or file.get("size", 0),
                     }
                 )
                 file_index += 1

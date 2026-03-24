@@ -266,6 +266,23 @@ async def full_prefetch_from_cache(
                     except Exception as e:
                         logger.debug(f"Pre-fetch: GenerationFree search failed: {e}")
 
+                if config.get("yggflix"):
+                    try:
+                        yggflix_service = YggflixService(config)
+                        yggflix_results = await asyncio.to_thread(
+                            yggflix_service.search, next_media
+                        )
+                        if yggflix_results:
+                            yggflix_results = await torrent_service.convert_and_process(
+                                yggflix_results
+                            )
+                            search_results = merge_items(search_results, yggflix_results)
+                            logger.debug(
+                                f"Pre-fetch: Yggflix: {len(yggflix_results)} results"
+                            )
+                    except Exception as e:
+                        logger.debug(f"Pre-fetch: Yggflix search failed: {e}")
+
                 if postgres_results:
                     search_results = merge_items(postgres_results, search_results)
                     logger.debug(
@@ -286,6 +303,12 @@ async def full_prefetch_from_cache(
                         hashes = torrent_smart_container.get_unaviable_hashes()
                         ip = get_client_ip(request)
                         result = await debrid.get_availability_bulk_cached(hashes, ip, _avail_redis)
+                        if not result:
+                            # All hashes hit as "not_cached" sentinels — retry direct API
+                            logger.debug(
+                                f"Pre-fetch: All hashes are 'not_cached' sentinels, retrying direct API for {next_episode_id}"
+                            )
+                            result = await debrid.get_availability_bulk(hashes, ip)
                         if result:
                             torrent_smart_container.update_availability(
                                 result, type(debrid), next_media
@@ -302,18 +325,22 @@ async def full_prefetch_from_cache(
                         best_matching_results, next_media
                     )
                     next_stream_objects = [Stream(**stream) for stream in stream_list]
-                    next_stream_cache = serialize_streams_for_cache(next_stream_objects)
 
-                    expiration_time = 600 if has_stremthru_enabled(debrid_services) else 1200
-
-                    await redis_cache.set(
-                        stream_cache_key(next_media),
-                        next_stream_cache,
-                        expiration=expiration_time,
-                    )
-                    logger.success(
-                        f"Pre-fetch: Successfully background pre-cached {len(next_stream_objects)} streams for episode {next_episode_id}"
-                    )
+                    if next_stream_objects:
+                        next_stream_cache = serialize_streams_for_cache(next_stream_objects)
+                        expiration_time = 600 if has_stremthru_enabled(debrid_services) else 1200
+                        await redis_cache.set(
+                            stream_cache_key(next_media),
+                            next_stream_cache,
+                            expiration=expiration_time,
+                        )
+                        logger.success(
+                            f"Pre-fetch: Successfully background pre-cached {len(next_stream_objects)} streams for episode {next_episode_id}"
+                        )
+                    else:
+                        logger.debug(
+                            f"Pre-fetch: No available streams found for episode {next_episode_id}, skipping cache write"
+                        )
                 else:
                     logger.debug(
                         f"Pre-fetch: No results found for episode {next_episode_id}"

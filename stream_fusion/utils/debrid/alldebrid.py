@@ -165,7 +165,7 @@ class AllDebrid(BaseDebrid):
             return {}, []
 
         try:
-            stremthru = StremThru(self.config, self.session)
+            stremthru = StremThru(self.config, self._session)
             response = await stremthru.get_availability_bulk(hashes, ip)
             if not isinstance(response, list):
                 return {}, hashes
