@@ -42,19 +42,10 @@ from stream_fusion.utils.torr9.torr9_result import Torr9Result as Torr9SearchRes
 from stream_fusion.utils.lacale.lacale_service import LaCaleService
 from stream_fusion.utils.generationfree.generationfree_service import GenerationFreeService
 from stream_fusion.settings import settings
+from stream_fusion.web.utils import get_client_ip
 
 
 router = APIRouter()
-
-
-def get_client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip
-    return request.client.host
 
 
 def serialize_streams_for_cache(streams):
@@ -315,7 +306,7 @@ async def full_prefetch_from_cache(
                             )
 
                     if config["cache"]:
-                        torrent_smart_container.cache_container_items()
+                        asyncio.create_task(asyncio.to_thread(torrent_smart_container.cache_container_items))
 
                     best_matching_results = torrent_smart_container.get_best_matching()
                     best_matching_results = sort_items(best_matching_results, config)
@@ -941,7 +932,7 @@ async def get_results(
                     )
 
         if config["cache"]:
-            torrent_smart_container.cache_container_items()
+            asyncio.create_task(asyncio.to_thread(torrent_smart_container.cache_container_items))
 
         best_matching_results = torrent_smart_container.get_best_matching()
         best_matching_results = sort_items(best_matching_results, config)
