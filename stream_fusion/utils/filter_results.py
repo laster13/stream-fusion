@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from typing import List
 
 from RTN import title_match
@@ -105,18 +106,24 @@ def filter_out_non_matching_movies(items, year):
     logger.info(f"Filters: Filtering non-matching movies for year: {year}")
     year_min = str(int(year) - 1)
     year_max = str(int(year) + 1)
-    year_pattern = re.compile(rf"\b{year_max}|{year}|{year_min}\b")
+    year_pattern = re.compile(rf"\b(?:{year_max}|{year}|{year_min})\b")
     filtered_items = []
+
+    logger.info(
+        f"Filters: YEAR MATCH accepts years in raw_title: {year_min}, {year}, {year_max}"
+    )
+
     for item in items:
-        if year_pattern.search(item.raw_title):
-            logger.trace(
-                f"Filters: Match found for year {year} in item: {item.raw_title}"
-            )
+        raw_title = getattr(item, "raw_title", "")
+        if year_pattern.search(raw_title):
+            logger.info(f"KEEP YEAR | raw_title={raw_title}")
             filtered_items.append(item)
         else:
-            logger.trace(
-                f"Filters: No match found for year {year} in item: {item.raw_title}"
-            )
+            logger.warning(f"REJECT YEAR | raw_title={raw_title}")
+
+    logger.info(
+        f"Filters: Year filtering summary -> kept={len(filtered_items)} rejected={len(items) - len(filtered_items)}"
+    )
     return filtered_items
 
 
@@ -175,6 +182,45 @@ def filter_out_non_matching_series(items, season, episode):
     return filtered_items
 
 
+def normalize_text(text: str) -> str:
+    """
+    Normalise un texte pour comparaison de titres :
+    - supprime les accents
+    - passe en minuscules
+    - compacte les espaces
+    """
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+    text = text.lower()
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def clean_release_title_for_matching(title: str) -> str:
+    """
+    Supprime les tags de release qui polluent le matching de titre
+    sans toucher au vrai nom de l'oeuvre.
+    """
+    if not title:
+        return ""
+
+    release_tags_pattern = re.compile(
+        r"\b("
+        r"DIRFIX|PROPER|REPACK|RERIP|REAL|INTERNAL|LIMITED|UNRATED|EXTENDED|"
+        r"REMUX|COMPLETE|COMPLET|INTEGRALE|INTEGRAL|READNFO|SUBFORCED|DUBBED|"
+        r"MULTI|VOSTFR|TRUEFRENCH|FRENCH|VFQ|VFF|VF2|VOF|VFI"
+        r")\b",
+        re.IGNORECASE,
+    )
+
+    cleaned = release_tags_pattern.sub(" ", title)
+    cleaned = re.sub(r"\b(19|20)\d{2}\b", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
 def clean_tmdb_title(title):
     # Dictionary of characters to filter, grouped by category
     characters_to_filter = {
@@ -199,14 +245,16 @@ def remove_non_matching_title(items, titles):
     integrale_pattern = re.compile(
         r"\b(INTEGRALE|COMPLET|COMPLETE|INTEGRAL)\b", re.IGNORECASE
     )
+
     cleaned_titles = [clean_tmdb_title(title) for title in titles]
     cleaned_titles = [
         integrale_pattern.sub("", title).strip() for title in cleaned_titles
     ]
+
     logger.info(f"Filters: Removing items not matching titles: {cleaned_titles}")
 
     def normalize_words(text):
-        return [w for w in text.lower().split() if w]
+        return [w for w in normalize_text(text).split() if w]
 
     def is_ordered_subset(subset, full_set):
         subset_words = normalize_words(subset)
@@ -228,45 +276,75 @@ def remove_non_matching_title(items, titles):
         else:
             cleaned_item_title = integrale_pattern.sub("", item.raw_title).strip()
 
-        item_words = normalize_words(cleaned_item_title)
+        cleaned_item_title_for_match = clean_release_title_for_matching(
+            cleaned_item_title
+        )
+
+        item_words = normalize_words(cleaned_item_title_for_match)
+        normalized_item_title = normalize_text(cleaned_item_title_for_match)
+
+        matched = False
+        match_reason = None
+        matched_title = None
 
         for title in cleaned_titles:
             title_words = normalize_words(title)
+            normalized_title = normalize_text(title)
 
             logger.trace(
-                f"Filters: Comparing item title: {cleaned_item_title} with title: {title}"
+                f"Filters: Comparing item title: {cleaned_item_title_for_match} with title: {title}"
             )
 
-            # Cas 1: égalité exacte après nettoyage
-            if cleaned_item_title.lower() == title.lower():
-                logger.trace(
-                    f"Filters: Exact cleaned title match. Item accepted: {cleaned_item_title}"
-                )
-                filtered_items.append(item)
+            # Cas 1: égalité exacte après normalisation
+            if normalized_item_title == normalized_title:
+                matched = True
+                match_reason = "exact_normalized"
+                matched_title = title
                 break
 
             # Cas 2: le titre de l'item est un sous-ensemble ordonné du titre TMDB
-            # Exemple utile: item un peu tronqué, mais pas plus long que le vrai titre
-            if is_ordered_subset(cleaned_item_title, title):
-                logger.trace(
-                    f"Filters: Ordered subset match found. Item accepted: {cleaned_item_title}"
-                )
-                filtered_items.append(item)
+            if is_ordered_subset(cleaned_item_title_for_match, title):
+                matched = True
+                match_reason = "ordered_subset"
+                matched_title = title
+                break
+
+            # Cas 2b: le titre TMDB est un sous-ensemble ordonné du titre de l'item (reverse)
+            if is_ordered_subset(title, cleaned_item_title_for_match):
+                matched = True
+                match_reason = "reverse_ordered_subset"
+                matched_title = title
                 break
 
             # Cas 3: matching flou RTN, mais on protège les titres très courts
             # pour éviter Paradise -> Hell's Paradise
             if len(title_words) >= 2 or len(item_words) >= 2:
-                if title_match(title, cleaned_item_title):
-                    logger.trace(
-                        f"Filters: title_match() succeeded. Item accepted: {cleaned_item_title}"
-                    )
-                    filtered_items.append(item)
+                if title_match(normalized_title, normalized_item_title):
+                    matched = True
+                    match_reason = "title_match"
+                    matched_title = title
                     break
 
+        if matched:
+            logger.info(
+                f"KEEP TITLE | raw_title={getattr(item, 'raw_title', None)} | "
+                f"parsed_title={cleaned_item_title} | "
+                f"match_title={cleaned_item_title_for_match} | "
+                f"matched_with={matched_title} | "
+                f"reason={match_reason}"
+            )
+            filtered_items.append(item)
         else:
-            logger.trace(f"Filters: No match found, item skipped: {cleaned_item_title}")
+            logger.warning(
+                f"REJECT TITLE | raw_title={getattr(item, 'raw_title', None)} | "
+                f"parsed_title={cleaned_item_title} | "
+                f"match_title={cleaned_item_title_for_match} | "
+                f"candidate_titles={cleaned_titles}"
+            )
 
+    logger.info(
+        f"Filters: Title filtering summary -> kept={len(filtered_items)} rejected={len(items) - len(filtered_items)}"
+    )
     logger.debug(
         f"Filters: Title filtering complete. {len(filtered_items)} items kept out of {len(items)} total"
     )

@@ -34,23 +34,33 @@ class C411Service:
     async def _search_movie(self, media: Movie) -> List[C411Result]:
         logger.info(f"C411: Searching movie: {media.titles[0]}")
         tmdb_id = str(media.tmdb_id) if self.has_tmdb and media.tmdb_id else None
-        if not tmdb_id:
-            logger.debug(f"C411: No TMDB ID available, skipping search for '{media.titles[0]}'")
+        title = media.titles[0] if media.titles else None
+
+        if not tmdb_id and not title:
+            logger.debug("C411: No TMDB ID or title available, skipping movie search")
             return []
 
-        raw = await self.api.search_movie(tmdb_id=tmdb_id)
+        raw = await self.api.search_movie(
+            tmdb_id=tmdb_id,
+            title=title,
+        )
         logger.info(f"C411: {len(raw)} raw results for movie '{media.titles[0]}'")
         return self._build_results(raw, media)
 
     async def _search_series(self, media: Series) -> List[C411Result]:
         logger.info(f"C411: Searching series (global): {media.titles[0]}")
         tmdb_id = str(media.tmdb_id) if self.has_tmdb and media.tmdb_id else None
-        if not tmdb_id:
-            logger.debug(f"C411: No TMDB ID available, skipping search for '{media.titles[0]}'")
+        title = media.titles[0] if media.titles else None
+
+        if not tmdb_id and not title:
+            logger.debug("C411: No TMDB ID or title available, skipping series search")
             return []
 
         # Recherche globale (sans saison/épisode) pour tout stocker en Postgres
-        raw = await self.api.search_series(tmdb_id=tmdb_id)
+        raw = await self.api.search_series(
+            tmdb_id=tmdb_id,
+            title=title,
+        )
         logger.info(f"C411: {len(raw)} raw results for '{media.titles[0]}' (global)")
         return self._build_results(raw, media)
 
