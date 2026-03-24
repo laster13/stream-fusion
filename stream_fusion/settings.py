@@ -1,6 +1,7 @@
 import enum
 import multiprocessing
 import os
+import sys
 from pydantic import Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from yarl import URL
@@ -146,6 +147,7 @@ class Settings(BaseSettings):
 
     # TMDB
     tmdb_api_key: str | None = None
+    tmdb_language: str = "fr-FR"
 
     # JACKETT
     jackett_host: str = "jackett"
@@ -225,6 +227,9 @@ class Settings(BaseSettings):
     generationfree_url: str = "https://generation-free.org"
     generationfree_api_key: str | None = None
     generationfree_unique_account: bool = check_env_variable("GENERATIONFREE_API_KEY")
+
+    # ADMIN
+    admin_template_dir: str = "/app/stream_fusion/static/admin"
 
     # PUBLIC_CACHE
     public_cache_url: str = "https://stremio-jackett-cacher.elfhosted.com/"
@@ -334,7 +339,16 @@ class Settings(BaseSettings):
         return "https://raw.githubusercontent.com/Telkaoss/stream-fusion/refs/heads/master/stream_fusion/static/videos/slots_full.mp4"
 
 
+_DEFAULT_SESSION_KEY = "331cbfe48117fcba53d09572b10d2fc293d86131dc51be46d8aa9843c2e9f48d"
+
 try:
     settings = Settings()
 except ValidationError as e:
     raise RuntimeError(f"Configuration validation error: {e}")
+
+if settings.session_key == _DEFAULT_SESSION_KEY:
+    print(
+        "WARNING: SESSION_KEY is using the insecure default value. "
+        "Set the SESSION_KEY environment variable to a unique secret.",
+        file=sys.stderr,
+    )

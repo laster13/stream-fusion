@@ -1,4 +1,5 @@
 from typing import List, Optional, Union
+import asyncio
 import re
 
 import aiohttp
@@ -70,7 +71,7 @@ class Torr9Service:
             f"(S{season_num:02d}E{episode_num:02d})"
         )
 
-        raw = self._filter_series_results_for_torr9_only(raw, media)
+        raw = await asyncio.to_thread(self._filter_series_results_for_torr9_only, raw, media)
 
         logger.info(
             f"Torr9: {len(raw)} raw results after Torr9 local filtering for '{media.titles[0]}'"
@@ -206,7 +207,7 @@ class Torr9Service:
             url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
             response = requests.get(
                 url,
-                params={"api_key": settings.tmdb_api_key, "language": "fr-FR"},
+                params={"api_key": settings.tmdb_api_key, "language": settings.tmdb_language},
                 timeout=10,
             )
             response.raise_for_status()
