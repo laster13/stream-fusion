@@ -764,6 +764,9 @@ function loadData() {
     setElementValue('tb_usenet', decodedData.TBUsenet, defaultConfig.tb_usenet);
     setElementValue('tb_search', decodedData.TBSearch, defaultConfig.tb_search);
 
+    setElementValue('stremthru_enabled', decodedData.stremthru, false);
+    setElementValue('stremthru_url', decodedData.stremthruUrl, 'https://stremthru.13377001.xyz/');
+
     handleUniqueAccounts();
     updateProviderFields();
 
