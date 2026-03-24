@@ -169,8 +169,9 @@ class Settings(BaseSettings):
     generationfree_enable: bool = True
 
     # ZILEAN DMM API
-    zilean_host: str = "zilean"
-    zilean_port: int = 8181
+    zilean_schema: str = "https"
+    zilean_host: str = "zileanfortheweebs.midnightignite.me" # use direct docker container name for internal communication, but can be overridden by environment variable ZILEAN_HOST
+    zilean_port: int | None = None # default port is 8181, but can be overridden by environment variable ZILEAN_PORT
     
     # DEBRIDLINK
     dl_token: str | None = None
@@ -187,7 +188,6 @@ class Settings(BaseSettings):
     # PIKPAK
     pp_credentials: str | None = None
     pp_unique_account: bool = check_env_variable("PP_CREDENTIALS")
-    zilean_schema: str = "http"
     zilean_max_workers: int = 4
     zilean_pool_connections: int = 10
     zilean_api_pool_maxsize: int = 10
