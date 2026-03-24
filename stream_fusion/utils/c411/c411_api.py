@@ -47,7 +47,7 @@ class C411API:
         params = dict(params)
         params["apikey"] = self.api_key
         safe_params = {k: ("***" if k == "apikey" else v) for k, v in params.items()}
-        logger.info(f"C411: request params={safe_params}")
+        logger.debug(f"C411: request params={safe_params}")
         session = await self._get_session()
 
         for attempt in range(2):
@@ -60,7 +60,7 @@ class C411API:
                 ) as response:
                     response.raise_for_status()
                     text = await response.text()
-                    logger.info(
+                    logger.debug(
                         f"C411: HTTP {response.status} received, XML length={len(text) if text else 0}"
                     )
                     return text
@@ -136,7 +136,7 @@ class C411API:
                     results.append(result)
                 elif result.magnet or result.link:
                     kept_without_hash += 1
-                    logger.info(
+                    logger.debug(
                         "C411: keeping item without valid info_hash "
                         f"| title={result.raw_title} "
                         f"| magnet_present={bool(result.magnet)} "
@@ -145,7 +145,7 @@ class C411API:
                     results.append(result)
                 else:
                     skipped_invalid_hash += 1
-                    logger.info(
+                    logger.debug(
                         "C411: skipped item without valid hash/link "
                         f"| title={result.raw_title} "
                         f"| magnet_present={bool(result.magnet)} "
@@ -202,14 +202,14 @@ class C411API:
             params = {"t": "movie", "tmdbid": tmdb_id}
             xml = await self._request_xml(params)
             tmdb_results = self._parse_xml(xml) if xml else []
-            logger.info(f"C411: search_movie tmdb={tmdb_id} → {len(tmdb_results)} results")
+            logger.debug(f"C411: search_movie tmdb={tmdb_id} → {len(tmdb_results)} results")
             all_results.extend(tmdb_results)
 
         if title:
             params = {"t": "movie", "q": title}
             xml = await self._request_xml(params)
             title_results = self._parse_xml(xml) if xml else []
-            logger.info(f"C411: search_movie title={title} → {len(title_results)} results")
+            logger.debug(f"C411: search_movie title={title} → {len(title_results)} results")
             all_results.extend(title_results)
 
         final_results = self._merge_and_deduplicate_results(all_results)
@@ -234,7 +234,7 @@ class C411API:
 
             xml = await self._request_xml(params)
             tmdb_results = self._parse_xml(xml) if xml else []
-            logger.info(
+            logger.debug(
                 f"C411: search_series tmdb={tmdb_id} s={season} e={episode} → {len(tmdb_results)} results"
             )
             all_results.extend(tmdb_results)
@@ -248,7 +248,7 @@ class C411API:
 
             xml = await self._request_xml(params)
             title_results = self._parse_xml(xml) if xml else []
-            logger.info(
+            logger.debug(
                 f"C411: search_series title={title} s={season} e={episode} → {len(title_results)} results"
             )
             all_results.extend(title_results)

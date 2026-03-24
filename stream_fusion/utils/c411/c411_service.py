@@ -44,7 +44,7 @@ class C411Service:
             tmdb_id=tmdb_id,
             title=title,
         )
-        logger.info(f"C411: {len(raw)} raw results for movie '{media.titles[0]}'")
+        logger.debug(f"C411: {len(raw)} raw results for movie '{media.titles[0]}'")
         return self._build_results(raw, media)
 
     async def _search_series(self, media: Series) -> List[C411Result]:
@@ -61,7 +61,7 @@ class C411Service:
             tmdb_id=tmdb_id,
             title=title,
         )
-        logger.info(f"C411: {len(raw)} raw results for '{media.titles[0]}' (global)")
+        logger.debug(f"C411: {len(raw)} raw results for '{media.titles[0]}' (global)")
         return self._build_results(raw, media)
 
     def _build_results(self, raw_results, media) -> List[C411Result]:

@@ -81,7 +81,7 @@ def get_indexer_priority_for_sort(indexer, config=None):
     return priority
 
 def items_sort(items, config):
-    logger.info(f"Filters: Sorting items by method: {config['sort']}")
+    logger.debug(f"Filters: Sorting items by method: {config['sort']}")
     if config["sort"] == "quality":
         sorted_items = sorted(items, key=lambda x: (sort_quality(x), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0)))
     elif config["sort"] == "sizeasc":
@@ -103,23 +103,23 @@ def items_sort(items, config):
 
 
 def filter_out_non_matching_movies(items, year):
-    logger.info(f"Filters: Filtering non-matching movies for year: {year}")
+    logger.debug(f"Filters: Filtering non-matching movies for year: {year}")
     year_min = str(int(year) - 1)
     year_max = str(int(year) + 1)
     year_pattern = re.compile(rf"\b(?:{year_max}|{year}|{year_min})\b")
     filtered_items = []
 
-    logger.info(
+    logger.debug(
         f"Filters: YEAR MATCH accepts years in raw_title: {year_min}, {year}, {year_max}"
     )
 
     for item in items:
         raw_title = getattr(item, "raw_title", "")
         if year_pattern.search(raw_title):
-            logger.info(f"KEEP YEAR | raw_title={raw_title}")
+            logger.debug(f"KEEP YEAR | raw_title={raw_title}")
             filtered_items.append(item)
         else:
-            logger.warning(f"REJECT YEAR | raw_title={raw_title}")
+            logger.debug(f"REJECT YEAR | raw_title={raw_title}")
 
     logger.info(
         f"Filters: Year filtering summary -> kept={len(filtered_items)} rejected={len(items) - len(filtered_items)}"
@@ -128,7 +128,7 @@ def filter_out_non_matching_movies(items, year):
 
 
 def filter_out_non_matching_series(items, season, episode):
-    logger.info(
+    logger.debug(
         f"Filters: Filtering non-matching items for season {season} and episode {episode}"
     )
     filtered_items = []
@@ -251,7 +251,7 @@ def remove_non_matching_title(items, titles):
         integrale_pattern.sub("", title).strip() for title in cleaned_titles
     ]
 
-    logger.info(f"Filters: Removing items not matching titles: {cleaned_titles}")
+    logger.debug(f"Filters: Removing items not matching titles: {cleaned_titles}")
 
     def normalize_words(text):
         return [w for w in normalize_text(text).split() if w]
@@ -326,7 +326,7 @@ def remove_non_matching_title(items, titles):
                     break
 
         if matched:
-            logger.info(
+            logger.debug(
                 f"KEEP TITLE | raw_title={getattr(item, 'raw_title', None)} | "
                 f"parsed_title={cleaned_item_title} | "
                 f"match_title={cleaned_item_title_for_match} | "
@@ -335,7 +335,7 @@ def remove_non_matching_title(items, titles):
             )
             filtered_items.append(item)
         else:
-            logger.warning(
+            logger.debug(
                 f"REJECT TITLE | raw_title={getattr(item, 'raw_title', None)} | "
                 f"parsed_title={cleaned_item_title} | "
                 f"match_title={cleaned_item_title_for_match} | "
@@ -366,27 +366,27 @@ def filter_items(items, media, config, skip_resolution=False):
     
     language_priority_filter = LanguagePriorityFilter(config)
 
-    logger.info(f"Filters: Initial item count: {len(items)}")
+    logger.debug(f"Filters: Initial item count: {len(items)}")
 
     if media.type == "series":
-        logger.info(f"Filters: Filtering out non-matching series torrents")
+        logger.debug(f"Filters: Filtering out non-matching series torrents")
         items = filter_out_non_matching_series(items, media.season, media.episode)
         logger.success(
             f"Filters: Item count after season/episode filtering: {len(items)}"
         )
 
     if media.type == "movie":
-        logger.info(f"Filters: Filtering out non-matching movie torrents")
+        logger.debug(f"Filters: Filtering out non-matching movie torrents")
         items = filter_out_non_matching_movies(items, media.year)
         logger.success(f"Filters: Item count after year filtering: {len(items)}")
 
-    logger.info(f"Filters: Filtering out items not matching titles: {media.titles}")
+    logger.debug(f"Filters: Filtering out items not matching titles: {media.titles}")
     items = remove_non_matching_title(items, media.titles)
     logger.success(f"Filters: Item count after title filtering: {len(items)}")
 
     for filter_name, filter_instance in filters.items():
         try:
-            logger.info(
+            logger.debug(
                 f"Filters: Applying {filter_name} filter: {config[filter_name]}"
             )
             items = filter_instance(items)
@@ -399,7 +399,7 @@ def filter_items(items, media, config, skip_resolution=False):
             )
 
     try:
-        logger.info(f"Filters: Applying language priority filter")
+        logger.debug(f"Filters: Applying language priority filter")
         items = language_priority_filter(items)
         logger.success(f"Filters: Items sorted by language priority")
         
@@ -427,17 +427,17 @@ def filter_items(items, media, config, skip_resolution=False):
 
 def sort_items(items, config):
     if config["sort"] is not None:
-        logger.info(f"Filters: Sorting items according to config: {config['sort']}")
+        logger.debug(f"Filters: Sorting items according to config: {config['sort']}")
         return items_sort(items, config)
     else:
-        logger.info("Filters: No sorting specified, returning items in original order")
+        logger.debug("Filters: No sorting specified, returning items in original order")
         return items
 
 
 def merge_items(
     cache_items: List[TorrentItem], search_items: List[TorrentItem]
 ) -> List[TorrentItem]:
-    logger.info(
+    logger.debug(
         f"Filters: Merging cached items ({len(cache_items)}) and search items ({len(search_items)})"
     )
     merged_dict = {}
