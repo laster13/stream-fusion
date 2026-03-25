@@ -313,23 +313,6 @@
 
                         <div class="relative flex gap-x-3">
                             <div class="flex h-6 items-center">
-                                <input id="cache" name="cache" type="checkbox" checked
-                                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                    onchange="updateProviderFields()">
-                            </div>
-                            <div class="text-sm leading-6">
-                                <label for="cache" class="font-medium text-white">Enable Public Caching</label>
-                                <p class="text-gray-500 dark:text-gray-300">Activate public caching for faster search results.</p>
-                                <p class="text-gray-500 dark:text-gray-300">
-                                    <span class="font-bold text-red-600 dark:text-red-500">
-                                        The cache server are the historical one from stremio-jackett app, only public torrent are cached on it
-                                    </span>
-                                </p>
-                            </div>
-                        </div>
-
-                        <div class="relative flex gap-x-3">
-                            <div class="flex h-6 items-center">
                                 <input id="zilean" name="zilean" type="checkbox" checked
                                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600">
                             </div>
@@ -552,23 +535,6 @@
                             <div class="text-sm leading-6">
                                 <label for="cinemeta" class="font-medium text-white">Use Cinemeta</label>
                                 <p class="text-gray-500 dark:text-gray-300">Use Cinemeta for simple metadata.</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="cache-fields" style="display: none;">
-                    <div class="border-b border-gray-900/10 dark:border-white/50 pb-12">
-                        <div class="flex flex-col items-center">
-                            <h2 class="text-white font-semibold leading-7">Public Cache Configuration</h2>
-                            <p class="mt-1 text-sm leading-6 text-gray-600 dark:text-gray-400">Enter your Public Cache URL information here.</p>
-                        </div>
-                        <div class="mt-10 grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-6">
-                            <div class="sm:col-span-4">
-                                <label for="cacheUrl" class="block text-sm font-medium leading-6 text-white">Public Cache URL</label>
-                                <input type="text" name="cacheUrl" id="cacheUrl"
-                                    value="https://stremio-jackett-cacher.elfhosted.com/"
-                                    class="mt-2 block w-full rounded-md border-0 py-1.5 px-3 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6">
                             </div>
                         </div>
                     </div>

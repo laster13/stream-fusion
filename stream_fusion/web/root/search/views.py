@@ -6,7 +6,6 @@ import asyncio
 from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
 from stream_fusion.services.postgresql.dao.torrentitem_dao import TorrentItemDAO
 from stream_fusion.services.redis.redis_config import get_redis_cache_dependency
-from stream_fusion.utils.cache.cache import search_public
 from stream_fusion.utils.cache.local_redis import RedisCache
 from stream_fusion.utils.debrid.get_debrid_service import get_all_debrid_services
 from stream_fusion.utils.filter.results_per_quality_filter import (
@@ -313,9 +312,6 @@ async def full_prefetch_from_cache(
                                 result, type(debrid), next_media
                             )
 
-                    if config["cache"]:
-                        asyncio.create_task(asyncio.to_thread(torrent_smart_container.cache_container_items))
-
                     best_matching_results = torrent_smart_container.get_best_matching()
                     best_matching_results = sort_items(best_matching_results, config)
 
@@ -601,23 +597,6 @@ async def get_results(
 
         # --- Step 2: Fallback sources — only queried when fast sources are insufficient ---
 
-        # Public torrent cache (shared across users, thread-based)
-        if config["cache"] and len(search_results) < min_cached:
-            public_cached_results = await asyncio.to_thread(search_public, media)
-            if public_cached_results:
-                logger.success(
-                    f"Search: Found {len(public_cached_results)} public cached results"
-                )
-                public_cached_results = [
-                    JackettResult().from_cached_item(torrent, media)
-                    for torrent in public_cached_results
-                    if isinstance(torrent, dict) and len(torrent.get("hash", "")) == 40
-                ]
-                public_cached_results = await torrent_service.convert_and_process(
-                    public_cached_results
-                )
-                search_results = merge_items(search_results, public_cached_results)
-
         # Zilean (cached torrent index)
         if config["zilean"] and len(search_results) < min_cached:
             zilean_service = ZileanService(config, session=http_session)
@@ -777,9 +756,6 @@ async def get_results(
                     logger.warning(
                         "Search: No availability results found in debrid service"
                     )
-
-        if config["cache"]:
-            asyncio.create_task(asyncio.to_thread(torrent_smart_container.cache_container_items))
 
         best_matching_results = torrent_smart_container.get_best_matching()
         best_matching_results = sort_items(best_matching_results, config)

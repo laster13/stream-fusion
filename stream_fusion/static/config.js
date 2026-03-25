@@ -504,7 +504,6 @@ function updateProviderFields() {
     const allDebrids = [...implementedDebrids, ...unimplementedDebrids];
 
     // Vérifier l'état des autres éléments de l'interface
-    const cacheChecked = document.getElementById('cache')?.checked;
     const yggflixChecked = document.getElementById('yggflix')?.checked || document.getElementById('yggflix')?.disabled;
     const sharewoodChecked = document.getElementById('sharewood')?.checked || document.getElementById('sharewood')?.disabled;
     const torboxChecked = document.getElementById('debrid_tb')?.checked || document.getElementById('debrid_tb')?.disabled;
@@ -514,7 +513,6 @@ function updateProviderFields() {
     const generationfreeChecked = document.getElementById('generationfree')?.checked || document.getElementById('generationfree')?.disabled;
 
     // Afficher/masquer les champs spécifiques
-    setElementDisplay('cache-fields', cacheChecked ? 'block' : 'none');
     setElementDisplay('sharewood-fields', sharewoodChecked ? 'block' : 'none');
     setElementDisplay('tb_debrid-fields', torboxChecked ? 'block' : 'none');
     setElementDisplay('c411-fields', c411Checked ? 'block' : 'none');
@@ -670,8 +668,6 @@ function loadData() {
 
     const defaultConfig = {
         jackett: false,
-        cache: true,
-        cacheUrl: 'https://stremio-jackett-cacher.elfhosted.com/',
         zilean: true,
         yggflix: true,
         sharewood: false,
@@ -833,9 +829,7 @@ function getLink(method) {
         maxResults: parseInt(document.getElementById('maxResults').value) || 5,
         minCachedResults: parseInt(document.getElementById('minCachedResults').value) || 5,
         exclusion: qualityExclusions.filter(quality => document.getElementById(quality).checked),
-        cacheUrl: document.getElementById('cacheUrl')?.value,
         jackett: document.getElementById('jackett')?.checked,
-        cache: document.getElementById('cache')?.checked,
         zilean: document.getElementById('zilean')?.checked,
         yggflix: document.getElementById('yggflix')?.checked,
         sharewood: document.getElementById('sharewood')?.checked,
@@ -860,7 +854,6 @@ function getLink(method) {
 
     const missingRequiredFields = [];
 
-    if (data.cache && !data.cacheUrl) missingRequiredFields.push("Cache URL");
     if (data.service.includes('Real-Debrid') && document.getElementById('rd_token_info') && !data.RDToken) missingRequiredFields.push("Real-Debrid Account Connection");
     if (data.service.includes('AllDebrid') && document.getElementById('ad_token_info') && !data.ADToken) missingRequiredFields.push("AllDebrid Account Connection");
     if (data.service.includes('TorBox') && document.getElementById('tb_token_info') && !data.TBToken) missingRequiredFields.push("TorBox Account Connection");

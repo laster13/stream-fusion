@@ -9,7 +9,6 @@ from stream_fusion.utils.debrid.realdebrid import RealDebrid
 from stream_fusion.utils.debrid.torbox import Torbox
 from stream_fusion.utils.stremthru.debrid import StremThruDebrid as StremThru
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
-from stream_fusion.utils.cache.cache import cache_public
 from stream_fusion.utils.general import season_episode_in_filename
 from stream_fusion.logging_config import logger
 
@@ -244,23 +243,6 @@ class TorrentSmartContainer:
             f"TorrentSmartContainer: No matching file found for Season {season}, Episode {episode}"
         )
         return None
-
-    def cache_container_items(self):
-        self.logger.info(
-            "TorrentSmartContainer: Starting cache process for container items"
-        )
-        self._save_to_cache()
-
-    def _save_to_cache(self):
-        self.logger.info("TorrentSmartContainer: Saving public items to cache")
-        public_torrents = list(
-            filter(lambda x: x.privacy == "public", self.get_items())
-        )
-        self.logger.debug(
-            f"TorrentSmartContainer: Found {len(public_torrents)} public torrents to cache"
-        )
-        cache_public(public_torrents, self.__media)
-        self.logger.info("TorrentSmartContainer: Caching process completed")
 
     def update_availability(self, debrid_response, debrid_type, media):
         if not debrid_response or debrid_response == {} or debrid_response == []:

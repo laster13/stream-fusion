@@ -231,9 +231,6 @@ class Settings(BaseSettings):
     # ADMIN
     admin_template_dir: str = "/app/stream_fusion/static/admin"
 
-    # PUBLIC_CACHE
-    public_cache_url: str = "https://stremio-jackett-cacher.elfhosted.com/"
-
     # DEVELOPMENT
     debug: bool = False
     dev_host: str = "0.0.0.0"
