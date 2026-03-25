@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from functools import lru_cache
 from typing import List
 
 from RTN import title_match
@@ -12,48 +13,67 @@ from stream_fusion.utils.filter.title_exclusion_filter import TitleExclusionFilt
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
 from stream_fusion.logging_config import logger
 
+# Resolution and HDR priority maps (lower = better)
 quality_order = {"2160p": 0, "1080p": 1, "720p": 2, "480p": 3}
-
 hdr_order = {"DV": 0, "HDR10+": 1, "HDR10": 2, "HDR": 3}
 
-def get_hdr_priority(hdr_list):
-    """Retourne la priorité HDR (plus petit = meilleur). DV > HDR10+ > HDR10 > HDR > SDR"""
+# Pre-compiled regex patterns (compiled once at import time)
+_INTEGRALE_PATTERN = re.compile(
+    r"\b(INTEGRALE|COMPLET|COMPLETE|INTEGRAL)\b", re.IGNORECASE
+)
+_RELEASE_TAGS_PATTERN = re.compile(
+    r"\b("
+    r"DIRFIX|PROPER|REPACK|RERIP|REAL|INTERNAL|LIMITED|UNRATED|EXTENDED|"
+    r"REMUX|COMPLETE|COMPLET|INTEGRALE|INTEGRAL|READNFO|SUBFORCED|DUBBED|"
+    r"MULTI|VOSTFR|TRUEFRENCH|FRENCH|VFQ|VFF|VF2|VOF|VFI"
+    r")\b",
+    re.IGNORECASE,
+)
+_YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
+_SPACES_PATTERN = re.compile(r"\s+")
+_TMDB_FILTER_PATTERN = re.compile(
+    r'[<>"/\\|?*\x00-\x1F'
+    r'\u2122\u00AE\u00A9\u2120\u00A1\u00BF\u2013\u2014'
+    r'\u2018\u2019\u201C\u201D\u2022\u2026\s]+'
+)
+_COLON_BEFORE_WORD_PATTERN = re.compile(r":(\S)")
+_COLON_SPACES_PATTERN = re.compile(r"\s*:\s*")
+
+
+def get_hdr_priority(hdr_list) -> int:
+    """Return HDR priority value (lower = better). DV > HDR10+ > HDR10 > HDR > SDR."""
     if not hdr_list:
-        return 99  # SDR
-    best = 99
-    for h in hdr_list:
-        if h in hdr_order:
-            best = min(best, hdr_order[h])
-    return best
+        return 99
+    return min((hdr_order[h] for h in hdr_list if h in hdr_order), default=99)
 
 
-def sort_quality(item: TorrentItem):
-    """Retourne (resolution_priority, is_unknown) pour le tri."""
+def sort_quality(item: TorrentItem) -> tuple:
+    """Return (resolution_priority, is_unknown) tuple for quality-based sorting."""
     logger.trace(f"Filters: Evaluating quality for item: {item.raw_title}")
-    # Ensure parsed_data is valid before accessing it
-    if hasattr(item, '_ensure_parsed_data_valid'):
+    if hasattr(item, "_ensure_parsed_data_valid"):
         item._ensure_parsed_data_valid()
-    # Check if parsed_data exists and is valid
-    if not item.parsed_data or not hasattr(item.parsed_data, 'resolution'):
+    if not item.parsed_data or not hasattr(item.parsed_data, "resolution"):
         return float("inf"), True
     resolution = item.parsed_data.resolution
-    priority = quality_order.get(resolution, float("inf"))
-    return priority, item.parsed_data.resolution is None
+    return quality_order.get(resolution, float("inf")), resolution is None
 
 
-def get_item_hdr_priority(item: TorrentItem):
-    """Retourne la priorité HDR d'un item."""
-    if not item.parsed_data or not hasattr(item.parsed_data, 'hdr'):
+def get_item_hdr_priority(item: TorrentItem) -> int:
+    """Return the HDR priority of a torrent item."""
+    if not item.parsed_data or not hasattr(item.parsed_data, "hdr"):
         return 99
-    return get_hdr_priority(getattr(item.parsed_data, 'hdr', []))
+    return get_hdr_priority(getattr(item.parsed_data, "hdr", []))
 
 
-def get_indexer_priority_for_sort(indexer, config=None):
-    """Fonction pour obtenir la priorité de l'indexer lors du tri"""
-    is_torbox = config and (config.get("debridDownloader") == "TorBox" or "TorBox" in config.get("service", []))
+def get_indexer_priority_for_sort(indexer, config=None) -> int:
+    """Return sort priority for a given indexer (lower = higher priority)."""
+    is_torbox = config and (
+        config.get("debridDownloader") == "TorBox"
+        or "TorBox" in config.get("service", [])
+    )
     if is_torbox:
         indexer_priority = {
-            "C411": 3,            # C411/Torr9 prioritaires pour TorBox
+            "C411": 3,
             "Torr9": 2,
             "LaCale": 1,
             "GenerationFree": 3,
@@ -65,7 +85,7 @@ def get_indexer_priority_for_sort(indexer, config=None):
         }
     else:
         indexer_priority = {
-            "C411": 3,            # C411/Torr9 prioritaires pour TorBox
+            "C411": 3,
             "Torr9": 2,
             "LaCale": 4,
             "GenerationFree": 4,
@@ -75,27 +95,44 @@ def get_indexer_priority_for_sort(indexer, config=None):
             "Sharewood": 5,
             "Jackett": 6,
         }
-    indexer_name = indexer.split(' ')[0] if indexer and ' ' in indexer else indexer
+    indexer_name = indexer.split(" ")[0] if indexer and " " in indexer else indexer
     priority = indexer_priority.get(indexer_name, 999)
-    logger.trace(f"Filters: Indexer '{indexer}' -> extracted '{indexer_name}' -> priority {priority} (TorBox={is_torbox})")
+    logger.trace(
+        f"Filters: Indexer '{indexer}' -> extracted '{indexer_name}' -> priority {priority} (TorBox={is_torbox})"
+    )
     return priority
 
-def items_sort(items, config):
-    logger.debug(f"Filters: Sorting items by method: {config['sort']}")
-    if config["sort"] == "quality":
-        sorted_items = sorted(items, key=lambda x: (sort_quality(x), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0)))
-    elif config["sort"] == "sizeasc":
-        sorted_items = sorted(items, key=lambda x: (int(x.size), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0)))
-    elif config["sort"] == "sizedesc":
-        sorted_items = sorted(items, key=lambda x: (-int(x.size), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0)))
-    elif config["sort"] == "qualitythensize":
-        sorted_items = sorted(items, key=lambda x: (sort_quality(x), -int(x.size), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0)))
-    else:
-        logger.warning(
-            f"Filters: Unrecognized sort method: {config['sort']}. No sorting applied."
-        )
-        sorted_items = items
 
+def items_sort(items, config):
+    """Sort items by the method specified in config."""
+    sort_method = config["sort"]
+    logger.debug(f"Filters: Sorting items by method: {sort_method}")
+
+    def _key_quality(x):
+        return (sort_quality(x), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0))
+
+    def _key_size_asc(x):
+        return (int(x.size), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0))
+
+    def _key_size_desc(x):
+        return (-int(x.size), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0))
+
+    def _key_quality_then_size(x):
+        return (sort_quality(x), -int(x.size), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0))
+
+    sort_keys = {
+        "quality": _key_quality,
+        "sizeasc": _key_size_asc,
+        "sizedesc": _key_size_desc,
+        "qualitythensize": _key_quality_then_size,
+    }
+
+    key_fn = sort_keys.get(sort_method)
+    if key_fn is None:
+        logger.warning(f"Filters: Unrecognized sort method: {sort_method}. No sorting applied.")
+        return items
+
+    sorted_items = sorted(items, key=key_fn)
     logger.success(
         f"Filters: Sorting complete - Quality/Size first, YggFlix priority at equal quality, seeders as tiebreaker. Number of sorted items: {len(sorted_items)}"
     )
@@ -103,16 +140,14 @@ def items_sort(items, config):
 
 
 def filter_out_non_matching_movies(items, year):
+    """Filter out movie torrents whose title does not contain a year within ±1 of the target year."""
     logger.debug(f"Filters: Filtering non-matching movies for year: {year}")
     year_min = str(int(year) - 1)
     year_max = str(int(year) + 1)
     year_pattern = re.compile(rf"\b(?:{year_max}|{year}|{year_min})\b")
+    logger.debug(f"Filters: YEAR MATCH accepts years in raw_title: {year_min}, {year}, {year_max}")
+
     filtered_items = []
-
-    logger.debug(
-        f"Filters: YEAR MATCH accepts years in raw_title: {year_min}, {year}, {year_max}"
-    )
-
     for item in items:
         raw_title = getattr(item, "raw_title", "")
         if year_pattern.search(raw_title):
@@ -128,53 +163,35 @@ def filter_out_non_matching_movies(items, year):
 
 
 def filter_out_non_matching_series(items, season, episode):
-    logger.debug(
-        f"Filters: Filtering non-matching items for season {season} and episode {episode}"
-    )
+    """Filter out series torrents that do not match the target season and episode."""
+    logger.debug(f"Filters: Filtering non-matching items for season {season} and episode {episode}")
+    numeric_season = int(season.replace("S", ""))
+    numeric_episode = int(episode.replace("E", ""))
     filtered_items = []
-    clean_season = season.replace("S", "")
-    clean_episode = episode.replace("E", "")
-    numeric_season = int(clean_season)
-    numeric_episode = int(clean_episode)
-
-    integrale_pattern = re.compile(
-        r"\b(INTEGRALE|COMPLET|COMPLETE|INTEGRAL)\b", re.IGNORECASE
-    )
 
     for item in items:
-        # Ensure parsed_data is valid before accessing it
-        if not item.parsed_data or not hasattr(item.parsed_data, 'seasons') or not hasattr(item.parsed_data, 'episodes'):
+        if not item.parsed_data or not hasattr(item.parsed_data, "seasons") or not hasattr(item.parsed_data, "episodes"):
             logger.trace(f"Filters: Skipping item with invalid parsed_data: {item.raw_title}")
             continue
 
-        if len(item.parsed_data.seasons) == 0 and len(item.parsed_data.episodes) == 0:
-            if integrale_pattern.search(item.raw_title):
-                logger.trace(
-                    f"Filters: Integrale match found for item: {item.raw_title}"
-                )
+        seasons = item.parsed_data.seasons
+        episodes = item.parsed_data.episodes
+
+        if not seasons and not episodes:
+            if _INTEGRALE_PATTERN.search(item.raw_title):
+                logger.trace(f"Filters: Full-series match found for item: {item.raw_title}")
                 filtered_items.append(item)
-            logger.trace(
-                f"Filters: No season or episode information found for item: {item.raw_title}"
-            )
+            logger.trace(f"Filters: No season or episode information found for item: {item.raw_title}")
             continue
-        if (
-            len(item.parsed_data.episodes) == 0
-            and numeric_season in item.parsed_data.seasons
-        ):
-            logger.trace(
-                f"Filters: Exact season match found for item: {item.raw_title}"
-            )
+
+        if not episodes and numeric_season in seasons:
+            logger.trace(f"Filters: Exact season match found for item: {item.raw_title}")
             filtered_items.append(item)
             continue
-        if (
-            numeric_season in item.parsed_data.seasons
-            and numeric_episode in item.parsed_data.episodes
-        ):
-            logger.trace(
-                f"Filters: Exact season and episode match found for item: {item.raw_title}"
-            )
+
+        if numeric_season in seasons and numeric_episode in episodes:
+            logger.trace(f"Filters: Exact season and episode match found for item: {item.raw_title}")
             filtered_items.append(item)
-            continue
 
     logger.debug(
         f"Filters: Filtering complete. {len(filtered_items)} matching items found out of {len(items)} total"
@@ -182,104 +199,71 @@ def filter_out_non_matching_series(items, season, episode):
     return filtered_items
 
 
+@lru_cache(maxsize=512)
 def normalize_text(text: str) -> str:
-    """
-    Normalise un texte pour comparaison de titres :
-    - supprime les accents
-    - passe en minuscules
-    - compacte les espaces
-    """
+    """Normalize text for title comparison: strip accents, lowercase, collapse whitespace."""
     if not text:
         return ""
     text = unicodedata.normalize("NFD", text)
     text = "".join(c for c in text if unicodedata.category(c) != "Mn")
     text = text.lower()
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return _SPACES_PATTERN.sub(" ", text).strip()
 
 
+@lru_cache(maxsize=512)
 def clean_release_title_for_matching(title: str) -> str:
-    """
-    Supprime les tags de release qui polluent le matching de titre
-    sans toucher au vrai nom de l'oeuvre.
-    """
+    """Strip release tags and years from a torrent title to isolate the media name."""
     if not title:
         return ""
-
-    release_tags_pattern = re.compile(
-        r"\b("
-        r"DIRFIX|PROPER|REPACK|RERIP|REAL|INTERNAL|LIMITED|UNRATED|EXTENDED|"
-        r"REMUX|COMPLETE|COMPLET|INTEGRALE|INTEGRAL|READNFO|SUBFORCED|DUBBED|"
-        r"MULTI|VOSTFR|TRUEFRENCH|FRENCH|VFQ|VFF|VF2|VOF|VFI"
-        r")\b",
-        re.IGNORECASE,
-    )
-
-    cleaned = release_tags_pattern.sub(" ", title)
-    cleaned = re.sub(r"\b(19|20)\d{2}\b", " ", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return cleaned
+    cleaned = _RELEASE_TAGS_PATTERN.sub(" ", title)
+    cleaned = _YEAR_PATTERN.sub(" ", cleaned)
+    return _SPACES_PATTERN.sub(" ", cleaned).strip()
 
 
-def clean_tmdb_title(title):
-    # Dictionary of characters to filter, grouped by category
-    characters_to_filter = {
-        "punctuation": r'<>"/\\|?*',
-        "control": r"\x00-\x1F",
-        "symbols": r"\u2122\u00AE\u00A9\u2120\u00A1\u00BF\u2013\u2014\u2018\u2019\u201C\u201D\u2022\u2026",
-        "spaces": r"\s+",
-    }
-
-    filter_pattern = "".join([f"[{chars}]" for chars in characters_to_filter.values()])
-    cleaned_title = re.sub(r":(\S)", r" \1", title)
-    cleaned_title = re.sub(r"\s*:\s*", " ", cleaned_title)
-    cleaned_title = re.sub(filter_pattern, " ", cleaned_title)
-    cleaned_title = cleaned_title.strip()
-    cleaned_title = re.sub(characters_to_filter["spaces"], " ", cleaned_title)
-
-    return cleaned_title
+@lru_cache(maxsize=512)
+def clean_tmdb_title(title: str) -> str:
+    """Sanitize a TMDB title by removing special characters and normalizing colons."""
+    cleaned = _COLON_BEFORE_WORD_PATTERN.sub(r" \1", title)
+    cleaned = _COLON_SPACES_PATTERN.sub(" ", cleaned)
+    return _TMDB_FILTER_PATTERN.sub(" ", cleaned).strip()
 
 
 def remove_non_matching_title(items, titles):
-    filtered_items = []
-    integrale_pattern = re.compile(
-        r"\b(INTEGRALE|COMPLET|COMPLETE|INTEGRAL)\b", re.IGNORECASE
-    )
-
-    cleaned_titles = [clean_tmdb_title(title) for title in titles]
+    """Remove items whose parsed title does not match any of the provided media titles."""
     cleaned_titles = [
-        integrale_pattern.sub("", title).strip() for title in cleaned_titles
+        _INTEGRALE_PATTERN.sub("", clean_tmdb_title(t)).strip() for t in titles
     ]
-
     logger.debug(f"Filters: Removing items not matching titles: {cleaned_titles}")
 
     def normalize_words(text):
-        return [w for w in normalize_text(text).split() if w]
+        return normalize_text(text).split()
 
-    def is_ordered_subset(subset, full_set):
+    def is_ordered_subset(subset: str, full_set: str) -> bool:
         subset_words = normalize_words(subset)
-        full_set_words = normalize_words(full_set)
-        subset_index = 0
-        for word in full_set_words:
-            if subset_index < len(subset_words) and word == subset_words[subset_index]:
-                subset_index += 1
-        return subset_index == len(subset_words)
+        it = iter(normalize_words(full_set))
+        return all(w in it for w in subset_words)
 
+    # Pre-compute normalized forms of TMDB titles once (not N×M times)
+    precomputed_titles = [
+        {
+            "title": t,
+            "words": normalize_words(t),
+            "normalized": normalize_text(t),
+        }
+        for t in cleaned_titles
+    ]
+
+    # Local cache for RTN title_match to avoid redundant Levenshtein computations
+    _title_match_cache: dict[tuple[str, str], bool] = {}
+
+    filtered_items = []
     for item in items:
         if hasattr(item, "_ensure_parsed_data_valid"):
             item._ensure_parsed_data_valid()
 
-        if item.parsed_data and hasattr(item.parsed_data, "parsed_title"):
-            cleaned_item_title = integrale_pattern.sub(
-                "", item.parsed_data.parsed_title
-            ).strip()
-        else:
-            cleaned_item_title = integrale_pattern.sub("", item.raw_title).strip()
-
-        cleaned_item_title_for_match = clean_release_title_for_matching(
-            cleaned_item_title
-        )
-
+        raw = item.parsed_data.parsed_title if (item.parsed_data and hasattr(item.parsed_data, "parsed_title")) else item.raw_title
+        cleaned_item_title = _INTEGRALE_PATTERN.sub("", raw).strip()
+        cleaned_item_title_for_match = clean_release_title_for_matching(cleaned_item_title)
         item_words = normalize_words(cleaned_item_title_for_match)
         normalized_item_title = normalize_text(cleaned_item_title_for_match)
 
@@ -287,42 +271,35 @@ def remove_non_matching_title(items, titles):
         match_reason = None
         matched_title = None
 
-        for title in cleaned_titles:
-            title_words = normalize_words(title)
-            normalized_title = normalize_text(title)
+        for td in precomputed_titles:
+            title = td["title"]
+            title_words = td["words"]
+            normalized_title = td["normalized"]
 
-            logger.trace(
-                f"Filters: Comparing item title: {cleaned_item_title_for_match} with title: {title}"
-            )
+            logger.trace(f"Filters: Comparing item title: {cleaned_item_title_for_match} with title: {title}")
 
-            # Cas 1: égalité exacte après normalisation
+            # Case 1: exact match after normalization
             if normalized_item_title == normalized_title:
-                matched = True
-                match_reason = "exact_normalized"
-                matched_title = title
+                matched, match_reason, matched_title = True, "exact_normalized", title
                 break
 
-            # Cas 2: le titre de l'item est un sous-ensemble ordonné du titre TMDB
+            # Case 2: item title is an ordered subset of the TMDB title
             if is_ordered_subset(cleaned_item_title_for_match, title):
-                matched = True
-                match_reason = "ordered_subset"
-                matched_title = title
+                matched, match_reason, matched_title = True, "ordered_subset", title
                 break
 
-            # Cas 2b: le titre TMDB est un sous-ensemble ordonné du titre de l'item (reverse)
+            # Case 3: TMDB title is an ordered subset of the item title (reverse)
             if is_ordered_subset(title, cleaned_item_title_for_match):
-                matched = True
-                match_reason = "reverse_ordered_subset"
-                matched_title = title
+                matched, match_reason, matched_title = True, "reverse_ordered_subset", title
                 break
 
-            # Cas 3: matching flou RTN, mais on protège les titres très courts
-            # pour éviter Paradise -> Hell's Paradise
+            # Case 4: fuzzy RTN match — guarded against single-word false positives
             if len(title_words) >= 2 or len(item_words) >= 2:
-                if title_match(normalized_title, normalized_item_title):
-                    matched = True
-                    match_reason = "title_match"
-                    matched_title = title
+                _tm_key = (normalized_title, normalized_item_title)
+                if _tm_key not in _title_match_cache:
+                    _title_match_cache[_tm_key] = title_match(normalized_title, normalized_item_title)
+                if _title_match_cache[_tm_key]:
+                    matched, match_reason, matched_title = True, "title_match", title
                     break
 
         if matched:
@@ -350,33 +327,29 @@ def remove_non_matching_title(items, titles):
     )
     return filtered_items
 
+
 def filter_items(items, media, config, skip_resolution=False):
+    """Apply all configured filters to a list of torrent items for the given media."""
     logger.info(f"Filters: Starting item filtering for media: {media.titles[0]}")
-    
-    # Préparer les filtres (SANS le filtre de résolution si skip_resolution=True)
+
     filters = {
         "languages": LanguageFilter(config),
         "maxSize": MaxSizeFilter(config, media.type),
         "exclusionKeywords": TitleExclusionFilter(config),
     }
-    
-    # Ajouter le filtre de résolution seulement si skip_resolution=False
     if not skip_resolution:
         filters["exclusion"] = QualityExclusionFilter(config)
-    
-    language_priority_filter = LanguagePriorityFilter(config)
 
+    language_priority_filter = LanguagePriorityFilter(config)
     logger.debug(f"Filters: Initial item count: {len(items)}")
 
     if media.type == "series":
-        logger.debug(f"Filters: Filtering out non-matching series torrents")
+        logger.debug("Filters: Filtering out non-matching series torrents")
         items = filter_out_non_matching_series(items, media.season, media.episode)
-        logger.success(
-            f"Filters: Item count after season/episode filtering: {len(items)}"
-        )
+        logger.success(f"Filters: Item count after season/episode filtering: {len(items)}")
 
     if media.type == "movie":
-        logger.debug(f"Filters: Filtering out non-matching movie torrents")
+        logger.debug("Filters: Filtering out non-matching movie torrents")
         items = filter_out_non_matching_movies(items, media.year)
         logger.success(f"Filters: Item count after year filtering: {len(items)}")
 
@@ -386,71 +359,64 @@ def filter_items(items, media, config, skip_resolution=False):
 
     for filter_name, filter_instance in filters.items():
         try:
-            logger.debug(
-                f"Filters: Applying {filter_name} filter: {config[filter_name]}"
-            )
+            logger.debug(f"Filters: Applying {filter_name} filter: {config[filter_name]}")
             items = filter_instance(items)
-            logger.success(
-                f"Filters: Item count after {filter_name} filter: {len(items)}"
-            )
+            logger.success(f"Filters: Item count after {filter_name} filter: {len(items)}")
         except Exception as e:
-            logger.error(
-                f"Filters: Error while applying {filter_name} filter", exc_info=e
-            )
+            logger.error(f"Filters: Error while applying {filter_name} filter", exc_info=e)
 
     try:
-        logger.debug(f"Filters: Applying language priority filter")
+        logger.debug("Filters: Applying language priority filter")
         items = language_priority_filter(items)
-        logger.success(f"Filters: Items sorted by language priority")
-        
-        language_groups = {}
+        logger.success("Filters: Items sorted by language priority")
+
+        language_groups: dict[int, list] = {}
         for item in items:
-            priority = getattr(item, 'language_priority', 999)
-            if priority not in language_groups:
-                language_groups[priority] = []
-            language_groups[priority].append(item)
-        
-        sorted_items = []
-        for priority in sorted(language_groups.keys()):
-            group_items = language_groups[priority]
-            sorted_group = items_sort(group_items, config)
-            sorted_items.extend(sorted_group)
-            
-        items = sorted_items
-        logger.success(f"Filters: Items sorted by language priority and then by quality")
+            priority = getattr(item, "language_priority", 999)
+            language_groups.setdefault(priority, []).append(item)
+
+        items = []
+        for priority in sorted(language_groups):
+            items.extend(items_sort(language_groups[priority], config))
+
+        logger.success("Filters: Items sorted by language priority and then by quality")
     except Exception as e:
-        logger.error(f"Filters: Error while applying language priority filter", exc_info=e)
-    
+        logger.error("Filters: Error while applying language priority filter", exc_info=e)
+
     logger.success(f"Filters: Filtering complete. Final item count: {len(items)}")
     return items
 
 
 def sort_items(items, config):
+    """Sort items according to the method defined in config."""
     if config["sort"] is not None:
         logger.debug(f"Filters: Sorting items according to config: {config['sort']}")
         return items_sort(items, config)
-    else:
-        logger.debug("Filters: No sorting specified, returning items in original order")
-        return items
+    logger.debug("Filters: No sorting specified, returning items in original order")
+    return items
 
 
 def merge_items(
     cache_items: List[TorrentItem], search_items: List[TorrentItem]
 ) -> List[TorrentItem]:
+    """Merge two item lists, deduplicating by (raw_title, size, privacy) and keeping the highest-priority source."""
     logger.debug(
         f"Filters: Merging cached items ({len(cache_items)}) and search items ({len(search_items)})"
     )
-    merged_dict = {}
+    merged_dict: dict[tuple, TorrentItem] = {}
 
     def add_to_merged(item: TorrentItem):
         key = (item.raw_title, item.size, item.privacy)
-        if key not in merged_dict:
+        existing = merged_dict.get(key)
+        if existing is None:
             merged_dict[key] = item
         else:
-            existing_priority = get_indexer_priority_for_sort(merged_dict[key].indexer)
+            existing_priority = get_indexer_priority_for_sort(existing.indexer)
             new_priority = get_indexer_priority_for_sort(item.indexer)
-
-            if new_priority < existing_priority or (new_priority == existing_priority and (item.seeders or 0) > (merged_dict[key].seeders or 0)):
+            if new_priority < existing_priority or (
+                new_priority == existing_priority
+                and (item.seeders or 0) > (existing.seeders or 0)
+            ):
                 merged_dict[key] = item
 
     for item in cache_items:
@@ -459,7 +425,5 @@ def merge_items(
         add_to_merged(item)
 
     merged_items = list(merged_dict.values())
-    logger.success(
-        f"Filters: Merging complete. Total unique items: {len(merged_items)}"
-    )
+    logger.success(f"Filters: Merging complete. Total unique items: {len(merged_items)}")
     return merged_items
