@@ -154,8 +154,8 @@ async def full_prefetch_from_cache(
                             for db_item in postgres_items:
                                 if db_item.indexer in _POSTGRES_INDEXERS:
                                     postgres_results.append(db_item.to_torrent_item())
-                            postgres_results = filter_items(
-                                postgres_results, next_media, config=config
+                            postgres_results = await asyncio.to_thread(
+                                filter_items, postgres_results, next_media, config=config
                             )
                             logger.debug(
                                 f"Pre-fetch: After filtering: {len(postgres_results)} Postgres results for {next_media.season}{next_media.episode}"
@@ -174,8 +174,8 @@ async def full_prefetch_from_cache(
                             for torrent in zilean_search_results
                             if len(getattr(torrent, "info_hash", "")) == 40
                         ]
-                        zilean_search_results = filter_items(
-                            zilean_search_results, next_media, config=config
+                        zilean_search_results = await asyncio.to_thread(
+                            filter_items, zilean_search_results, next_media, config=config
                         )
                         zilean_search_results = await torrent_service.convert_and_process(
                             zilean_search_results
@@ -288,7 +288,9 @@ async def full_prefetch_from_cache(
                     )
 
                 if search_results:
-                    search_results = filter_items(search_results, next_media, config=config)
+                    search_results = await asyncio.to_thread(
+                        filter_items, search_results, next_media, config=config
+                    )
                     filtered_results = ResultsPerQualityFilter(config).filter(
                         search_results
                     )
@@ -696,27 +698,34 @@ async def get_results(
             f"Search: Merged Postgres ({len(postgres_results)}) + External ({len(external_results)}) = {len(all_results)} total results"
         )
 
-        filtered_results = filter_items(all_results, media, config=config)
+        filtered_results = await asyncio.to_thread(
+            filter_items, all_results, media, config=config
+        )
 
         # --- Re-fetch if stale cache has insufficient results (skip if just freshly fetched) ---
         min_results = int(config.get("minCachedResults", 8))
-        external_filtered = filter_items(external_results, media, config=config)
-        if not just_fetched and len(external_filtered) < min_results:
-            logger.warning(
-                f"Search: Insufficient external results ({len(external_filtered)} < {min_results}). Recreating external cache."
+        if not just_fetched:
+            external_filtered = await asyncio.to_thread(
+                filter_items, external_results, media, config=config
             )
-            await redis_cache.delete(cache_key)
-            external_results = await get_search_results(media, config)
-            await redis_cache.set(
-                cache_key,
-                [item.to_dict() for item in external_results],
-                expiration=settings.redis_expiration,
-            )
-            logger.success(
-                f"Search: Recreated external cache with {len(external_results)} results"
-            )
-            all_results = merge_items(postgres_results, external_results)
-            filtered_results = filter_items(all_results, media, config=config)
+            if len(external_filtered) < min_results:
+                logger.warning(
+                    f"Search: Insufficient external results ({len(external_filtered)} < {min_results}). Recreating external cache."
+                )
+                await redis_cache.delete(cache_key)
+                external_results = await get_search_results(media, config)
+                await redis_cache.set(
+                    cache_key,
+                    [item.to_dict() for item in external_results],
+                    expiration=settings.redis_expiration,
+                )
+                logger.success(
+                    f"Search: Recreated external cache with {len(external_results)} results"
+                )
+                all_results = merge_items(postgres_results, external_results)
+                filtered_results = await asyncio.to_thread(
+                    filter_items, all_results, media, config=config
+                )
 
         logger.success(f"Search: Final number of filtered results: {len(filtered_results)}")
         return filtered_results
