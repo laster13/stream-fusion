@@ -200,13 +200,9 @@ class RealDebrid(BaseDebrid):
         # Native RD /torrents/instantAvailability no longer returns usable data
         if settings.stremthru_url:
             try:
-                from stream_fusion.utils.debrid.stremthru import StremThru
                 token = settings.rd_token if settings.rd_unique_account else await self.token_manager.get_access_token()
                 if token:
-                    session = await self._get_session()
-                    st = StremThru(self.config, session=session)
-                    st.set_store_credentials("realdebrid", token)
-                    result = await st.get_availability_bulk(hashes_or_magnets, ip)
+                    result, _ = await self._get_stremthru_community_cache(hashes, "realdebrid", token, ip=ip)
                     logger.info(f"Real-Debrid: StremThru found {len(result)} cached hashes")
                     return result  # list format — handled by __using_stremthru in TorrentSmartContainer
                 else:

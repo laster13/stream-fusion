@@ -7,7 +7,6 @@ from urllib.parse import unquote
 from fastapi import HTTPException
 
 from stream_fusion.utils.debrid.base_debrid import BaseDebrid
-from stream_fusion.utils.debrid.stremthru import StremThru
 from stream_fusion.utils.general import season_episode_in_filename
 from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
@@ -161,51 +160,31 @@ class AllDebrid(BaseDebrid):
         }
 
     async def _lookup_stremthru(self, hashes, ip=None):
+        """
+        Query StremThru as community cache for AllDebrid.
+        Uses the _get_stremthru_community_cache() hook from BaseDebrid.
+        Filters only AllDebrid results (debrid_code AD).
+        """
         if not hashes:
             return {}, []
 
         try:
-            stremthru = StremThru(self.config, self._session)
-            response = await stremthru.get_availability_bulk(hashes, ip)
-            if not isinstance(response, list):
-                return {}, hashes
+            token = self.config.get("ADToken", "")
+            st_results, still_remaining = await self._get_stremthru_community_cache(
+                hashes, "alldebrid", token, debrid_code_filter="AD", ip=ip
+            )
 
             cached = {}
-            remaining = []
-
-            for hash_value in hashes:
-                remaining.append(hash_value)
-
-            result_by_hash = {}
-            for item in response:
-                if not isinstance(item, dict):
-                    continue
+            for item in st_results:
                 hash_value = self._normalize_hash_value(item.get("hash"))
                 if not hash_value:
                     continue
-                result_by_hash[hash_value] = item
-
-            still_remaining = []
-            for hash_value in hashes:
-                item = result_by_hash.get(hash_value)
-                if not item:
-                    still_remaining.append(hash_value)
-                    continue
-
-                status = str(item.get("status", "")).lower()
-                files = item.get("files", [])
-                debrid_code = str(item.get("debrid", "")).upper()
-
-                # Accélération seulement sur le positif
-                if status == "cached" and debrid_code in ("AD", "ALLDEBRID"):
-                    cached[hash_value] = self._build_result_item(
-                        hash_value,
-                        instant=True,
-                        files=files,
-                        source="stremthru",
-                    )
-                else:
-                    still_remaining.append(hash_value)
+                cached[hash_value] = self._build_result_item(
+                    hash_value,
+                    instant=True,
+                    files=item.get("files", []),
+                    source="stremthru",
+                )
 
             if cached:
                 logger.info(
