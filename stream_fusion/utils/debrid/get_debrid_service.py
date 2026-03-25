@@ -9,7 +9,7 @@ from stream_fusion.utils.debrid.debridlink import DebridLink
 from stream_fusion.utils.debrid.easydebrid import EasyDebrid
 from stream_fusion.utils.debrid.offcloud import Offcloud
 from stream_fusion.utils.debrid.pikpak import PikPak
-from stream_fusion.utils.debrid.stremthru import StremThru
+from stream_fusion.utils.stremthru.debrid import StremThruDebrid as StremThru
 from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
 

@@ -7,7 +7,7 @@ from stream_fusion.utils.debrid.alldebrid import AllDebrid
 from stream_fusion.utils.debrid.premiumize import Premiumize
 from stream_fusion.utils.debrid.realdebrid import RealDebrid
 from stream_fusion.utils.debrid.torbox import Torbox
-from stream_fusion.utils.debrid.stremthru import StremThru
+from stream_fusion.utils.stremthru.debrid import StremThruDebrid as StremThru
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
 from stream_fusion.utils.cache.cache import cache_public
 from stream_fusion.utils.general import season_episode_in_filename
