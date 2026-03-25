@@ -396,16 +396,6 @@ function toggleStremThruFields() {
     } else {
         setElementDisplay('stremthru_url_div', 'none');
         if (authDiv) setElementDisplay('stremthru_auth_div', 'none');
-
-        // Si StremThru est désactivé, désactiver et décocher les services non implémentés
-        unimplementedDebrids.forEach(id => {
-            const checkbox = document.getElementById(id);
-            if (checkbox && checkbox.checked) {
-                checkbox.checked = false;
-                // Déclencher manuellement la mise à jour pour masquer les champs
-                updateProviderFields(); 
-            }
-        });
     }
 }
 
@@ -507,9 +497,8 @@ function addDebridDownloaderOption(serviceName) {
 function updateProviderFields() {
     console.log("--- Running updateProviderFields ---"); // Debug start
     const stremthruEnabledCheckbox = document.getElementById('stremthru_enabled');
-    let stremthruWasEnabled = stremthruEnabledCheckbox ? stremthruEnabledCheckbox.checked : false; // Track initial state
-    let stremthruForcedEnable = false;
-    let anyUnimplementedChecked = false; // Flag to track if any unimplemented service is checked
+    let stremthruWasEnabled = stremthruEnabledCheckbox ? stremthruEnabledCheckbox.checked : false;
+    let anyUnimplementedChecked = false;
 
     const serviceStates = {};
     const allDebrids = [...implementedDebrids, ...unimplementedDebrids];
@@ -558,24 +547,22 @@ function updateProviderFields() {
             setElementDisplay(credDivId, isChecked ? 'block' : 'none');
         }
 
-        // Logique pour forcer l'activation de StremThru avec les débrideurs non implémentés
+        // Avertissement si un service nécessitant StremThru est coché sans que StremThru soit configuré
         if (unimplementedDebrids.includes(id) && isChecked) {
-            if (stremthruEnabledCheckbox && !stremthruEnabledCheckbox.checked) {
-                stremthruEnabledCheckbox.checked = true;
-                stremthruForcedEnable = true; // Marquer qu'on l'a forcé
-            }
-            anyUnimplementedChecked = true; // Définir le drapeau
+            anyUnimplementedChecked = true;
         }
     });
 
-    // Gérer l'état de la case à cocher StremThru: désactiver si un service non implémenté est coché
+    // Afficher un avertissement si des services StremThru-only sont activés sans StremThru configuré
+    const stremthruWarningDiv = document.getElementById('stremthru_required_warning');
+    if (stremthruWarningDiv) {
+        const stremthruConfigured = stremthruEnabledCheckbox && stremthruEnabledCheckbox.checked;
+        setElementDisplay('stremthru_required_warning', (anyUnimplementedChecked && !stremthruConfigured) ? 'block' : 'none');
+    }
+
+    // Afficher/masquer les champs StremThru selon l'état de la case
     if (stremthruEnabledCheckbox) {
-        if (anyUnimplementedChecked) {
-            stremthruEnabledCheckbox.checked = true; // S'assurer qu'elle est cochée
-            stremthruEnabledCheckbox.disabled = true; // Désactiver la case à cocher
-        } else {
-            stremthruEnabledCheckbox.disabled = false; // Réactiver si aucun service non implémenté n'est coché
-        }
+        stremthruEnabledCheckbox.disabled = false; // Le checkbox reste toujours libre
 
         // Afficher/masquer les champs StremThru
         setElementDisplay('stremthru_url_div', stremthruEnabledCheckbox.checked ? 'block' : 'none');
@@ -585,8 +572,8 @@ function updateProviderFields() {
         }
     }
 
-    // Si on a forcé l'activation de StremThru OU si son état a changé, mettre à jour la visibilité de ses champs
-    if (stremthruEnabledCheckbox && (stremthruForcedEnable || stremthruEnabledCheckbox.checked !== stremthruWasEnabled || anyUnimplementedChecked)) {
+    // Mettre à jour la visibilité des champs StremThru si l'état a changé
+    if (stremthruEnabledCheckbox && stremthruEnabledCheckbox.checked !== stremthruWasEnabled) {
         toggleStremThruFields();
     }
 
@@ -649,15 +636,10 @@ function ensureDebridConsistency() {
         }
     }
 
-    // Gérer l'état de la case à cocher StremThru
+    // StremThru : le checkbox reste libre, pas de forçage
     const stremthruEnabledCheckbox = document.getElementById('stremthru_enabled');
     if (stremthruEnabledCheckbox) {
-        if (anyUnimplementedChecked) {
-            stremthruEnabledCheckbox.checked = true;
-            stremthruEnabledCheckbox.disabled = true;
-        } else {
-            stremthruEnabledCheckbox.disabled = false;
-        }
+        stremthruEnabledCheckbox.disabled = false;
     }
 
     updateDebridDownloaderOptions();

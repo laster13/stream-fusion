@@ -380,3 +380,48 @@ class BaseDebrid:
                 hits.extend(by_hash.values())
 
         return self._reconstruct_response(hits)
+
+    async def _get_stremthru_community_cache(
+        self,
+        hashes: list,
+        store_name: str,
+        token: str,
+        debrid_code_filter: str | None = None,
+        ip: str | None = None,
+    ) -> tuple:
+        """
+        Query StremThru as optional community cache.
+
+        No local Redis — intentional: StremThru manages its own external cache.
+        Redis caching is handled by the caller (RD/AD) via get_availability_bulk_cached().
+
+        Args:
+            hashes: list of 40-char hex hashes
+            store_name: StremThru store name (e.g. "realdebrid")
+            token: store authentication token
+            debrid_code_filter: if set, filter results by this code (e.g. "AD")
+            ip: optional client IP
+
+        Returns:
+            (cached_items: list[dict], remaining_hashes: list[str])
+            Never raises exceptions.
+        """
+        if not getattr(settings, "stremthru_url", None):
+            return [], hashes
+
+        try:
+            from stream_fusion.utils.stremthru.client import StremThruClient
+            session = await self._get_session()
+            client = StremThruClient(settings.stremthru_url, store_name, token, session)
+            results = await client.check_availability(hashes, ip)
+
+            if debrid_code_filter:
+                results = [r for r in results if r.get("debrid") == debrid_code_filter]
+
+            cached_hashes = {r["hash"] for r in results}
+            remaining = [h for h in hashes if h not in cached_hashes]
+            return results, remaining
+
+        except Exception as e:
+            logger.warning(f"{self.__class__.__name__}: StremThru community cache unavailable ({e})")
+            return [], hashes

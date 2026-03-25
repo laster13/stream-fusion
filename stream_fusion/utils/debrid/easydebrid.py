@@ -1,33 +1,33 @@
-from stream_fusion.utils.debrid.stremthru import StremThru
+from stream_fusion.utils.stremthru.debrid import StremThruDebrid
 from stream_fusion.logging_config import logger
 
 
-class EasyDebrid(StremThru):
+class EasyDebrid(StremThruDebrid):
     def __init__(self, config, session=None):
         super().__init__(config, session)
         self.name = "EasyDebrid"
         self.extension = "ED"
 
-        # Récupérer la clé API d'EasyDebrid
+        # Retrieve the EasyDebrid API key
         self.api_key = config.get("easydebrid_api_key", "")
 
-        # Configurer StremThru pour utiliser EasyDebrid
+        # Configure StremThru to use EasyDebrid
         self.set_store_credentials("easydebrid", self.api_key)
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
-        """Vérifie la disponibilité des torrents en masse via StremThru"""
+        """Check bulk torrent availability via StremThru."""
         results = await super().get_availability_bulk(hashes_or_magnets, ip)
-        logger.debug(f"EasyDebrid (via StremThru): {len(results)} torrents en cache trouvés")
+        logger.debug(f"EasyDebrid (via StremThru): {len(results)} cached torrents found")
         return results
 
     async def add_magnet(self, magnet, ip=None):
-        """Ajoute un magnet à EasyDebrid via StremThru"""
+        """Add a magnet to EasyDebrid via StremThru."""
         result = await super().add_magnet(magnet, ip)
-        logger.debug(f"EasyDebrid (via StremThru): Magnet ajouté avec succès: {result is not None}")
+        logger.debug(f"EasyDebrid (via StremThru): magnet added successfully: {result is not None}")
         return result
 
     async def get_stream_link(self, query, config=None, ip=None):
-        """Génère un lien de streaming via StremThru"""
+        """Generate a streaming link via StremThru."""
         link = await super().get_stream_link(query, config, ip)
-        logger.debug(f"EasyDebrid (via StremThru): Lien de streaming généré: {link is not None}")
+        logger.debug(f"EasyDebrid (via StremThru): stream link generated: {link is not None}")
         return link
