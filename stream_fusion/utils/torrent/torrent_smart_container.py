@@ -16,7 +16,7 @@ from stream_fusion.logging_config import logger
 class TorrentSmartContainer:
     def __init__(self, torrent_items: List[TorrentItem], media):
         self.logger = logger
-        self.logger.info(
+        self.logger.debug(
             f"Initializing TorrentSmartContainer with {len(torrent_items)} items"
         )
         self.__itemsDict: Dict[str, TorrentItem] = self._build_items_dict_by_infohash(
@@ -24,7 +24,7 @@ class TorrentSmartContainer:
         )
         self.__media = media
         self.__using_stremthru = False
-        self.logger.info(
+        self.logger.debug(
             "TorrentSmartContainer: Including all torrents regardless of seeders count"
         )
 
@@ -120,17 +120,16 @@ class TorrentSmartContainer:
         for torrent_item in self.__itemsDict.values():
             if torrent_item.privacy == "public" and torrent_item.file_index is not None:
                 direct_torrentable_items.append(torrent_item)
-        self.logger.info(
+        self.logger.debug(
             f"TorrentSmartContainer: Found {len(direct_torrentable_items)} direct torrentable items"
         )
         return direct_torrentable_items
 
     def get_best_matching(self):
-        self.logger.info("TorrentSmartContainer: Finding best matching items")
-        best_matching = []
         self.logger.debug(
-            f"TorrentSmartContainer: Total items to process: {len(self.__itemsDict)}"
+            f"TorrentSmartContainer: Finding best matching items ({len(self.__itemsDict)} to process)"
         )
+        best_matching = []
 
         for torrent_item in self.__itemsDict.values():
             self.logger.trace(
@@ -252,7 +251,7 @@ class TorrentSmartContainer:
             )
             return
 
-        self.logger.info(
+        self.logger.debug(
             f"TorrentSmartContainer: Updating availability for {debrid_type.__name__}"
         )
 
@@ -463,12 +462,12 @@ class TorrentSmartContainer:
             else:
                 torrent_item.availability = "AD"
 
-        self.logger.info(
+        self.logger.debug(
             "TorrentSmartContainer: AllDebrid availability update completed"
         )
 
     def _update_availability_torbox(self, response, media):
-        self.logger.info("TorrentSmartContainer: Updating availability for Torbox")
+        self.logger.debug("TorrentSmartContainer: Updating availability for Torbox")
         if response["success"] is False:
             self.logger.error(f"TorrentSmartContainer: Torbox API error: {response}")
             return
@@ -637,7 +636,7 @@ class TorrentSmartContainer:
             if result_debrid:
                 debrid_code = result_debrid
                 self.logger.debug(
-                    f"TorrentSmartContainer: Utilisation du code debrid spécifique: {debrid_code} pour {hash_value}"
+                    f"TorrentSmartContainer: Using specific debrid code: {debrid_code} for {hash_value}"
                 )
             else:
                 debrid_code = underlying_debrid
@@ -725,7 +724,7 @@ class TorrentSmartContainer:
                         skip_file_name_for_series=False,
                     )
                     self.logger.info(
-                        f"TorrentSmartContainer: Fallback intelligent utilisé pour {item.raw_title}: {fallback_file.get('name')}"
+                        f"TorrentSmartContainer: Smart fallback used for {item.raw_title}: {fallback_file.get('name')}"
                     )
                     continue
 
@@ -738,7 +737,7 @@ class TorrentSmartContainer:
                         skip_file_name_for_series=False,
                     )
                     self.logger.info(
-                        f"TorrentSmartContainer: Local full_index fallback utilisé pour {item.raw_title}: {local_series_candidate.get('title')}"
+                        f"TorrentSmartContainer: Local full_index fallback used for {item.raw_title}: {local_series_candidate.get('title')}"
                     )
                     continue
 
@@ -760,7 +759,7 @@ class TorrentSmartContainer:
                             skip_file_name_for_series=False,
                         )
                         self.logger.info(
-                            f"TorrentSmartContainer: Generic video fallback utilisé pour {item.raw_title}: {best_video.get('name')}"
+                            f"TorrentSmartContainer: Generic video fallback used for {item.raw_title}: {best_video.get('name')}"
                         )
                         continue
 
@@ -794,7 +793,7 @@ class TorrentSmartContainer:
                         item, local_movie_candidates, debrid=debrid_code
                     )
                     self.logger.info(
-                        f"TorrentSmartContainer: Local movie fallback utilisé pour {item.raw_title}"
+                        f"TorrentSmartContainer: Local movie fallback used for {item.raw_title}"
                     )
                     continue
 
@@ -804,7 +803,7 @@ class TorrentSmartContainer:
                 f"TorrentSmartContainer: Updated availability for {item.raw_title}: {item.availability}"
             )
 
-        self.logger.info(
+        self.logger.debug(
             "TorrentSmartContainer: StremThru availability update completed"
         )
 
@@ -834,7 +833,7 @@ class TorrentSmartContainer:
         )
 
     def _build_items_dict_by_infohash(self, items: List[TorrentItem]):
-        self.logger.info(
+        self.logger.debug(
             f"TorrentSmartContainer: Building items dictionary by infohash ({len(items)} items)"
         )
         items_dict = {}
@@ -842,7 +841,7 @@ class TorrentSmartContainer:
             if item.info_hash is not None:
                 normalized_hash = self._normalize_hash(item.info_hash)
                 if normalized_hash not in items_dict:
-                    self.logger.debug(f"Adding {normalized_hash} to items dict")
+                    self.logger.trace(f"Adding {normalized_hash} to items dict")
                     items_dict[normalized_hash] = item
                 else:
                     existing_item = items_dict[normalized_hash]
@@ -850,15 +849,15 @@ class TorrentSmartContainer:
                         item.indexer == "Yggtorrent - API"
                         and existing_item.indexer != "Yggtorrent - API"
                     ):
-                        self.logger.debug(
+                        self.logger.trace(
                             f"TorrentSmartContainer: Replacing {existing_item.indexer} with Yggtorrent for hash: {normalized_hash}"
                         )
                         items_dict[normalized_hash] = item
                     else:
-                        self.logger.debug(
+                        self.logger.trace(
                             f"TorrentSmartContainer: Skipping duplicate info hash: {normalized_hash} (keeping {existing_item.indexer})"
                         )
-        self.logger.info(
+        self.logger.debug(
             f"TorrentSmartContainer: Built dictionary with {len(items_dict)} unique items"
         )
         return items_dict

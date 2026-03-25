@@ -133,9 +133,7 @@ def items_sort(items, config):
         return items
 
     sorted_items = sorted(items, key=key_fn)
-    logger.success(
-        f"Filters: Sorting complete - Quality/Size first, YggFlix priority at equal quality, seeders as tiebreaker. Number of sorted items: {len(sorted_items)}"
-    )
+    logger.debug(f"Filters: Sorting complete — {len(sorted_items)} items sorted by {sort_method}")
     return sorted_items
 
 
@@ -151,10 +149,10 @@ def filter_out_non_matching_movies(items, year):
     for item in items:
         raw_title = getattr(item, "raw_title", "")
         if year_pattern.search(raw_title):
-            logger.debug(f"KEEP YEAR | raw_title={raw_title}")
+            logger.trace(f"KEEP YEAR | raw_title={raw_title}")
             filtered_items.append(item)
         else:
-            logger.debug(f"REJECT YEAR | raw_title={raw_title}")
+            logger.trace(f"REJECT YEAR | raw_title={raw_title}")
 
     logger.info(
         f"Filters: Year filtering summary -> kept={len(filtered_items)} rejected={len(items) - len(filtered_items)}"
@@ -303,7 +301,7 @@ def remove_non_matching_title(items, titles):
                     break
 
         if matched:
-            logger.debug(
+            logger.trace(
                 f"KEEP TITLE | raw_title={getattr(item, 'raw_title', None)} | "
                 f"parsed_title={cleaned_item_title} | "
                 f"match_title={cleaned_item_title_for_match} | "
@@ -312,7 +310,7 @@ def remove_non_matching_title(items, titles):
             )
             filtered_items.append(item)
         else:
-            logger.debug(
+            logger.trace(
                 f"REJECT TITLE | raw_title={getattr(item, 'raw_title', None)} | "
                 f"parsed_title={cleaned_item_title} | "
                 f"match_title={cleaned_item_title_for_match} | "
@@ -346,29 +344,29 @@ def filter_items(items, media, config, skip_resolution=False):
     if media.type == "series":
         logger.debug("Filters: Filtering out non-matching series torrents")
         items = filter_out_non_matching_series(items, media.season, media.episode)
-        logger.success(f"Filters: Item count after season/episode filtering: {len(items)}")
+        logger.debug(f"Filters: Item count after season/episode filtering: {len(items)}")
 
     if media.type == "movie":
         logger.debug("Filters: Filtering out non-matching movie torrents")
         items = filter_out_non_matching_movies(items, media.year)
-        logger.success(f"Filters: Item count after year filtering: {len(items)}")
+        logger.debug(f"Filters: Item count after year filtering: {len(items)}")
 
     logger.debug(f"Filters: Filtering out items not matching titles: {media.titles}")
     items = remove_non_matching_title(items, media.titles)
-    logger.success(f"Filters: Item count after title filtering: {len(items)}")
+    logger.debug(f"Filters: Item count after title filtering: {len(items)}")
 
     for filter_name, filter_instance in filters.items():
         try:
             logger.debug(f"Filters: Applying {filter_name} filter: {config[filter_name]}")
             items = filter_instance(items)
-            logger.success(f"Filters: Item count after {filter_name} filter: {len(items)}")
+            logger.debug(f"Filters: Item count after {filter_name} filter: {len(items)}")
         except Exception as e:
             logger.error(f"Filters: Error while applying {filter_name} filter", exc_info=e)
 
     try:
         logger.debug("Filters: Applying language priority filter")
         items = language_priority_filter(items)
-        logger.success("Filters: Items sorted by language priority")
+        logger.debug("Filters: Items sorted by language priority")
 
         language_groups: dict[int, list] = {}
         for item in items:
@@ -379,11 +377,11 @@ def filter_items(items, media, config, skip_resolution=False):
         for priority in sorted(language_groups):
             items.extend(items_sort(language_groups[priority], config))
 
-        logger.success("Filters: Items sorted by language priority and then by quality")
+        logger.debug("Filters: Items sorted by language priority and then by quality")
     except Exception as e:
         logger.error("Filters: Error while applying language priority filter", exc_info=e)
 
-    logger.success(f"Filters: Filtering complete. Final item count: {len(items)}")
+    logger.info(f"Filters: Filtering complete. Final item count: {len(items)}")
     return items
 
 

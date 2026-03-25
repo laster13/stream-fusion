@@ -187,7 +187,7 @@ class AllDebrid(BaseDebrid):
                 )
 
             if cached:
-                logger.info(
+                logger.debug(
                     f"AllDebrid: StremThru found {len(cached)} cached, {len(still_remaining)} remaining for bulk check"
                 )
 
@@ -216,7 +216,7 @@ class AllDebrid(BaseDebrid):
                     f"AllDebrid: Failed to delete magnet {magnet_id}: {str(e)}"
                 )
 
-        logger.info(
+        logger.debug(
             f"AllDebrid: Deleted {success}/{len(magnet_ids)} uploaded magnets after availability check"
         )
 
@@ -462,7 +462,7 @@ class AllDebrid(BaseDebrid):
                 return result_magnets
 
             magnets_data = response.get("data", {}).get("magnets", [])
-            logger.info(
+            logger.debug(
                 f"AllDebrid: Direct batch returned {len(magnets_data)} magnets"
             )
 

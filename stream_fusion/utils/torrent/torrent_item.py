@@ -105,7 +105,7 @@ class TorrentItem:
 
     def to_dict(self):
         resolution = getattr(self.parsed_data, 'resolution', 'UNKNOWN') if self.parsed_data else 'NONE'
-        logger.debug(f"TorrentItem.to_dict(): '{self.raw_title[:60]}' → resolution='{resolution}' (caching)")
+        logger.trace(f"TorrentItem.to_dict(): '{self.raw_title[:60]}' → resolution='{resolution}' (caching)")
 
         parsed_data_dict = None
         if self.parsed_data:
@@ -167,7 +167,7 @@ class TorrentItem:
         if data.get('parsed_data'):
             try:
                 reconstructed = ParsedData(**data['parsed_data'])
-                logger.debug(f"TorrentItem.from_dict(): Reconstructed ParsedData: {reconstructed}, resolution={getattr(reconstructed, 'resolution', 'UNKNOWN')}")
+                logger.trace(f"TorrentItem.from_dict(): Reconstructed ParsedData: {reconstructed}, resolution={getattr(reconstructed, 'resolution', 'UNKNOWN')}")
                 if reconstructed is not None:
                     instance.parsed_data = reconstructed
                 else:
@@ -177,10 +177,10 @@ class TorrentItem:
                 logger.warning(f"Failed to reconstruct ParsedData from cache: {e}, will re-parse")
                 instance.parsed_data = parse(instance.raw_title)
         else:
-            logger.debug("TorrentItem.from_dict(): No parsed_data in cache dict, will parse")
+            logger.trace("TorrentItem.from_dict(): No parsed_data in cache dict, will parse")
             instance.parsed_data = parse(instance.raw_title)
 
         resolution = getattr(instance.parsed_data, 'resolution', 'UNKNOWN') if instance.parsed_data else 'NONE'
-        logger.debug(f"TorrentItem.from_dict(): '{instance.raw_title[:60]}' → resolution='{resolution}'")
+        logger.trace(f"TorrentItem.from_dict(): '{instance.raw_title[:60]}' → resolution='{resolution}'")
 
         return instance

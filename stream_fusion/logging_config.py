@@ -10,7 +10,8 @@ from stream_fusion.settings import settings
 
 REDACTED = settings.log_redacted
 patterns = [
-    r"/ey.*?/",
+    r"/ey[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*/",  # JWT tokens in URL path segments
+    r"(ADToken|RDToken|TBToken|PMToken|apikey|api_key|passkey|api-key)=([^&\s\"']+)",  # API key params
 ]
 
 class SecretFilter:
@@ -25,11 +26,14 @@ class SecretFilter:
 
     def redact(self, message):
         for pattern in self._patterns:
-            message = re.sub(pattern, "<REDACTED>", message)
+            if "=" in pattern:
+                message = re.sub(pattern, r"\1=<REDACTED>", message)
+            else:
+                message = re.sub(pattern, "/<REDACTED>/", message)
         return message
 
 def format_console(record):
-    format_ = "<level>{level: <8}</level> | <cyan>{function}</cyan>:<cyan>{line}</cyan> - {message}\n"
+    format_ = "<green>{time:HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{function}</cyan>:<cyan>{line}</cyan> - {message}\n"
     if record["exception"] is not None:
         stack = stackprinter.format(
             record["exception"],
@@ -37,7 +41,10 @@ def format_console(record):
         )
         if REDACTED:
             for pat in patterns:
-                stack = re.sub(pat, "/<REDACTED>/", stack)
+                if "=" in pat:
+                    stack = re.sub(pat, r"\1=<REDACTED>", stack)
+                else:
+                    stack = re.sub(pat, "/<REDACTED>/", stack)
         record["extra"]["stack"] = stack
         format_ += "\n{extra[stack]}"
     return format_
@@ -51,7 +58,10 @@ def format_file(record):
         )
         if REDACTED:
             for pat in patterns:
-                stack = re.sub(pat, "/<REDACTED>/", stack)
+                if "=" in pat:
+                    stack = re.sub(pat, r"\1=<REDACTED>", stack)
+                else:
+                    stack = re.sub(pat, "/<REDACTED>/", stack)
         record["extra"]["stack"] = stack
         format_ += "{extra[stack]}\n"
     return format_
