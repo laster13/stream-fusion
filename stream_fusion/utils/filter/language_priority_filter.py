@@ -69,7 +69,7 @@ class LanguagePriorityFilter(BaseFilter):
 
         sorted_data = sorted(data, key=lambda x: x.language_priority)
         
-        logger.info(f"Language sort complete. Priority order: VFF/VOF/VFI > VF2/VFQ > VOST > others")
+        logger.debug(f"Language sort complete. Priority order: VFF/VOF/VFI > VF2/VFQ > VOST > others")
         
         return sorted_data
 

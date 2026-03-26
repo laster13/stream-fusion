@@ -211,7 +211,7 @@ class SharewoodService:
 
         items = []
         for result in results:
-            logger.debug(f"Processing result: {result}")
+            logger.trace(f"Processing result: {result}")
             item = SharewoodResult()
 
             item.raw_title = result.get("name", "...")

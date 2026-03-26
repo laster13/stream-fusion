@@ -64,7 +64,7 @@ class RDTokenManager:
             raise Exception("Missing required Real Debrid configuration")
 
         self.token_key = self.generate_token_key()
-        self.logger.info("RDTokenManager initialized successfully")
+        self.logger.debug("RDTokenManager initialized successfully")
 
     def generate_token_key(self):
         unique_string = f"{self.client_id}:{self.client_secret}:{self.refresh_token}"
@@ -73,7 +73,7 @@ class RDTokenManager:
     async def get_access_token(self):
         token = self.redis.get(self.token_key)
         if token:
-            self.logger.debug("Access token found in Redis")
+            self.logger.trace("Access token found in Redis")
             return token.decode("utf-8")
         self.logger.info("Access token not found in Redis, generating new token")
         return await self.new_access_token()

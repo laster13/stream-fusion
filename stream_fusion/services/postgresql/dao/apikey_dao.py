@@ -83,7 +83,7 @@ class APIKeyDAO:
             result = await self.session.execute(query)
             db_key = result.scalar_one_or_none()
             if db_key:
-                logger.info(f"Retrieved API key: {api_key}")
+                logger.debug(f"Retrieved API key: {api_key}")
                 return self._model_to_schema(db_key)
             else:
                 logger.warning(f"API key not found: {api_key}")

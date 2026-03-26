@@ -154,7 +154,7 @@ class Torr9API:
 
             xml = await self._request_xml(params)
             results = self._parse_xml(xml) if xml else []
-            logger.info(
+            logger.debug(
                 f"Torr9: search_series imdb={imdb_id} s={season} e={episode} -> {len(results)} results"
             )
 

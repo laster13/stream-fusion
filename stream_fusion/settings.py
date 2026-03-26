@@ -88,6 +88,8 @@ class Settings(BaseSettings):
         None  # If set, the link will be proxied through the given proxy.
     )
     proxy_buffer_size: int = 1024 * 1024
+    playback_limit_requests: int = 60   # max requests per user per window
+    playback_limit_seconds: int = 60    # window size in seconds
 
     # REALDEBRID
     rd_token: str | None = None

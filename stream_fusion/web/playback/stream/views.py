@@ -38,6 +38,48 @@ redis_client = redis.Redis(
 
 DOWNLOAD_IN_PROGRESS_FLAG = "DOWNLOAD_IN_PROGRESS"
 
+_STREAM_LINK_TTL = 6 * 3600   # 6 hours — debrid links are valid well beyond 20 min
+_DIRECT_LINK_TTL = 6 * 3600   # 6 hours — same rationale
+_READY_TTL = 6 * 3600         # 6 hours — align with direct_link
+_DOWNLOAD_TTL = 600            # 10 min  — in-progress flag, short by design
+_LOCK_TTL = 60                 # 60 s    — mutex, short by design
+
+
+def _user_hash(identifier: str) -> str:
+    """16-char SHA-256 of the user identifier (api_key or IP). Never stored in plain text."""
+    return hashlib.sha256(identifier.encode()).hexdigest()[:16]
+
+
+def _content_hash(query: dict) -> str:
+    """Stable 16-char hash of the stream content (info_hash + episode + service).
+
+    - Same torrent + same episode + same service → same hash.
+    - Naturally disambiguates episodes of the same series torrent.
+    - Never contains magnet URIs or tracker credentials.
+    """
+    info_hash = query.get("info_hash", "")
+    if not info_hash:
+        magnet = query.get("magnet", "")
+        if "btih:" in magnet:
+            info_hash = magnet.split("btih:")[1].split("&")[0].split(":")[0].lower()
+    content = f"{info_hash}:{query.get('season', '')}:{query.get('episode', '')}:{query.get('service', '')}"
+    return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+
+async def _enforce_rate_limit(user_id: str) -> None:
+    """Fixed-window rate limiter per user (api_key or IP).
+
+    HEAD requests are excluded — call this only on the GET path.
+    Uses redis_client.incr() + expire() for a simple, dependency-free counter.
+    """
+    key = f"ratelimit:playback:{_user_hash(user_id)}"
+    count = await redis_client.incr(key)
+    if count == 1:
+        await redis_client.expire(key, settings.playback_limit_seconds)
+    if count > settings.playback_limit_requests:
+        logger.warning(f"Playback: Rate limit exceeded for user {_user_hash(user_id)}")
+        raise HTTPException(status_code=429, detail="Too many requests. Please slow down.")
+
 
 class ProxyStreamer:
     def __init__(self, request: Request, url: str, headers: dict):
@@ -63,32 +105,36 @@ async def handle_download(
     query: dict, config: dict, ip: str, redis_cache: RedisCache, debrid_session=None
 ) -> str:
     api_key = config.get("apiKey")
-    cache_key = f"download:{api_key}:{json.dumps(query)}_{ip}"
-    ready_cache_key = f"ready:{api_key}:{json.dumps(query)}_{ip}"
-    if await redis_cache.get(ready_cache_key) == "READY":
-        logger.info("Playback: File already marked as ready, checking for cached direct link")
-        
-        direct_link_cache_key = f"direct_link:{api_key}:{json.dumps(query)}_{ip}"
-        cached_direct_link = await redis_cache.get(direct_link_cache_key)
-        
+    user_id = api_key if api_key else ip
+    uhash = _user_hash(user_id)
+    chash = _content_hash(query)
+
+    download_key = f"download:{uhash}:{chash}"
+    ready_key = f"ready:{uhash}:{chash}"
+    direct_link_key = f"direct_link:{uhash}:{chash}"
+
+    if await redis_cache.get(ready_key) == "READY":
+        logger.debug("Playback: File already marked as ready, checking for cached direct link")
+
+        cached_direct_link = await redis_cache.get(direct_link_key)
         if cached_direct_link:
-            logger.info("Playback: Direct link found in cache, returning immediately")
+            logger.debug("Playback: Direct link found in cache, returning immediately")
             return cached_direct_link
-        
+
         debrid_service = get_download_service(config, debrid_session)
         if debrid_service:
             try:
                 direct_link = await debrid_service.get_stream_link(query, config, ip)
                 if direct_link and direct_link != settings.no_cache_video_url:
-                    await redis_cache.set(direct_link_cache_key, direct_link, expiration=600)
-                    logger.info("Playback: Direct link generated and cached")
+                    await redis_cache.set(direct_link_key, direct_link, expiration=_DIRECT_LINK_TTL)
+                    logger.debug("Playback: Direct link generated and cached")
                     return direct_link
             except Exception:
                 pass
 
-    download_flag = await redis_cache.get(cache_key)
+    download_flag = await redis_cache.get(download_key)
     if download_flag == DOWNLOAD_IN_PROGRESS_FLAG:
-        logger.info("Playback: Download in progress, checking if file is now ready")
+        logger.debug("Playback: Download in progress, checking if file is now ready")
 
         try:
             debrid_service = get_download_service(config, debrid_session)
@@ -97,15 +143,13 @@ async def handle_download(
                     direct_link = await debrid_service.get_stream_link(query, config, ip)
                     if direct_link and direct_link != settings.no_cache_video_url:
                         logger.success("Playback: File is now ready! Clearing download flag and returning direct link")
-                        await redis_cache.delete(cache_key)
-                        ready_cache_key = f"ready:{api_key}:{json.dumps(query)}_{ip}"
-                        await redis_cache.set(ready_cache_key, "READY", expiration=300)
-                        direct_link_cache_key = f"direct_link:{api_key}:{json.dumps(query)}_{ip}"
-                        await redis_cache.set(direct_link_cache_key, direct_link, expiration=600)
+                        await redis_cache.delete(download_key)
+                        await redis_cache.set(ready_key, "READY", expiration=_READY_TTL)
+                        await redis_cache.set(direct_link_key, direct_link, expiration=_DIRECT_LINK_TTL)
                         return direct_link
                 except DebridError as debrid_err:
                     logger.warning(f"Playback: Debrid error in progress check {debrid_err.status_keys}, returning status video")
-                    await redis_cache.delete(cache_key)
+                    await redis_cache.delete(download_key)
                     error_url = get_status_video_url(debrid_err.status_keys, default_key="UNKNOWN")
                     return RedirectResponse(url=error_url, status_code=302)
                 except Exception as link_error:
@@ -115,10 +159,7 @@ async def handle_download(
 
         return settings.no_cache_video_url
 
-    # Mark the start of the download
-    await redis_cache.set(
-        cache_key, DOWNLOAD_IN_PROGRESS_FLAG, expiration=600  
-    )
+    await redis_cache.set(download_key, DOWNLOAD_IN_PROGRESS_FLAG, expiration=_DOWNLOAD_TTL)
 
     try:
         debrid_service = get_download_service(config, debrid_session)
@@ -183,9 +224,8 @@ async def handle_download(
                 )
         return settings.no_cache_video_url
     except Exception as e:
-        await redis_cache.delete(cache_key)
+        await redis_cache.delete(download_key)
         logger.error(f"Playback: Error handling download: {str(e)}", exc_info=True)
-        # Check if torrent is banned (451 - Unavailable For Legal Reasons)
         if "451" in str(e):
             logger.warning(f"Playback: Torrent banned (451), returning banned video")
             return settings.banned_video_url
@@ -197,64 +237,37 @@ async def handle_download(
 
 
 async def get_stream_link(
-    decoded_query: str, config: dict, ip: str, redis_cache: RedisCache, cache_user_identifier: str, stream_id: str = None, debrid_session=None
+    decoded_query: str, config: dict, ip: str, redis_cache: RedisCache,
+    uhash: str, chash: str, debrid_session=None
 ) -> str:
     logger.debug(f"Playback: Getting stream link for query: {decoded_query}, IP: {ip}")
-    
-    query = json.loads(decoded_query)
-    if stream_id and query.get("type") == "series":
-        cache_key = f"stream_link:{cache_user_identifier}:{stream_id}:{query.get('service', '')}"
-        current_source_key = f"current_source:{cache_user_identifier}:{stream_id}:{query.get('service', '')}"
-        logger.info(f"Playback: get_stream_link using series cache key: {cache_key}")
-        logger.info(f"Playback: get_stream_link Stream ID: {stream_id}, Service: {query.get('service', '')}")
-    else:
-        cache_key = f"stream_link:{cache_user_identifier}:{decoded_query}"
-        current_source_key = f"current_source:{cache_user_identifier}:{decoded_query}"
-        logger.info(f"Playback: get_stream_link using fallback cache key: {cache_key}")
 
-    magnet = query.get("magnet")
-    info_hash = query.get("info_hash")
-    service = query.get("service", False)
-    
-    if magnet or info_hash:
-        source_info = {
-            "magnet": magnet,
-            "info_hash": info_hash,
-            "raw_title": query.get("title", ""),
-            "service": service,
-            "indexer": query.get("indexer", "")
-        }
-        await redis_cache.set(current_source_key, source_info, expiration=1200)
-        logger.debug(f"Playback: Stored current source for binge group: {magnet[:50] if magnet else info_hash}")
-
+    cache_key = f"stream_link:{uhash}:{chash}"
     cached_link = await redis_cache.get(cache_key)
     if cached_link:
-        logger.info(f"Playback: Stream link found in cache: {cached_link}")
+        logger.debug(f"Playback: Stream link found in cache")
         return cached_link
 
-    debrid_service = get_download_service(config, debrid_session)
+    query = json.loads(decoded_query)
+    service = query.get("service", False)
 
-    if not debrid_service:
-        logger.error("Playback: No debrid service available")
-        raise HTTPException(status_code=500, detail="No debrid service available")
-
-    if service:
-        logger.debug(f"Playback: Getting stream link from {service}")
-        link = await debrid_service.get_stream_link(query, config, ip)
-        
-        if link is None:
-            logger.warning("Playback: Debrid service returned None instead of a valid link")
-            logger.warning(f"Playback: Query: {decoded_query}")
-            logger.warning(f"Playback: Service: {service}")
-            raise DebridError("Debrid service failed to provide a valid stream link", error_code="UNKNOWN")
-    else:
+    if not service:
         logger.error("Playback: Service not found in query")
         raise HTTPException(status_code=500, detail="Service not found in query")
 
+    debrid_service = get_debrid_service(config, service, debrid_session)
+
+    logger.debug(f"Playback: Getting stream link from service {service}")
+    link = await debrid_service.get_stream_link(query, config, ip)
+
+    if link is None:
+        logger.warning(f"Playback: Debrid service returned None for service {service}")
+        raise DebridError("Debrid service failed to provide a valid stream link", error_code="UNKNOWN")
+
     if link != settings.no_cache_video_url:
-        logger.debug(f"Playback: Caching new stream link: {link}")
-        await redis_cache.set(cache_key, link, expiration=1200)  # Cache for 20 minutes
-        logger.info(f"Playback: New stream link generated and cached: {link}")
+        logger.debug(f"Playback: Caching new stream link")
+        await redis_cache.set(cache_key, link, expiration=_STREAM_LINK_TTL)
+        logger.debug(f"Playback: New stream link generated and cached")
     else:
         logger.debug("Playback: Stream link not cached (NO_CACHE_VIDEO_URL)")
     return link
@@ -274,18 +287,19 @@ async def get_playback(
         config = parse_config(config)
         api_key = config.get("apiKey")
         ip = get_client_ip(request)
-        cache_user_identifier = api_key if api_key else ip
+        user_id = api_key if api_key else ip
 
-        # Only validate the API key if it exists
+        await _enforce_rate_limit(user_id)
+
         if api_key:
             try:
                 await check_api_key(api_key, apikey_dao)
-                logger.info(f"Playback: Valid API key provided by {ip}")
+                logger.debug(f"Playback: Valid API key provided by {ip}")
             except HTTPException as e:
                 logger.warning(f"Playback: Invalid API key provided by {ip}. Error: {e.detail}")
-                raise e # Re-raise if validation fails for a provided key
+                raise e
         else:
-            logger.info(f"Playback: No API key provided by {ip}. Proceeding without API key validation.")
+            logger.debug(f"Playback: No API key provided by {ip}. Proceeding without API key validation.")
 
         if not query:
             logger.warning("Playback: Query is empty")
@@ -306,33 +320,22 @@ async def get_playback(
                 return result
             return RedirectResponse(url=result, status_code=status.HTTP_302_FOUND)
 
-        # Extract stream_id from referer
-        stream_id = None
-        referer = request.headers.get("referer", "")
-        if "/stream/" in referer:
-            try:
-                stream_id = referer.split("/stream/")[1].split("/")[-1].replace(".json", "")
-            except:
-                pass
+        uhash = _user_hash(user_id)
+        chash = _content_hash(query_dict)
+        fast_cache_key = f"stream_link:{uhash}:{chash}"
 
-        # Fast path: check cache before acquiring lock
-        if stream_id and query_dict.get("type") == "series":
-            fast_cache_key = f"stream_link:{cache_user_identifier}:{stream_id}:{query_dict.get('service', '')}"
-        else:
-            fast_cache_key = f"stream_link:{cache_user_identifier}:{decoded_query}"
         fast_cached = await redis_cache.get(fast_cache_key)
         if fast_cached:
-            logger.info("Playback: Fast path cache hit, skipping lock")
+            logger.debug("Playback: Fast path cache hit, skipping lock")
             link = fast_cached
         else:
-            # Use cache_user_identifier for lock key
-            lock_key = f"lock:stream:{cache_user_identifier}:{decoded_query}"
-            lock = redis_client.lock(lock_key, timeout=60)
+            lock_key = f"lock:stream:{uhash}:{chash}"
+            lock = redis_client.lock(lock_key, timeout=_LOCK_TTL)
 
             try:
                 if await lock.acquire(blocking=False):
                     logger.debug("Playback: Lock acquired, getting stream link")
-                    link = await get_stream_link(decoded_query, config, ip, redis_cache, cache_user_identifier, stream_id, debrid_session)
+                    link = await get_stream_link(decoded_query, config, ip, redis_cache, uhash, chash, debrid_session)
                 else:
                     logger.debug("Playback: Lock not acquired, waiting for cached link")
                     for _ in range(60):
@@ -353,28 +356,26 @@ async def get_playback(
                     await lock.release()
                     logger.debug("Playback: Lock released")
                 except LockError:
-                    logger.warning("Playback: Failed to release lock (already released)")
+                    logger.debug("Playback: Failed to release lock (already released)")
 
-        # Vérifier si la proxification est activée pour cette clé API
-        use_proxy = settings.proxied_link  # Valeur par défaut
-        
+        use_proxy = settings.proxied_link
+
         if api_key:
             try:
-                # Récupérer les informations de la clé API
                 api_key_info = await apikey_dao.get_key_by_uuid(api_key)
                 if api_key_info and hasattr(api_key_info, 'proxied_links'):
                     use_proxy = api_key_info.proxied_links
-                    logger.info(f"Playback: API key {api_key} has proxied_links={use_proxy}")
+                    logger.debug(f"Playback: API key has proxied_links={use_proxy}")
             except Exception as e:
                 logger.error(f"Playback: Error checking API key proxification status: {e}")
-        
+
         if not use_proxy:
-            logger.debug(f"Playback: Redirecting to non-proxied link: {link}")
+            logger.debug(f"Playback: Redirecting to non-proxied link")
             return RedirectResponse(
                 url=link, status_code=status.HTTP_302_FOUND
             )
 
-        if service == "TB":  # TODO: Check this for torbox
+        if service == "TB":
             logger.debug("Playback: Bypass proxied link for TorBox")
             return RedirectResponse(url=link, status_code=status.HTTP_302_FOUND)
 
@@ -392,7 +393,7 @@ async def get_playback(
 
         streamer = ProxyStreamer(request, link, headers)
 
-        logger.debug(f"Playback: Initiating request to: {link}")
+        logger.debug(f"Playback: Initiating request to stream link")
         async with request.app.state.http_session.head(
             link, headers=headers
         ) as response:
@@ -438,7 +439,3 @@ async def get_playback(
                 detail="An error occurred while processing the request."
             ).model_dump(),
         )
-
-
-# HEAD handler removed - FastAPI automatically handles HEAD requests
-# by routing them to the GET handler (same behavior as Comet)

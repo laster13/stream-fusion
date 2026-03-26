@@ -106,7 +106,7 @@ def get_indexer_priority_for_sort(indexer, config=None) -> int:
 def items_sort(items, config):
     """Sort items by the method specified in config."""
     sort_method = config["sort"]
-    logger.debug(f"Filters: Sorting items by method: {sort_method}")
+    logger.trace(f"Filters: Sorting items by method: {sort_method}")
 
     def _key_quality(x):
         return (sort_quality(x), get_indexer_priority_for_sort(x.indexer, config), get_item_hdr_priority(x), getattr(x, "language_priority", 999), -int(x.seeders or 0))
@@ -133,7 +133,7 @@ def items_sort(items, config):
         return items
 
     sorted_items = sorted(items, key=key_fn)
-    logger.debug(f"Filters: Sorting complete — {len(sorted_items)} items sorted by {sort_method}")
+    logger.trace(f"Filters: Sorting complete — {len(sorted_items)} items sorted by {sort_method}")
     return sorted_items
 
 
@@ -162,7 +162,7 @@ def filter_out_non_matching_movies(items, year):
 
 def filter_out_non_matching_series(items, season, episode):
     """Filter out series torrents that do not match the target season and episode."""
-    logger.debug(f"Filters: Filtering non-matching items for season {season} and episode {episode}")
+    logger.trace(f"Filters: Filtering non-matching items for season {season} and episode {episode}")
     numeric_season = int(season.replace("S", ""))
     numeric_episode = int(episode.replace("E", ""))
     filtered_items = []
@@ -191,7 +191,7 @@ def filter_out_non_matching_series(items, season, episode):
             logger.trace(f"Filters: Exact season and episode match found for item: {item.raw_title}")
             filtered_items.append(item)
 
-    logger.debug(
+    logger.trace(
         f"Filters: Filtering complete. {len(filtered_items)} matching items found out of {len(items)} total"
     )
     return filtered_items
@@ -231,7 +231,7 @@ def remove_non_matching_title(items, titles):
     cleaned_titles = [
         _INTEGRALE_PATTERN.sub("", clean_tmdb_title(t)).strip() for t in titles
     ]
-    logger.debug(f"Filters: Removing items not matching titles: {cleaned_titles}")
+    logger.trace(f"Filters: Removing items not matching titles: {cleaned_titles}")
 
     def normalize_words(text):
         return normalize_text(text).split()
@@ -317,10 +317,10 @@ def remove_non_matching_title(items, titles):
                 f"candidate_titles={cleaned_titles}"
             )
 
-    logger.info(
+    logger.debug(
         f"Filters: Title filtering summary -> kept={len(filtered_items)} rejected={len(items) - len(filtered_items)}"
     )
-    logger.debug(
+    logger.trace(
         f"Filters: Title filtering complete. {len(filtered_items)} items kept out of {len(items)} total"
     )
     return filtered_items
@@ -328,7 +328,7 @@ def remove_non_matching_title(items, titles):
 
 def filter_items(items, media, config, skip_resolution=False):
     """Apply all configured filters to a list of torrent items for the given media."""
-    logger.info(f"Filters: Starting item filtering for media: {media.titles[0]}")
+    logger.debug(f"Filters: Starting item filtering for media: {media.titles[0]}")
 
     filters = {
         "languages": LanguageFilter(config),
@@ -339,34 +339,34 @@ def filter_items(items, media, config, skip_resolution=False):
         filters["exclusion"] = QualityExclusionFilter(config)
 
     language_priority_filter = LanguagePriorityFilter(config)
-    logger.debug(f"Filters: Initial item count: {len(items)}")
+    logger.trace(f"Filters: Initial item count: {len(items)}")
 
     if media.type == "series":
-        logger.debug("Filters: Filtering out non-matching series torrents")
+        logger.trace("Filters: Filtering out non-matching series torrents")
         items = filter_out_non_matching_series(items, media.season, media.episode)
-        logger.debug(f"Filters: Item count after season/episode filtering: {len(items)}")
+        logger.trace(f"Filters: Item count after season/episode filtering: {len(items)}")
 
     if media.type == "movie":
-        logger.debug("Filters: Filtering out non-matching movie torrents")
+        logger.trace("Filters: Filtering out non-matching movie torrents")
         items = filter_out_non_matching_movies(items, media.year)
-        logger.debug(f"Filters: Item count after year filtering: {len(items)}")
+        logger.trace(f"Filters: Item count after year filtering: {len(items)}")
 
-    logger.debug(f"Filters: Filtering out items not matching titles: {media.titles}")
+    logger.trace(f"Filters: Filtering out items not matching titles: {media.titles}")
     items = remove_non_matching_title(items, media.titles)
-    logger.debug(f"Filters: Item count after title filtering: {len(items)}")
+    logger.trace(f"Filters: Item count after title filtering: {len(items)}")
 
     for filter_name, filter_instance in filters.items():
         try:
-            logger.debug(f"Filters: Applying {filter_name} filter: {config[filter_name]}")
+            logger.trace(f"Filters: Applying {filter_name} filter: {config[filter_name]}")
             items = filter_instance(items)
-            logger.debug(f"Filters: Item count after {filter_name} filter: {len(items)}")
+            logger.trace(f"Filters: Item count after {filter_name} filter: {len(items)}")
         except Exception as e:
             logger.error(f"Filters: Error while applying {filter_name} filter", exc_info=e)
 
     try:
-        logger.debug("Filters: Applying language priority filter")
+        logger.trace("Filters: Applying language priority filter")
         items = language_priority_filter(items)
-        logger.debug("Filters: Items sorted by language priority")
+        logger.trace("Filters: Items sorted by language priority")
 
         language_groups: dict[int, list] = {}
         for item in items:
@@ -377,7 +377,7 @@ def filter_items(items, media, config, skip_resolution=False):
         for priority in sorted(language_groups):
             items.extend(items_sort(language_groups[priority], config))
 
-        logger.debug("Filters: Items sorted by language priority and then by quality")
+        logger.trace("Filters: Items sorted by language priority and then by quality")
     except Exception as e:
         logger.error("Filters: Error while applying language priority filter", exc_info=e)
 
@@ -388,7 +388,7 @@ def filter_items(items, media, config, skip_resolution=False):
 def sort_items(items, config):
     """Sort items according to the method defined in config."""
     if config["sort"] is not None:
-        logger.debug(f"Filters: Sorting items according to config: {config['sort']}")
+        logger.trace(f"Filters: Sorting items according to config: {config['sort']}")
         return items_sort(items, config)
     logger.debug("Filters: No sorting specified, returning items in original order")
     return items
@@ -398,7 +398,7 @@ def merge_items(
     cache_items: List[TorrentItem], search_items: List[TorrentItem]
 ) -> List[TorrentItem]:
     """Merge two item lists, deduplicating by (raw_title, size, privacy) and keeping the highest-priority source."""
-    logger.debug(
+    logger.trace(
         f"Filters: Merging cached items ({len(cache_items)}) and search items ({len(search_items)})"
     )
     merged_dict: dict[tuple, TorrentItem] = {}
@@ -423,5 +423,5 @@ def merge_items(
         add_to_merged(item)
 
     merged_items = list(merged_dict.values())
-    logger.success(f"Filters: Merging complete. Total unique items: {len(merged_items)}")
+    logger.trace(f"Filters: Merging complete. Total unique items: {len(merged_items)}")
     return merged_items

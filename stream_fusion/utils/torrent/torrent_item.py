@@ -58,7 +58,10 @@ class TorrentItem:
         magnet = self.magnet
         torrent_download = self.torrent_download
 
-        if self.info_hash and self.indexer in _PRIVATE_CREDENTIAL_INDEXERS:
+        # Only add tracker credentials when the file must be downloaded (⬇️).
+        # When the file is already cached on the debrid service (⚡), the tracker
+        # URL is not needed and exposing credentials in the stream URL is unnecessary.
+        if self.info_hash and self.indexer in _PRIVATE_CREDENTIAL_INDEXERS and not self.availability:
             if self.indexer == "C411 - API" and settings.c411_api_key:
                 c411_tracker = settings.c411_passkey or ""
                 if c411_tracker and magnet and "&tr=" not in magnet:

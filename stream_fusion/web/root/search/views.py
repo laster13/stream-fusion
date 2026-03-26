@@ -673,7 +673,7 @@ async def get_results(
 
         # --- External search results: use cache if available, otherwise run fresh search ---
         if cached_external is None:
-            logger.info("Search: No external sources in Redis cache. Performing new search.")
+            logger.debug("Search: No external sources in Redis cache. Performing new search.")
             external_results = await get_search_results(media, config)
             just_fetched = True  # avoid double-fetch if results are insufficient
             await redis_cache.set(
@@ -741,10 +741,17 @@ async def get_results(
             _avail_redis = await RedisCache(config).get_redis_client()
             for debrid in debrid_services:
                 hashes = torrent_smart_container.get_unaviable_hashes()
+                if not hashes:
+                    logger.debug(f"Search: All items already marked available, skipping {type(debrid).__name__} check")
+                    continue
                 ip = get_client_ip(request)
                 result = await debrid.get_availability_bulk_cached(hashes, ip, _avail_redis)
 
-                if result:
+                if result is None:
+                    logger.warning(
+                        f"Search: {type(debrid).__name__} returned None for {len(hashes)} hashes (API failure?)"
+                    )
+                elif result:
                     torrent_smart_container.update_availability(
                         result, type(debrid), media
                     )
@@ -759,8 +766,8 @@ async def get_results(
                         f"Search: Checked availability for {checked_count} items with {type(debrid).__name__} (returned {returned_count})"
                     )
                 else:
-                    logger.warning(
-                        "Search: No availability results found in debrid service"
+                    logger.debug(
+                        f"Search: {type(debrid).__name__} found 0 cached hashes out of {len(hashes)}"
                     )
 
         best_matching_results = torrent_smart_container.get_best_matching()

@@ -98,7 +98,7 @@ class YggflixService:
         for query in queries:
             try:
                 raw_results = self.yggflix.search_series(title=query)
-                logger.info(f"YGG Relay series query '{query}' -> {len(raw_results)} results")
+                logger.debug(f"YGG Relay series query '{query}' -> {len(raw_results)} results")
             except Exception as e:
                 logger.warning(f"YGG Relay series query failed '{query}': {e}")
                 continue
@@ -156,7 +156,7 @@ class YggflixService:
             results = self.__filter_series_results(results, media)
 
         results = sorted(results, key=lambda r: r.get("seeders", 0), reverse=True)[:50]
-        logger.info(f"{len(results)} results to process from YGG Relay for: {media.titles[0]}")
+        logger.debug(f"{len(results)} results to process from YGG Relay for: {media.titles[0]}")
 
         items = []
         for result in results:
