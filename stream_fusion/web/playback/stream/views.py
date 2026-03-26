@@ -9,7 +9,9 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
+from stream_fusion.services.postgresql.dependencies import get_db_session
 from stream_fusion.services.redis.redis_config import get_redis_cache_dependency
+from sqlalchemy.ext.asyncio import AsyncSession
 from stream_fusion.utils.cache.local_redis import RedisCache
 from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
@@ -238,7 +240,7 @@ async def handle_download(
 
 async def get_stream_link(
     decoded_query: str, config: dict, ip: str, redis_cache: RedisCache,
-    uhash: str, chash: str, debrid_session=None
+    uhash: str, chash: str, debrid_session=None, db_session=None
 ) -> str:
     logger.debug(f"Playback: Getting stream link for query: {decoded_query}, IP: {ip}")
 
@@ -269,7 +271,14 @@ async def get_stream_link(
         await redis_cache.set(cache_key, link, expiration=_STREAM_LINK_TTL)
         logger.debug(f"Playback: New stream link generated and cached")
     else:
-        logger.debug("Playback: Stream link not cached (NO_CACHE_VIDEO_URL)")
+        # False positive: hash was marked as cached but debrid returned no_cache_video_url
+        # Invalidate both Redis and PG so the next search re-checks the API
+        info_hash = debrid_service._extract_hash(query.get("magnet", ""))
+        if info_hash:
+            await debrid_service.invalidate_availability_cache(
+                info_hash, redis_client, db_session
+            )
+        logger.debug("Playback: Stream link not cached (NO_CACHE_VIDEO_URL) — cache invalidated")
     return link
 
 
@@ -280,6 +289,7 @@ async def get_playback(
     request: Request,
     redis_cache: RedisCache = Depends(get_redis_cache_dependency),
     apikey_dao: APIKeyDAO = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
     if request.method == "HEAD":
         return Response(status_code=200)
@@ -335,7 +345,7 @@ async def get_playback(
             try:
                 if await lock.acquire(blocking=False):
                     logger.debug("Playback: Lock acquired, getting stream link")
-                    link = await get_stream_link(decoded_query, config, ip, redis_cache, uhash, chash, debrid_session)
+                    link = await get_stream_link(decoded_query, config, ip, redis_cache, uhash, chash, debrid_session, db_session=db)
                 else:
                     logger.debug("Playback: Lock not acquired, waiting for cached link")
                     for _ in range(60):

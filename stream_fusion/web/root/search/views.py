@@ -5,6 +5,7 @@ import asyncio
 
 from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
 from stream_fusion.services.postgresql.dao.torrentitem_dao import TorrentItemDAO
+from stream_fusion.services.postgresql.dependencies import get_db_session
 from stream_fusion.services.redis.redis_config import get_redis_cache_dependency
 from stream_fusion.utils.cache.local_redis import RedisCache
 from stream_fusion.utils.debrid.get_debrid_service import get_all_debrid_services
@@ -42,6 +43,7 @@ from stream_fusion.utils.lacale.lacale_service import LaCaleService
 from stream_fusion.utils.generationfree.generationfree_service import GenerationFreeService
 from stream_fusion.settings import settings
 from stream_fusion.web.utils import get_client_ip
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 router = APIRouter()
@@ -402,6 +404,7 @@ async def get_results(
     redis_cache: RedisCache = Depends(get_redis_cache_dependency),
     apikey_dao: APIKeyDAO = Depends(),
     torrent_dao: TorrentItemDAO = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ) -> SearchResponse:
     start = time.time()
     logger.info(f"Search: Stream request initiated for {stream_type} - {stream_id}")
@@ -745,7 +748,7 @@ async def get_results(
                     logger.debug(f"Search: All items already marked available, skipping {type(debrid).__name__} check")
                     continue
                 ip = get_client_ip(request)
-                result = await debrid.get_availability_bulk_cached(hashes, ip, _avail_redis)
+                result = await debrid.get_availability_bulk_cached(hashes, ip, _avail_redis, db_session=db)
 
                 if result is None:
                     logger.warning(
