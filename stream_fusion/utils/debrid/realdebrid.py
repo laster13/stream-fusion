@@ -71,7 +71,7 @@ class RealDebrid(BaseDebrid):
             )
         except HTTPException as e:
             if e.status_code == 451:
-                logger.error(f"Real-Debrid: Torrent banned (451)")
+                logger.error("Real-Debrid: Torrent banned (451)")
                 raise
             raise
 
@@ -184,42 +184,195 @@ class RealDebrid(BaseDebrid):
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
         if not hashes_or_magnets:
-            return {"status": "success", "data": {"magnets": []}}
+            return []
 
         # Normalise inputs: accept both plain hashes and magnet URIs
         def _extract_hash(value):
-            import re as _re
-            if _re.match(r'^[a-fA-F0-9]{40}$', value):
+            if re.match(r'^[a-fA-F0-9]{40}$', value):
                 return value.lower()
-            m = _re.search(r'urn:btih:([a-fA-F0-9]{40})', value, _re.IGNORECASE)
+            m = re.search(r'urn:btih:([a-fA-F0-9]{40})', value, re.IGNORECASE)
             return m.group(1).lower() if m else None
 
-        hashes = [h for h in (_extract_hash(v) for v in hashes_or_magnets) if h]
+        hashes = list(dict.fromkeys(h for h in (_extract_hash(v) for v in hashes_or_magnets) if h))
+        if not hashes:
+            return []
 
-        # --- StremThru (community cache) if configured ---
-        # Native RD /torrents/instantAvailability no longer returns usable data
+        result_items = []
+        remaining_hashes = hashes
+
+        # Step 1: StremThru community cache (native RD /torrents/instantAvailability is dead)
         if settings.stremthru_url:
             try:
                 token = settings.rd_token if settings.rd_unique_account else await self.token_manager.get_access_token()
                 if token:
-                    result, _ = await self._get_stremthru_community_cache(hashes, "realdebrid", token, ip=ip)
-                    logger.info(f"Real-Debrid: StremThru found {len(result)} cached hashes")
-                    return result  # list format — handled by __using_stremthru in TorrentSmartContainer
+                    stremthru_results, remaining_hashes = await self._get_stremthru_community_cache(
+                        hashes, "realdebrid", token, ip=ip
+                    )
+                    result_items.extend(stremthru_results)
+                    logger.info(f"Real-Debrid: StremThru found {len(stremthru_results)} cached hashes, {len(remaining_hashes)} remaining")
                 else:
-                    logger.warning("Real-Debrid: no token available for StremThru cache check, falling back to stub")
+                    logger.warning("Real-Debrid: no token available for StremThru check")
             except Exception as e:
-                logger.warning(f"Real-Debrid: StremThru cache check failed ({e}), falling back to stub")
+                logger.warning(f"Real-Debrid: StremThru cache check failed ({e})")
 
-        # --- Stub fallback: mark everything as available ---
-        # Return StremThru list format so TorrentSmartContainer routes through
-        # _update_availability_stremthru (which handles this shape correctly).
-        # _update_availability_realdebrid expects the old {hash: {"rd": [...]}} format
-        # and would silently skip our dict — using the list format avoids that mismatch.
-        logger.warning("Real-Debrid: StremThru not configured or failed — marking all hashes as available (stub)")
-        return [
-            {"hash": h, "status": "cached", "files": [], "store_name": "realdebrid", "debrid": "RD"}
-            for h in (hashes or hashes_or_magnets)
-        ]
+        # Step 2: Direct RD check via anonymous magnet add + /torrents for remaining hashes
+        _MAX_DIRECT = 20
+        to_check = remaining_hashes[:_MAX_DIRECT]
+        skipped = remaining_hashes[_MAX_DIRECT:]
+        if skipped:
+            logger.warning(
+                f"Real-Debrid: Skipping {len(skipped)} hashes (RD direct check limit is {_MAX_DIRECT})"
+            )
+
+        if to_check:
+            direct_cached = await self._check_availability_direct(to_check)
+            result_items.extend(direct_cached)
+
+        logger.info(f"Real-Debrid: availability check complete — {len(result_items)} cached hashes found")
+        return result_items
+
+    async def _check_availability_direct(self, hashes):
+        """
+        Check RD cache by adding anonymous magnets (no trackers) and inspecting /torrents.
+
+        Status semantics for no-tracker magnets:
+          magnet_conversion / waiting_files_selection / downloaded → CACHED
+          451 infringing_file                                      → NOT cached (and nothing added to account)
+          magnet_error / queued / dead / …                        → NOT cached
+
+        Strategy:
+          A. GET /torrents → mark already-present hashes as cached, skip adding them
+          B. POST /torrents/addMagnet for each remaining hash (0.5 s between calls)
+          C. GET /torrents → single status check for all newly added IDs
+          D. Fire-and-forget deletion of added IDs (451s were never added, no cleanup needed)
+        """
+        if not hashes:
+            return []
+
+        _CACHED_STATUSES = frozenset(("magnet_conversion", "waiting_files_selection", "downloaded"))
+
+        try:
+            headers = await self.get_headers()
+        except Exception as e:
+            logger.warning(f"Real-Debrid: Could not get headers for direct check: {e}")
+            return []
+
+        # A — GET /torrents: mark hashes already in account, build remaining list
+        cached_results = []
+        remaining = list(hashes)
+        try:
+            existing_torrents = await self.json_response(f"{self.base_url}torrents", headers=headers)
+            if isinstance(existing_torrents, list):
+                existing_by_hash = {
+                    (t.get("hash") or "").lower(): t
+                    for t in existing_torrents if t.get("hash")
+                }
+                still_remaining = []
+                for h in hashes:
+                    t = existing_by_hash.get(h)
+                    if t and t.get("status") in _CACHED_STATUSES:
+                        cached_results.append({
+                            "hash": h, "status": "cached", "files": [],
+                            "store_name": "realdebrid", "debrid": "RD",
+                        })
+                    else:
+                        still_remaining.append(h)
+                remaining = still_remaining
+        except Exception as e:
+            logger.warning(f"Real-Debrid: Could not fetch existing torrents: {e}")
+
+        if not remaining:
+            logger.info(f"Real-Debrid: direct check — {len(cached_results)}/{len(hashes)} cached")
+            return cached_results
+
+        # B — Add anonymous magnets for hashes not in account (safe: no pre-existing ID risk)
+        new_adds = {}  # {hash: torrent_id}
+        for i, h in enumerate(remaining):
+            if i > 0:
+                await asyncio.sleep(0.5)
+            tid = await self._add_magnet_probe(h, headers)
+            if tid:
+                new_adds[h] = tid
+
+        if not new_adds:
+            logger.info(f"Real-Debrid: direct check — {len(cached_results)}/{len(hashes)} cached")
+            return cached_results
+
+        # C — Single GET /torrents to check status of all newly added IDs
+        try:
+            all_torrents = await self.json_response(f"{self.base_url}torrents", headers=headers)
+            torrents_by_id = {t.get("id"): t for t in (all_torrents or []) if isinstance(t, dict)}
+            for h, tid in new_adds.items():
+                torrent = torrents_by_id.get(tid)
+                status = torrent.get("status") if torrent else None
+                if status in _CACHED_STATUSES:
+                    cached_results.append({
+                        "hash": h, "status": "cached", "files": [],
+                        "store_name": "realdebrid", "debrid": "RD",
+                    })
+                    logger.trace(f"Real-Debrid: {h} cached (status={status})")
+                else:
+                    logger.trace(f"Real-Debrid: {h} not cached (status={status})")
+        except Exception as e:
+            logger.error(f"Real-Debrid: Could not fetch torrents for status check: {e}")
+
+        logger.info(f"Real-Debrid: direct check — {len(cached_results)}/{len(hashes)} cached")
+
+        # D — Background deletion of all added IDs (451s were never added, nothing to clean up)
+        asyncio.create_task(self._delete_torrents_background(list(new_adds.values())))
+
+        return cached_results
+
+    async def _add_magnet_probe(self, info_hash: str, headers: dict):
+        """
+        Low-level addMagnet for availability probing — bypasses json_response to silence
+        expected 451 (infringing_file) at TRACE level.
+        Retries once on 429 with a 2 s back-off.
+        Returns the torrent ID string on success, None otherwise.
+        """
+        await self._global_rate_limit()
+        url = f"{self.base_url}torrents/addMagnet"
+        session = await self._get_session()
+        timeout = aiohttp.ClientTimeout(total=30)
+        max_attempts = 2  # 1 retry on 429
+        for attempt in range(max_attempts):
+            try:
+                async with session.post(
+                    url,
+                    headers=headers,
+                    data={"magnet": f"magnet:?xt=urn:btih:{info_hash}"},
+                    timeout=timeout,
+                ) as response:
+                    if response.status == 451:
+                        logger.trace(f"Real-Debrid: {info_hash} not cached (451 infringing_file)")
+                        return None
+                    if response.status == 429:
+                        logger.debug(f"Real-Debrid: probe rate limited for {info_hash} (attempt {attempt + 1}/{max_attempts})")
+                        if attempt < max_attempts - 1:
+                            await asyncio.sleep(2)
+                            continue
+                        return None
+                    if response.status in (200, 201):
+                        data = await response.json()
+                        return data.get("id") if isinstance(data, dict) else None
+                    body = await response.text()
+                    logger.warning(f"Real-Debrid: addMagnet probe unexpected {response.status} for {info_hash}: {body[:200]}")
+                    return None
+            except Exception as e:
+                logger.warning(f"Real-Debrid: addMagnet probe failed for {info_hash}: {e}")
+                return None
+        return None
+
+    async def _delete_torrents_background(self, torrent_ids):
+        """Progressively delete temp torrents added during availability check. Non-blocking."""
+        logger.debug(f"Real-Debrid: background cleanup of {len(torrent_ids)} temp torrent(s)")
+        for torrent_id in torrent_ids:
+            try:
+                await self.delete_torrent(torrent_id)
+                logger.debug(f"Real-Debrid: Deleted temp torrent {torrent_id}")
+            except Exception as e:
+                logger.debug(f"Real-Debrid: Could not delete temp torrent {torrent_id}: {e}")
+            await asyncio.sleep(1)  # gentle on the RD API (~1 s/delete, max ~20 s for 20)
 
     async def get_stream_link(self, query, config=None, ip=None):
         # Extract query parameters
@@ -453,7 +606,7 @@ class RealDebrid(BaseDebrid):
                 index = max(range(len(selected_files)), key=lambda i: selected_files[i]['bytes'])
 
         if index is None or index >= len(links):
-            logger.warning(f"Real-Debrid: Appropriate link not found. Falling back to the first available link.")
+            logger.warning("Real-Debrid: Appropriate link not found. Falling back to the first available link.")
             return links[0] if links else settings.no_cache_video_url
 
         logger.info(f"Real-Debrid: Selected link index: {index}")
