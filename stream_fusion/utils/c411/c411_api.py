@@ -136,7 +136,7 @@ class C411API:
                     results.append(result)
                 elif result.magnet or result.link:
                     kept_without_hash += 1
-                    logger.debug(
+                    logger.trace(
                         "C411: keeping item without valid info_hash "
                         f"| title={result.raw_title} "
                         f"| magnet_present={bool(result.magnet)} "
@@ -145,7 +145,7 @@ class C411API:
                     results.append(result)
                 else:
                     skipped_invalid_hash += 1
-                    logger.debug(
+                    logger.trace(
                         "C411: skipped item without valid hash/link "
                         f"| title={result.raw_title} "
                         f"| magnet_present={bool(result.magnet)} "

@@ -86,7 +86,7 @@ class Torr9Service:
                 result = Torr9Result().from_api_item(item, media)
                 results.append(result)
             except ValueError as e:
-                logger.debug(f"Torr9: Skipping item - {e}")
+                logger.trace(f"Torr9: Skipping item - {e}")
             except Exception as e:
                 logger.error(f"Torr9: Unexpected error while building item: {e}")
 
@@ -119,7 +119,7 @@ class Torr9Service:
             is_complete_pack = self._is_complete_pack(title)
 
             if allowed_years is not None and found_year is not None and found_year not in allowed_years:
-                logger.debug(f"Torr9: Reject wrong year: {title}")
+                logger.trace(f"Torr9: Reject wrong year: {title}")
                 continue
 
             if is_complete_pack:
@@ -127,7 +127,7 @@ class Torr9Service:
                 continue
 
             if has_episode_marker and not exact_match:
-                logger.debug(
+                logger.trace(
                     f"Torr9: Reject wrong episode for S{season_num:02d}E{episode_num:02d}: {title}"
                 )
                 continue

@@ -71,5 +71,5 @@ class C411Service:
                 result = C411Result().from_api_item(item, media)
                 results.append(result)
             except ValueError as e:
-                logger.debug(f"C411: Skipping item — {e}")
+                logger.trace(f"C411: Skipping item — {e}")
         return results
