@@ -47,7 +47,7 @@ class C411API:
         params = dict(params)
         params["apikey"] = self.api_key
         safe_params = {k: ("***" if k == "apikey" else v) for k, v in params.items()}
-        logger.debug(f"C411: request params={safe_params}")
+        logger.trace(f"C411: request params={safe_params}")
         session = await self._get_session()
 
         for attempt in range(2):
@@ -60,7 +60,7 @@ class C411API:
                 ) as response:
                     response.raise_for_status()
                     text = await response.text()
-                    logger.debug(
+                    logger.trace(
                         f"C411: HTTP {response.status} received, XML length={len(text) if text else 0}"
                     )
                     return text
@@ -157,7 +157,7 @@ class C411API:
                 logger.debug(f"C411: Error parsing item: {e}")
                 continue
 
-        logger.info(
+        logger.debug(
             "C411: XML parse summary -> "
             f"total_items={total_items}, "
             f"kept={len(results)}, "
@@ -186,7 +186,7 @@ class C411API:
                 if (result.seeders or 0) > (existing.seeders or 0):
                     deduped[key] = result
 
-        logger.info(
+        logger.debug(
             f"C411: dedup summary -> input={len(results)}, unique={len(deduped)}"
         )
         return list(deduped.values())
@@ -234,7 +234,7 @@ class C411API:
 
             xml = await self._request_xml(params)
             tmdb_results = self._parse_xml(xml) if xml else []
-            logger.debug(
+            logger.trace(
                 f"C411: search_series tmdb={tmdb_id} s={season} e={episode} → {len(tmdb_results)} results"
             )
             all_results.extend(tmdb_results)
@@ -248,13 +248,13 @@ class C411API:
 
             xml = await self._request_xml(params)
             title_results = self._parse_xml(xml) if xml else []
-            logger.debug(
+            logger.trace(
                 f"C411: search_series title={title} s={season} e={episode} → {len(title_results)} results"
             )
             all_results.extend(title_results)
 
         final_results = self._merge_and_deduplicate_results(all_results)
-        logger.info(
+        logger.debug(
             f"C411: search_series merged total → {len(final_results)} results"
         )
         return final_results

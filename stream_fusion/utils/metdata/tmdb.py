@@ -11,7 +11,7 @@ from stream_fusion.logging_config import logger
 
 class TMDB(MetadataProvider):
     async def get_metadata(self, id, type):
-        self.logger.info("Getting metadata for " + type + " with id " + id)
+        self.logger.debug("Getting metadata for " + type + " with id " + id)
 
         full_id = id.split(":")
         session = await self._get_session()
@@ -64,5 +64,5 @@ class TMDB(MetadataProvider):
                     if data.get("tv_results") and len(data["tv_results"]) > 0:
                         result.titles.append(self.replace_weird_characters(data["tv_results"][0]["name"]))
 
-        self.logger.info("Got metadata for " + type + " with id " + id)
+        self.logger.debug("Got metadata for " + type + " with id " + id)
         return result

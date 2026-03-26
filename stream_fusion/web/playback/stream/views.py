@@ -114,11 +114,11 @@ async def handle_download(
     direct_link_key = f"direct_link:{uhash}:{chash}"
 
     if await redis_cache.get(ready_key) == "READY":
-        logger.info("Playback: File already marked as ready, checking for cached direct link")
+        logger.debug("Playback: File already marked as ready, checking for cached direct link")
 
         cached_direct_link = await redis_cache.get(direct_link_key)
         if cached_direct_link:
-            logger.info("Playback: Direct link found in cache, returning immediately")
+            logger.debug("Playback: Direct link found in cache, returning immediately")
             return cached_direct_link
 
         debrid_service = get_download_service(config, debrid_session)
@@ -127,14 +127,14 @@ async def handle_download(
                 direct_link = await debrid_service.get_stream_link(query, config, ip)
                 if direct_link and direct_link != settings.no_cache_video_url:
                     await redis_cache.set(direct_link_key, direct_link, expiration=_DIRECT_LINK_TTL)
-                    logger.info("Playback: Direct link generated and cached")
+                    logger.debug("Playback: Direct link generated and cached")
                     return direct_link
             except Exception:
                 pass
 
     download_flag = await redis_cache.get(download_key)
     if download_flag == DOWNLOAD_IN_PROGRESS_FLAG:
-        logger.info("Playback: Download in progress, checking if file is now ready")
+        logger.debug("Playback: Download in progress, checking if file is now ready")
 
         try:
             debrid_service = get_download_service(config, debrid_session)
@@ -245,7 +245,7 @@ async def get_stream_link(
     cache_key = f"stream_link:{uhash}:{chash}"
     cached_link = await redis_cache.get(cache_key)
     if cached_link:
-        logger.info(f"Playback: Stream link found in cache")
+        logger.debug(f"Playback: Stream link found in cache")
         return cached_link
 
     query = json.loads(decoded_query)
@@ -267,7 +267,7 @@ async def get_stream_link(
     if link != settings.no_cache_video_url:
         logger.debug(f"Playback: Caching new stream link")
         await redis_cache.set(cache_key, link, expiration=_STREAM_LINK_TTL)
-        logger.info(f"Playback: New stream link generated and cached")
+        logger.debug(f"Playback: New stream link generated and cached")
     else:
         logger.debug("Playback: Stream link not cached (NO_CACHE_VIDEO_URL)")
     return link
@@ -294,12 +294,12 @@ async def get_playback(
         if api_key:
             try:
                 await check_api_key(api_key, apikey_dao)
-                logger.info(f"Playback: Valid API key provided by {ip}")
+                logger.debug(f"Playback: Valid API key provided by {ip}")
             except HTTPException as e:
                 logger.warning(f"Playback: Invalid API key provided by {ip}. Error: {e.detail}")
                 raise e
         else:
-            logger.info(f"Playback: No API key provided by {ip}. Proceeding without API key validation.")
+            logger.debug(f"Playback: No API key provided by {ip}. Proceeding without API key validation.")
 
         if not query:
             logger.warning("Playback: Query is empty")
@@ -326,7 +326,7 @@ async def get_playback(
 
         fast_cached = await redis_cache.get(fast_cache_key)
         if fast_cached:
-            logger.info("Playback: Fast path cache hit, skipping lock")
+            logger.debug("Playback: Fast path cache hit, skipping lock")
             link = fast_cached
         else:
             lock_key = f"lock:stream:{uhash}:{chash}"
@@ -356,7 +356,7 @@ async def get_playback(
                     await lock.release()
                     logger.debug("Playback: Lock released")
                 except LockError:
-                    logger.warning("Playback: Failed to release lock (already released)")
+                    logger.debug("Playback: Failed to release lock (already released)")
 
         use_proxy = settings.proxied_link
 
@@ -365,7 +365,7 @@ async def get_playback(
                 api_key_info = await apikey_dao.get_key_by_uuid(api_key)
                 if api_key_info and hasattr(api_key_info, 'proxied_links'):
                     use_proxy = api_key_info.proxied_links
-                    logger.info(f"Playback: API key has proxied_links={use_proxy}")
+                    logger.debug(f"Playback: API key has proxied_links={use_proxy}")
             except Exception as e:
                 logger.error(f"Playback: Error checking API key proxification status: {e}")
 

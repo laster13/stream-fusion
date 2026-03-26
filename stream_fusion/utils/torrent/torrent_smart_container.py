@@ -16,7 +16,7 @@ from stream_fusion.logging_config import logger
 class TorrentSmartContainer:
     def __init__(self, torrent_items: List[TorrentItem], media):
         self.logger = logger
-        self.logger.debug(
+        self.logger.trace(
             f"Initializing TorrentSmartContainer with {len(torrent_items)} items"
         )
         self.__itemsDict: Dict[str, TorrentItem] = self._build_items_dict_by_infohash(
@@ -24,7 +24,7 @@ class TorrentSmartContainer:
         )
         self.__media = media
         self.__using_stremthru = False
-        self.logger.debug(
+        self.logger.trace(
             "TorrentSmartContainer: Including all torrents regardless of seeders count"
         )
 
@@ -104,7 +104,7 @@ class TorrentSmartContainer:
         for info_hash, item in self.__itemsDict.items():
             if item.availability is False:
                 hashes.append(info_hash)
-        self.logger.debug(
+        self.logger.trace(
             f"TorrentSmartContainer: Retrieved {len(hashes)} hashes to process"
         )
         return hashes
@@ -126,7 +126,7 @@ class TorrentSmartContainer:
         return direct_torrentable_items
 
     def get_best_matching(self):
-        self.logger.debug(
+        self.logger.trace(
             f"TorrentSmartContainer: Finding best matching items ({len(self.__itemsDict)} to process)"
         )
         best_matching = []
@@ -251,7 +251,7 @@ class TorrentSmartContainer:
             )
             return
 
-        self.logger.debug(
+        self.logger.trace(
             f"TorrentSmartContainer: Updating availability for {debrid_type.__name__}"
         )
 
@@ -267,7 +267,7 @@ class TorrentSmartContainer:
                 StremThru.get_underlying_debrid_code(store_name)
                 or debrid_response[0].get("debrid", "RD")
             )
-            self.logger.debug(
+            self.logger.trace(
                 f"TorrentSmartContainer: StremThru list response detected (store={store_name}, debrid={underlying_debrid})"
             )
             self._update_availability_stremthru(
@@ -408,7 +408,7 @@ class TorrentSmartContainer:
                 )
 
     def _update_availability_alldebrid(self, response, media):
-        self.logger.info("TorrentSmartContainer: Updating availability for AllDebrid")
+        self.logger.debug("TorrentSmartContainer: Updating availability for AllDebrid")
 
         if not isinstance(response, dict) or response.get("status") != "success":
             self.logger.error(
@@ -439,7 +439,7 @@ class TorrentSmartContainer:
 
             torrent_item = self.__itemsDict.get(hash_value)
             if torrent_item is None:
-                self.logger.debug(
+                self.logger.trace(
                     f"TorrentSmartContainer: Unknown AllDebrid hash returned: {hash_value}"
                 )
                 continue
@@ -462,7 +462,7 @@ class TorrentSmartContainer:
             else:
                 torrent_item.availability = "AD"
 
-        self.logger.debug(
+        self.logger.trace(
             "TorrentSmartContainer: AllDebrid availability update completed"
         )
 
@@ -635,7 +635,7 @@ class TorrentSmartContainer:
             result_debrid = result.get("debrid")
             if result_debrid:
                 debrid_code = result_debrid
-                self.logger.debug(
+                self.logger.trace(
                     f"TorrentSmartContainer: Using specific debrid code: {debrid_code} for {hash_value}"
                 )
             else:
@@ -661,7 +661,7 @@ class TorrentSmartContainer:
                 )
 
             if item.type == "series":
-                self.logger.debug(
+                self.logger.trace(
                     f"TorrentSmartContainer: Processing series files for {item.raw_title}"
                 )
                 clean_season = media.season.replace("S", "")
@@ -682,7 +682,7 @@ class TorrentSmartContainer:
                                 file.get("size", 0),
                             )
                         )
-                        self.logger.debug(
+                        self.logger.trace(
                             f"TorrentSmartContainer: Match found: {file_name}"
                         )
 
@@ -693,12 +693,12 @@ class TorrentSmartContainer:
                         debrid=debrid_code,
                         skip_file_name_for_series=False,
                     )
-                    self.logger.debug(
+                    self.logger.trace(
                         f"TorrentSmartContainer: StremThru updated matching series files for {item.raw_title}"
                     )
                     continue
 
-                self.logger.debug(
+                self.logger.trace(
                     f"TorrentSmartContainer: No direct episode match found for {item.raw_title}"
                 )
 
@@ -799,11 +799,11 @@ class TorrentSmartContainer:
 
                 item.availability = debrid_code
 
-            self.logger.debug(
+            self.logger.trace(
                 f"TorrentSmartContainer: Updated availability for {item.raw_title}: {item.availability}"
             )
 
-        self.logger.debug(
+        self.logger.trace(
             "TorrentSmartContainer: StremThru availability update completed"
         )
 
@@ -828,12 +828,12 @@ class TorrentSmartContainer:
             torrent_item.file_name = file["title"]
 
         torrent_item.size = file["size"]
-        self.logger.debug(
+        self.logger.trace(
             f"TorrentSmartContainer: Updated file details for {torrent_item.raw_title}: {file['title']}"
         )
 
     def _build_items_dict_by_infohash(self, items: List[TorrentItem]):
-        self.logger.debug(
+        self.logger.trace(
             f"TorrentSmartContainer: Building items dictionary by infohash ({len(items)} items)"
         )
         items_dict = {}
@@ -857,7 +857,7 @@ class TorrentSmartContainer:
                         self.logger.trace(
                             f"TorrentSmartContainer: Skipping duplicate info hash: {normalized_hash} (keeping {existing_item.indexer})"
                         )
-        self.logger.debug(
+        self.logger.trace(
             f"TorrentSmartContainer: Built dictionary with {len(items_dict)} unique items"
         )
         return items_dict
@@ -909,7 +909,7 @@ class TorrentSmartContainer:
                     numeric_season in parsed_file.seasons
                     and numeric_episode in parsed_file.episodes
                 ):
-                    self.logger.debug(
+                    self.logger.trace(
                         f"TorrentSmartContainer: Matching series file found: {file_name}"
                     )
                     explicit_index = file.get("index")

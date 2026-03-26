@@ -57,7 +57,7 @@ class YggflixAPI:
             return []
 
         items = root.findall(".//item")
-        logger.info(f"YGG Relay found {len(items)} results")
+        logger.debug(f"YGG Relay found {len(items)} results")
 
         normalized = []
         for item in items:

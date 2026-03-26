@@ -49,7 +49,7 @@ class Torr9Service:
         return self._build_results(raw, media)
 
     async def _search_series(self, media: Series) -> List[Torr9Result]:
-        logger.info(f"Torr9: Searching series: {media.titles[0]}")
+        logger.debug(f"Torr9: Searching series: {media.titles[0]}")
         raw_id = media.id.split(":")[0] if media.id else None
         imdb_id = raw_id if raw_id and raw_id.startswith("tt") else None
 
@@ -66,14 +66,14 @@ class Torr9Service:
             episode=episode_num,
         )
 
-        logger.info(
+        logger.debug(
             f"Torr9: {len(raw)} raw results for '{media.titles[0]}' "
             f"(S{season_num:02d}E{episode_num:02d})"
         )
 
         raw = await asyncio.to_thread(self._filter_series_results_for_torr9_only, raw, media)
 
-        logger.info(
+        logger.debug(
             f"Torr9: {len(raw)} raw results after Torr9 local filtering for '{media.titles[0]}'"
         )
 
@@ -90,7 +90,7 @@ class Torr9Service:
             except Exception as e:
                 logger.error(f"Torr9: Unexpected error while building item: {e}")
 
-        logger.info(f"Torr9: Built {len(results)} final Torr9Result objects")
+        logger.debug(f"Torr9: Built {len(results)} final Torr9Result objects")
         return results
 
     def _filter_series_results_for_torr9_only(self, raw_results, media: Series):
@@ -136,7 +136,7 @@ class Torr9Service:
 
         combined = exact_episode_items + complete_pack_items
 
-        logger.info(
+        logger.debug(
             f"Torr9: Filtered results for '{media.titles[0]}' "
             f"(exact={len(exact_episode_items)}, packs={len(complete_pack_items)}, total={len(combined)})"
         )

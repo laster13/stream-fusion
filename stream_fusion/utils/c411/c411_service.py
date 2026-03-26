@@ -48,7 +48,7 @@ class C411Service:
         return self._build_results(raw, media)
 
     async def _search_series(self, media: Series) -> List[C411Result]:
-        logger.info(f"C411: Searching series (global): {media.titles[0]}")
+        logger.debug(f"C411: Searching series (global): {media.titles[0]}")
         tmdb_id = str(media.tmdb_id) if self.has_tmdb and media.tmdb_id else None
         title = media.titles[0] if media.titles else None
 

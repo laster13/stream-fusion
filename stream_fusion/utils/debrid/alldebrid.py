@@ -579,7 +579,7 @@ class AllDebrid(BaseDebrid):
 
         ordered_results = [result_by_hash[h] for h in cleaned_hashes]
         ready_count = sum(1 for item in ordered_results if item.get("instant"))
-        logger.info(
+        logger.debug(
             f"AllDebrid: Cache check complete — {ready_count}/{len(ordered_results)} cached"
         )
 

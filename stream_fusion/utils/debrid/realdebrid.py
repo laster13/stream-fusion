@@ -50,7 +50,7 @@ class RealDebrid(BaseDebrid):
     async def add_magnet(self, magnet, ip=None):
         url = f"{self.base_url}torrents/addMagnet"
         data = {"magnet": magnet}
-        logger.info(f"Real-Debrid: Adding magnet: {magnet}")
+        logger.debug(f"Real-Debrid: Adding magnet: {magnet}")
         try:
             headers = await self.get_headers()
             return await self.json_response(
@@ -81,7 +81,7 @@ class RealDebrid(BaseDebrid):
         return await self.json_response(url, method="delete", headers=headers)
 
     async def get_torrent_info(self, torrent_id):
-        logger.info(f"Real-Debrid: Getting torrent info for ID: {torrent_id}")
+        logger.trace(f"Real-Debrid: Getting torrent info for ID: {torrent_id}")
         url = f"{self.base_url}torrents/info/{torrent_id}"
         headers = await self.get_headers()
         torrent_info = await self.json_response(url, headers=headers)
@@ -90,7 +90,7 @@ class RealDebrid(BaseDebrid):
         return torrent_info
 
     async def select_files(self, torrent_id, file_id):
-        logger.info(
+        logger.debug(
             f"Real-Debrid: Selecting file(s): {file_id} for torrent ID: {torrent_id}"
         )
         await self._torrent_rate_limit()
@@ -209,7 +209,7 @@ class RealDebrid(BaseDebrid):
                         hashes, "realdebrid", token, ip=ip
                     )
                     result_items.extend(stremthru_results)
-                    logger.info(f"Real-Debrid: StremThru found {len(stremthru_results)} cached hashes, {len(remaining_hashes)} remaining")
+                    logger.debug(f"Real-Debrid: StremThru found {len(stremthru_results)} cached hashes, {len(remaining_hashes)} remaining")
                 else:
                     logger.warning("Real-Debrid: no token available for StremThru check")
             except Exception as e:
@@ -228,7 +228,7 @@ class RealDebrid(BaseDebrid):
             direct_cached = await self._check_availability_direct(to_check)
             result_items.extend(direct_cached)
 
-        logger.info(f"Real-Debrid: availability check complete — {len(result_items)} cached hashes found")
+        logger.debug(f"Real-Debrid: availability check complete — {len(result_items)} cached hashes found")
         return result_items
 
     async def _check_availability_direct(self, hashes):
@@ -282,7 +282,7 @@ class RealDebrid(BaseDebrid):
             logger.warning(f"Real-Debrid: Could not fetch existing torrents: {e}")
 
         if not remaining:
-            logger.info(f"Real-Debrid: direct check — {len(cached_results)}/{len(hashes)} cached")
+            logger.debug(f"Real-Debrid: direct check — {len(cached_results)}/{len(hashes)} cached")
             return cached_results
 
         # B — Add anonymous magnets for hashes not in account (safe: no pre-existing ID risk)
@@ -295,7 +295,7 @@ class RealDebrid(BaseDebrid):
                 new_adds[h] = tid
 
         if not new_adds:
-            logger.info(f"Real-Debrid: direct check — {len(cached_results)}/{len(hashes)} cached")
+            logger.debug(f"Real-Debrid: direct check — {len(cached_results)}/{len(hashes)} cached")
             return cached_results
 
         # C — Single GET /torrents to check status of all newly added IDs
@@ -316,7 +316,7 @@ class RealDebrid(BaseDebrid):
         except Exception as e:
             logger.error(f"Real-Debrid: Could not fetch torrents for status check: {e}")
 
-        logger.info(f"Real-Debrid: direct check — {len(cached_results)}/{len(hashes)} cached")
+        logger.debug(f"Real-Debrid: direct check — {len(cached_results)}/{len(hashes)} cached")
 
         # D — Background deletion of all added IDs (451s were never added, nothing to clean up)
         asyncio.create_task(self._delete_torrents_background(list(new_adds.values())))
@@ -383,18 +383,18 @@ class RealDebrid(BaseDebrid):
         episode = query["episode"]
         info_hash = get_info_hash_from_magnet(magnet)
 
-        logger.info(f"Real-Debrid: Getting stream link for {stream_type} with hash: {info_hash}")
+        logger.debug(f"Real-Debrid: Getting stream link for {stream_type} with hash: {info_hash}")
 
         # Check for cached torrents
         cached_torrent_ids = await self._get_cached_torrent_ids(info_hash)
-        logger.info(f"Real-Debrid: Found {len(cached_torrent_ids)} cached torrents with hash: {info_hash}")
+        logger.debug(f"Real-Debrid: Found {len(cached_torrent_ids)} cached torrents with hash: {info_hash}")
 
         torrent_id = None
         if cached_torrent_ids:
             torrent_info = await self._get_cached_torrent_info(cached_torrent_ids, file_index, season, episode, stream_type)
             if torrent_info:
                 torrent_id = torrent_info["id"]
-                logger.info(f"Real-Debrid: Found cached torrent with ID: {torrent_id}")
+                logger.debug(f"Real-Debrid: Found cached torrent with ID: {torrent_id}")
 
         # If the torrent is not in cache, add it
         if torrent_id is None:
@@ -403,7 +403,7 @@ class RealDebrid(BaseDebrid):
                 logger.error("Real-Debrid: Failed to add or find torrent.")
                 raise HTTPException(status_code=500, detail="Real-Debrid: Failed to add or find torrent.")
 
-        logger.info(f"Real-Debrid: Waiting for link(s) to be ready for torrent ID: {torrent_id}")
+        logger.debug(f"Real-Debrid: Waiting for link(s) to be ready for torrent ID: {torrent_id}")
         links = await self.wait_for_link(torrent_id, timeout=20)
         if links is None:
             logger.warning("Real-Debrid: No links available after waiting. Returning NO_CACHE_VIDEO_URL.")
@@ -414,19 +414,19 @@ class RealDebrid(BaseDebrid):
 
         # Select the appropriate link
         if len(links) > 1:
-            logger.info("Real-Debrid: Finding appropriate link")
+            logger.debug("Real-Debrid: Finding appropriate link")
             download_link = await self._find_appropriate_link(torrent_info, links, file_index, season, episode)
         else:
             download_link = links[0]
 
         # Unrestrict the link
-        logger.info(f"Real-Debrid: Unrestricting the download link: {download_link}")
+        logger.debug(f"Real-Debrid: Unrestricting the download link: {download_link}")
         unrestrict_response = await self.unrestrict_link(download_link)
         if not unrestrict_response or "download" not in unrestrict_response:
             logger.error("Real-Debrid: Failed to unrestrict link.")
             return None
 
-        logger.info(f"Real-Debrid: Got download link: {unrestrict_response['download']}")
+        logger.debug(f"Real-Debrid: Got download link: {unrestrict_response['download']}")
         return unrestrict_response["download"]
 
     async def _get_cached_torrent_ids(self, info_hash):
@@ -435,7 +435,7 @@ class RealDebrid(BaseDebrid):
         headers = await self.get_headers()
         torrents = await self.json_response(url, headers=headers)
 
-        logger.info(f"Real-Debrid: Searching user's downloads for hash: {info_hash}")
+        logger.debug(f"Real-Debrid: Searching user's downloads for hash: {info_hash}")
         torrent_ids = [
             torrent["id"]
             for torrent in torrents
@@ -478,9 +478,9 @@ class RealDebrid(BaseDebrid):
 
     async def add_magnet_or_torrent(self, magnet, torrent_download=None, ip=None):
         if torrent_download is None:
-            logger.info("Real-Debrid: Adding magnet")
+            logger.debug("Real-Debrid: Adding magnet")
             magnet_response = await self.add_magnet(magnet)
-            logger.info(f"Real-Debrid: Add magnet response: {magnet_response}")
+            logger.debug(f"Real-Debrid: Add magnet response: {magnet_response}")
 
             if not magnet_response or "id" not in magnet_response:
                 logger.error("Real-Debrid: Failed to add magnet.")
@@ -490,10 +490,10 @@ class RealDebrid(BaseDebrid):
 
             torrent_id = magnet_response["id"]
         else:
-            logger.info("Real-Debrid: Downloading and adding torrent file")
+            logger.debug("Real-Debrid: Downloading and adding torrent file")
             torrent_file = await self.download_torrent_file(torrent_download)
             upload_response = await self.add_torrent(torrent_file)
-            logger.info(f"Real-Debrid: Add torrent file response: {upload_response}")
+            logger.debug(f"Real-Debrid: Add torrent file response: {upload_response}")
 
             if not upload_response or "id" not in upload_response:
                 logger.error("Real-Debrid: Failed to add torrent file.")
@@ -503,7 +503,7 @@ class RealDebrid(BaseDebrid):
 
             torrent_id = upload_response["id"]
 
-        logger.info(f"Real-Debrid: New torrent added with ID: {torrent_id}")
+        logger.debug(f"Real-Debrid: New torrent added with ID: {torrent_id}")
         return await self.get_torrent_info(torrent_id)
 
     async def add_magnet_or_torrent_and_select(self, query, ip=None):
@@ -522,19 +522,19 @@ class RealDebrid(BaseDebrid):
         is_season_pack = stream_type == "series" and len(torrent_info["files"]) > 5
 
         if is_season_pack:
-            logger.info("Real-Debrid: Processing season pack")
+            logger.debug("Real-Debrid: Processing season pack")
             await self._process_season_pack(torrent_info)
         else:
-            logger.info("Real-Debrid: Selecting specific file")
+            logger.debug("Real-Debrid: Selecting specific file")
             await self._select_file(
                 torrent_info, stream_type, file_index, season, episode
             )
 
-        logger.info(f"Real-Debrid: Added magnet or torrent to download service: {magnet[:50]}")
+        logger.debug(f"Real-Debrid: Added magnet or torrent to download service: {magnet[:50]}")
         return torrent_info['id']
 
     async def _process_season_pack(self, torrent_info):
-        logger.info("Real-Debrid: Processing season pack files")
+        logger.debug("Real-Debrid: Processing season pack files")
         video_file_indexes = [
             str(file["id"])
             for file in torrent_info["files"]
@@ -543,7 +543,7 @@ class RealDebrid(BaseDebrid):
 
         if video_file_indexes:
             await self.select_files(torrent_info["id"], ",".join(video_file_indexes))
-            logger.info(
+            logger.debug(
                 f"Real-Debrid: Selected {len(video_file_indexes)} video files from season pack"
             )
             await asyncio.sleep(10)
@@ -553,14 +553,14 @@ class RealDebrid(BaseDebrid):
     async def _select_file(self, torrent_info, stream_type, file_index, season, episode):
         torrent_id = torrent_info["id"]
         if file_index is not None:
-            logger.info(f"Real-Debrid: Selecting file_index: {file_index}")
+            logger.debug(f"Real-Debrid: Selecting file_index: {file_index}")
             await self.select_files(torrent_id, file_index)
             return
 
         files = torrent_info["files"]
         if stream_type == "movie":
             largest_file_id = max(files, key=lambda x: x["bytes"])["id"]
-            logger.info(f"Real-Debrid: Selecting largest file_index: {largest_file_id}")
+            logger.debug(f"Real-Debrid: Selecting largest file_index: {largest_file_id}")
             await self.select_files(torrent_id, largest_file_id)
         elif stream_type == "series":
             matching_files = [
@@ -570,7 +570,7 @@ class RealDebrid(BaseDebrid):
             ]
             if matching_files:
                 largest_file_id = max(matching_files, key=lambda x: x["bytes"])["id"]
-                logger.info(
+                logger.debug(
                     f"Real-Debrid: Selecting largest matching file_index: {largest_file_id}"
                 )
                 await self.select_files(torrent_id, largest_file_id)
@@ -584,7 +584,7 @@ class RealDebrid(BaseDebrid):
         torrent_info = await self.get_torrent_info(torrent_info["id"])
         selected_files = [file for file in torrent_info["files"] if file["selected"] == 1]
 
-        logger.info(f"Real-Debrid: Finding appropriate link. Selected files: {len(selected_files)}, Available links: {len(links)}")
+        logger.debug(f"Real-Debrid: Finding appropriate link. Selected files: {len(selected_files)}, Available links: {len(links)}")
 
         if not selected_files:
             logger.warning("Real-Debrid: No files were selected. Selecting the largest file.")
@@ -609,5 +609,5 @@ class RealDebrid(BaseDebrid):
             logger.warning("Real-Debrid: Appropriate link not found. Falling back to the first available link.")
             return links[0] if links else settings.no_cache_video_url
 
-        logger.info(f"Real-Debrid: Selected link index: {index}")
+        logger.debug(f"Real-Debrid: Selected link index: {index}")
         return links[index]
