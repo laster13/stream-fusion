@@ -22,7 +22,7 @@ class TorrentItemDAO:
                 self.session.add(new_item)
                 await self.session.flush()
                 await self.session.refresh(new_item)
-                logger.debug(f"TorrentItemDAO: Created new TorrentItem: {new_item.id}")
+                logger.trace(f"TorrentItemDAO: Created new TorrentItem: {new_item.id}")
                 return new_item
             except Exception as e:
                 if "duplicate key value violates unique constraint" not in str(e):
@@ -46,10 +46,10 @@ class TorrentItemDAO:
                 result = await self.session.execute(query)
                 db_item = result.scalar_one_or_none()
                 if db_item:
-                    logger.debug(f"TorrentItemDAO: Retrieved TorrentItem: {item_id}")
+                    logger.trace(f"TorrentItemDAO: Retrieved TorrentItem: {item_id}")
                     return db_item
                 else:
-                    logger.debug(f"TorrentItemDAO: TorrentItem not found: {item_id}")
+                    logger.trace(f"TorrentItemDAO: TorrentItem not found: {item_id}")
                     return None
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error retrieving TorrentItem {item_id}: {str(e)}")

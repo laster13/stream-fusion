@@ -87,7 +87,7 @@ class TorrentService:
             "LaCale - API",
             "GenerationFree - API",
         ] and not torrent_item.tmdb_id:
-            self.logger.debug(
+            self.logger.trace(
                 f"TorrentService: Skipping {torrent_item.indexer} torrent without tmdb_id: {torrent_item.raw_title}"
             )
             return
@@ -95,13 +95,13 @@ class TorrentService:
         try:
             existing = await self.torrent_dao.get_torrent_item_by_id(unique_id)
             if existing:
-                self.logger.debug(f"TorrentService: Torrent already cached, skipping: {unique_id}")
+                self.logger.trace(f"TorrentService: Torrent already cached, skipping: {unique_id}")
             else:
                 await self.torrent_dao.create_torrent_item(torrent_item, unique_id)
-                self.logger.debug(f"TorrentService: Created new cached torrent: {unique_id}")
+                self.logger.trace(f"TorrentService: Created new cached torrent: {unique_id}")
         except Exception as e:
             if "duplicate key value violates unique constraint" in str(e):
-                self.logger.debug(f"TorrentService: Race condition, torrent already exists: {unique_id}")
+                self.logger.trace(f"TorrentService: Race condition, torrent already exists: {unique_id}")
             else:
                 self.logger.error(f"TorrentService: Error caching torrent {unique_id}: {str(e)}")
 
@@ -238,7 +238,7 @@ class TorrentService:
                 decoder = Decoder(encoding="latin-1")
                 metadata = decoder.decode(torrent_file)
             except Exception as inner_e:
-                logger.error(f"Impossible de décoder le fichier torrent: {str(e)} puis {str(inner_e)}")
+                logger.error(f"Failed to decode torrent file: {str(e)} then {str(inner_e)}")
                 result.torrent_download = result.link
                 result.trackers = []
                 result.info_hash = ""
@@ -267,7 +267,7 @@ class TorrentService:
                 result.trackers,
             )
         except Exception as e:
-            logger.error(f"Erreur lors du traitement des métadonnées du torrent: {str(e)}")
+            logger.error(f"Error processing torrent metadata: {str(e)}")
             result.trackers = []
             result.info_hash = ""
             result.magnet = ""

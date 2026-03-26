@@ -420,16 +420,13 @@ async def get_results(
 
     debrid_session = getattr(request.app.state, "debrid_session", None)
     debrid_services = get_all_debrid_services(config, debrid_session)
-    logger.debug(f"Search: Found {len(debrid_services)} debrid services")
-    logger.info(
-        f"Search: Debrid services: {[debrid.__class__.__name__ for debrid in debrid_services]}"
-    )
+    logger.debug(f"Search: Debrid services: {[debrid.__class__.__name__ for debrid in debrid_services]}")
 
     http_session = getattr(request.app.state, "http_session", None)
 
     # --- Metadata: TMDB preferred, Cinemeta as fallback; result cached in Redis ---
     async def get_metadata(episode_id=None, media_type=None):
-        logger.info(f"Search: Fetching metadata from {config['metadataProvider']}")
+        logger.debug(f"Search: Fetching metadata from {config['metadataProvider']}")
         actual_id = episode_id if episode_id is not None else stream_id
         actual_type = media_type if media_type is not None else stream_type
 
@@ -449,6 +446,7 @@ async def get_results(
         get_metadata, stream_id, stream_type, config["metadataProvider"]
     )
     logger.debug(f"Search: Retrieved media metadata for {str(media.titles)}")
+    logger.info(f"Search: [{media.titles[0]}] {stream_type} {stream_id}")
 
     # stream_cache_key: user-specific (api_key or IP) + media identifier → 16-char SHA256 prefix
     def stream_cache_key(media):
@@ -694,7 +692,7 @@ async def get_results(
             just_fetched = False
 
         all_results = merge_items(postgres_results, external_results)
-        logger.info(
+        logger.debug(
             f"Search: Merged Postgres ({len(postgres_results)}) + External ({len(external_results)}) = {len(all_results)} total results"
         )
 
@@ -732,7 +730,6 @@ async def get_results(
 
     # --- Search: aggregate results from Postgres + external sources, apply quality filter ---
     raw_search_results = await get_and_filter_results(media, config)
-    logger.debug(f"Search: Filtered search results: {len(raw_search_results)}")
     search_results = ResultsPerQualityFilter(config).filter(raw_search_results)
     logger.info(f"Search: Filtered search results per quality: {len(search_results)}")
 

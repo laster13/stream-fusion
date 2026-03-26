@@ -24,7 +24,7 @@ class YggflixResult:
 
     def convert_to_torrent_item(self):
         parsed_data = self.parsed_data or parse(self.raw_title)
-        logger.debug(
+        logger.trace(
             f"YggflixResult.convert_to_torrent_item(): "
             f"'{self.raw_title[:60]}' → resolution='{getattr(parsed_data, 'resolution', 'UNKNOWN')}'"
         )
