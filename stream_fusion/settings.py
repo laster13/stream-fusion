@@ -90,6 +90,8 @@ class Settings(BaseSettings):
     proxy_buffer_size: int = 1024 * 1024
     playback_limit_requests: int = 60   # max requests per user per window
     playback_limit_seconds: int = 60    # window size in seconds
+    share_cache_limit_requests: int = 30   # max cache-check requests per API key per window
+    share_cache_limit_seconds: int = 60    # window size in seconds
 
     # REALDEBRID
     rd_token: str | None = None

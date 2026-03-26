@@ -93,6 +93,28 @@ class DebridCacheDAO:
             await self.session.rollback()
             logger.warning(f"DebridCacheDAO: invalidate failed for {info_hash} ({e})")
 
+    async def check_batch(self, hashes: list[str], service: str) -> set[str]:
+        """Return the subset of `hashes` that are confirmed-cached and not expired.
+
+        Hash-only projection — does NOT fetch cached_data (lighter than get_batch).
+        Used by the share endpoint to answer availability queries without leaking file metadata.
+        """
+        if not hashes:
+            return set()
+        now = int(time.time())
+        try:
+            result = await self.session.execute(
+                select(DebridCacheModel.info_hash).where(
+                    DebridCacheModel.info_hash.in_(hashes),
+                    DebridCacheModel.service == service,
+                    DebridCacheModel.expires_at > now,
+                )
+            )
+            return {row for (row,) in result.all()}
+        except Exception as e:
+            logger.warning(f"DebridCacheDAO: check_batch failed ({e})")
+            return set()
+
     async def delete_expired(self) -> int:
         """Delete all expired entries. Returns the number of rows deleted."""
         now = int(time.time())
