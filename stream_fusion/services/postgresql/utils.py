@@ -74,3 +74,32 @@ async def init_db_cleanup_function(engine):
             logger.info("API key cleanup function created and scheduled.")
         else:
             logger.info("API key cleanup function already exists.")
+
+        # Debrid cache cleanup — delete entries whose expires_at has passed
+        result = await conn.execute(text(
+            "SELECT 1 FROM pg_proc WHERE proname = 'delete_expired_debrid_cache'"
+        ))
+        debrid_cleanup_exists = result.scalar() is not None
+
+        if not debrid_cleanup_exists:
+            await conn.execute(text("""
+            CREATE OR REPLACE FUNCTION delete_expired_debrid_cache() RETURNS void AS $$
+            DECLARE deleted_count INTEGER;
+            BEGIN
+                DELETE FROM debrid_cache
+                WHERE expires_at < EXTRACT(EPOCH FROM NOW())::BIGINT;
+                GET DIAGNOSTICS deleted_count = ROW_COUNT;
+                IF deleted_count > 0 THEN
+                    RAISE NOTICE 'Deleted % expired debrid cache entries', deleted_count;
+                END IF;
+            END;
+            $$ LANGUAGE plpgsql;
+            """))
+
+            await conn.execute(text("""
+            SELECT cron.schedule('30 */6 * * *', $$SELECT delete_expired_debrid_cache()$$);
+            """))
+
+            logger.info("Debrid cache cleanup function created and scheduled.")
+        else:
+            logger.info("Debrid cache cleanup function already exists.")

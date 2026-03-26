@@ -1,5 +1,6 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 from typing import List, Union, Set
+
 from RTN import parse
 
 from stream_fusion.logging_config import logger
@@ -11,6 +12,9 @@ from stream_fusion.utils.yggfilx.yggflix_api import YggflixAPI
 
 
 class YggflixService:
+    # Minimum delay between consecutive API calls to avoid triggering 429 rate limits.
+    _REQUEST_DELAY = 0.3  # seconds
+
     def __init__(self, config: dict):
         self.yggflix = YggflixAPI()
         self.has_tmdb = config.get("metadataProvider") == "tmdb"
@@ -45,6 +49,21 @@ class YggflixService:
             unique.append(normalized)
         return unique
 
+    def __merge_results(
+        self,
+        new_items: List[dict],
+        merged: List[dict],
+        seen_hashes: Set[str],
+    ) -> None:
+        """Merge new_items into merged, deduplicating by info_hash."""
+        for item in new_items:
+            info_hash = (item.get("info_hash") or "").lower()
+            if info_hash:
+                if info_hash in seen_hashes:
+                    continue
+                seen_hashes.add(info_hash)
+            merged.append(item)
+
     def __search_movie(self, media: Movie) -> List[dict]:
         titles = self.__unique_titles(getattr(media, "titles", []) or [])
         year = getattr(media, "year", None)
@@ -57,24 +76,19 @@ class YggflixService:
             if q:
                 queries.append(q)
 
-        merged_results = []
+        merged_results: List[dict] = []
         seen_hashes: Set[str] = set()
 
-        for query in queries:
+        for i, query in enumerate(queries):
+            if i > 0:
+                time.sleep(self._REQUEST_DELAY)
             try:
                 raw_results = self.yggflix.search_movie(title=query)
-                logger.info(f"YGG Relay movie query '{query}' -> {len(raw_results)} results")
+                logger.debug(f"YGG Relay movie query '{query}' -> {len(raw_results)} results")
             except Exception as e:
                 logger.warning(f"YGG Relay movie query failed '{query}': {e}")
                 continue
-
-            for item in raw_results:
-                info_hash = (item.get("info_hash") or "").lower()
-                if info_hash:
-                    if info_hash in seen_hashes:
-                        continue
-                    seen_hashes.add(info_hash)
-                merged_results.append(item)
+            self.__merge_results(raw_results, merged_results, seen_hashes)
 
         return merged_results
 
@@ -85,6 +99,8 @@ class YggflixService:
 
         logger.info(f"Searching YGG Relay for series: {media.titles[0] if media.titles else 'unknown'}")
 
+        # Build query list: for each title, generate S##E## first, then S## (for season packs).
+        # Both variants are always run — S## catches season packs not tagged with episode numbers.
         queries = []
         for title in titles:
             if season_num is not None and episode_num is not None:
@@ -92,24 +108,20 @@ class YggflixService:
             if season_num is not None:
                 queries.append(f"{title} S{int(season_num):02d}")
 
-        merged_results = []
+        merged_results: List[dict] = []
         seen_hashes: Set[str] = set()
 
-        for query in queries:
+        for i, query in enumerate(queries):
+            if i > 0:
+                # Small delay between requests to stay under the relay's rate limit.
+                time.sleep(self._REQUEST_DELAY)
             try:
                 raw_results = self.yggflix.search_series(title=query)
                 logger.debug(f"YGG Relay series query '{query}' -> {len(raw_results)} results")
             except Exception as e:
                 logger.warning(f"YGG Relay series query failed '{query}': {e}")
                 continue
-
-            for item in raw_results:
-                info_hash = (item.get("info_hash") or "").lower()
-                if info_hash:
-                    if info_hash in seen_hashes:
-                        continue
-                    seen_hashes.add(info_hash)
-                merged_results.append(item)
+            self.__merge_results(raw_results, merged_results, seen_hashes)
 
         return merged_results
 
@@ -147,7 +159,7 @@ class YggflixService:
         self, results: List[dict], media: Union[Movie, Series]
     ) -> List[YggflixResult]:
         if not results:
-            logger.info(f"No results found on YGG Relay for: {media.titles[0]}")
+            logger.debug(f"No results found on YGG Relay for: {media.titles[0]}")
             return []
 
         results = self.__filter_out_no_seeders(results)
