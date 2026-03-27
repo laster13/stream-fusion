@@ -315,7 +315,9 @@ class Settings(BaseSettings):
         return url
 
     model_config = SettingsConfigDict(
-        env_file=".env", secrets_dir="/run/secrets", env_file_encoding="utf-8"
+        env_file=".env",
+        secrets_dir="/run/secrets" if os.path.isdir("/run/secrets") else None,
+        env_file_encoding="utf-8",
     )
 
     @property
