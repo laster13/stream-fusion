@@ -87,6 +87,86 @@ class StremThruDebrid(BaseDebrid):
             ]
         return sanitized
 
+    async def _enrich_before_live(
+        self, hashes: list, db_session, redis_client, hits: list
+    ) -> list:
+        """StremThru override: cross-service PG L2 check + peer cache using native service name.
+
+        StremThru stores availability under "stremthru_<store>" but the native debrid service
+        (e.g. "alldebrid") may already be cached in PG from a direct debrid instance.
+        We check that native key first, then query the peer for any remaining misses.
+        """
+        if not self.store_name:
+            return hashes
+
+        remaining = list(hashes)
+        native_service = self.store_name
+
+        from stream_fusion.utils.stremthru.client import DEBRID_CODE_MAP
+        debrid_code = DEBRID_CODE_MAP.get(native_service, native_service[:2].upper())
+
+        # 1. PG L2 cross-service lookup with native service key
+        if db_session and remaining:
+            try:
+                from stream_fusion.services.postgresql.dao.debridcache_dao import DebridCacheDAO
+                pg_hits = await DebridCacheDAO(db_session).get_batch(remaining, native_service)
+                if pg_hits:
+                    for h, data in pg_hits.items():
+                        st_item = {
+                            "hash": h,
+                            "status": "cached",
+                            "files": data.get("files", []),
+                            "store_name": native_service,
+                            "debrid": debrid_code,
+                        }
+                        hits.append(st_item)
+                        if redis_client:
+                            try:
+                                import jsonpickle as _jp
+                                await redis_client.set(
+                                    self._avail_cache_key(h),
+                                    _jp.encode(st_item),
+                                    ex=self._AVAIL_TTL_CACHED,
+                                )
+                            except Exception:
+                                pass
+                    remaining = [h for h in remaining if h not in pg_hits]
+                    logger.debug(
+                        f"StremThru: cross-service PG ({native_service}) — {len(pg_hits)} hits"
+                    )
+            except Exception as e:
+                logger.debug(f"StremThru: cross-service PG failed ({e})")
+
+        # 2. Peer cache with native service name
+        if remaining:
+            peer_hits = await self._get_peer_cache(remaining, native_service)
+            if peer_hits:
+                for h, data in peer_hits.items():
+                    st_item = {
+                        "hash": h,
+                        "status": "cached",
+                        "files": data.get("files", []),
+                        "store_name": native_service,
+                        "debrid": debrid_code,
+                    }
+                    hits.append(st_item)
+                    if redis_client:
+                        try:
+                            import jsonpickle as _jp
+                            await redis_client.set(
+                                self._avail_cache_key(h),
+                                _jp.encode(st_item),
+                                ex=self._AVAIL_TTL_CACHED,
+                            )
+                        except Exception:
+                            pass
+                remaining = [h for h in remaining if h not in peer_hits]
+                logger.debug(
+                    f"StremThru: peer ({native_service}) — {len(peer_hits)} hits"
+                )
+
+        return remaining
+
     # ------------------------------------------------------------------
     # Store configuration
     # ------------------------------------------------------------------
