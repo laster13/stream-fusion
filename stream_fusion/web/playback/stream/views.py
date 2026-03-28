@@ -106,6 +106,17 @@ class ProxyStreamer:
 async def handle_download(
     query: dict, config: dict, ip: str, redis_cache: RedisCache, debrid_session=None
 ) -> str:
+    def _effective_service():
+        """Return the debrid service to use for this download.
+
+        If the query carries preferred_service=TorBox (set for special French indexers
+        when TorBox is configured), force TorBox regardless of debridDownloader.
+        Otherwise fall back to the user's configured download service.
+        """
+        if query.get("preferred_service") == "TorBox" and config.get("TBToken"):
+            return get_debrid_service(config, "TB", debrid_session)
+        return get_download_service(config, debrid_session)
+
     api_key = config.get("apiKey")
     user_id = api_key if api_key else ip
     uhash = _user_hash(user_id)
@@ -123,7 +134,7 @@ async def handle_download(
             logger.debug("Playback: Direct link found in cache, returning immediately")
             return cached_direct_link
 
-        debrid_service = get_download_service(config, debrid_session)
+        debrid_service = _effective_service()
         if debrid_service:
             try:
                 direct_link = await debrid_service.get_stream_link(query, config, ip)
@@ -139,7 +150,7 @@ async def handle_download(
         logger.debug("Playback: Download in progress, checking if file is now ready")
 
         try:
-            debrid_service = get_download_service(config, debrid_session)
+            debrid_service = _effective_service()
             if debrid_service:
                 try:
                     direct_link = await debrid_service.get_stream_link(query, config, ip)
@@ -164,7 +175,7 @@ async def handle_download(
     await redis_cache.set(download_key, DOWNLOAD_IN_PROGRESS_FLAG, expiration=_DOWNLOAD_TTL)
 
     try:
-        debrid_service = get_download_service(config, debrid_session)
+        debrid_service = _effective_service()
         if not debrid_service:
             raise HTTPException(
                 status_code=500, detail="Download service not available"

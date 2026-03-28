@@ -15,6 +15,16 @@ _PRIVATE_CREDENTIAL_INDEXERS = {
     "GenerationFree - API",
 }
 
+# Indexers that TorBox handles better than other debrid services.
+# When TorBox is configured and a torrent comes from one of these, it is
+# preferred as the download service regardless of debridDownloader.
+_TORBOX_PREFERRED_INDEXERS = {
+    "C411 - API",
+    "Torr9 - API",
+    "LaCale - API",
+    "GenerationFree - API",
+}
+
 
 class TorrentItem:
     def __init__(self, raw_title, size, magnet, info_hash, link, seeders, languages, indexer,
@@ -95,7 +105,7 @@ class TorrentItem:
                     tracker = f"{settings.sharewood_url}/announce/{sharewood_passkey}"
                     magnet = f"{magnet}&tr={quote(tracker, safe='')}"
 
-        return {
+        query = {
             "magnet": magnet,
             "type": self.type,
             "file_index": self.file_index,
@@ -105,6 +115,18 @@ class TorrentItem:
             "service": self.availability if self.availability else "DL",
             "privacy": self.privacy if self.privacy else "private",
         }
+
+        # When the torrent is not cached and comes from a TorBox-preferred indexer,
+        # signal the playback endpoint to use TorBox for the download (if configured).
+        if (
+            not self.availability
+            and self.indexer in _TORBOX_PREFERRED_INDEXERS
+            and config
+            and config.get("TBToken")
+        ):
+            query["preferred_service"] = "TorBox"
+
+        return query
 
     def to_dict(self):
         resolution = getattr(self.parsed_data, 'resolution', 'UNKNOWN') if self.parsed_data else 'NONE'

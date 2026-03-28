@@ -56,12 +56,14 @@ class StreamParser:
                     for item in stream_list
                     if item.get("name", "").startswith(DIRECT_TORRENT)
                     or INSTANTLY_AVAILABLE in item.get("name", "")
+                    or (settings.allow_debrid_download and DOWNLOAD_REQUIRED in item.get("name", ""))
                 ]
             else:
                 stream_list = [
                     item
                     for item in stream_list
                     if INSTANTLY_AVAILABLE in item.get("name", "")
+                    or (settings.allow_debrid_download and DOWNLOAD_REQUIRED in item.get("name", ""))
                 ]
 
             is_torbox = (
@@ -204,11 +206,18 @@ class StreamParser:
         elif torrent_item.availability == "PK":
             name = f"{INSTANTLY_AVAILABLE}instant\nPikPak\n({resolution})"
         else:
-            name = (
-                f"{DOWNLOAD_REQUIRED}download\n"
-                f"{self.config.get('debridDownloader', settings.download_service)}\n"
-                f"({resolution})"
+            # If TorBox is configured and the torrent comes from a special French indexer
+            # (C411, Torr9, LaCale, GenerationFree), TorBox will be forced for the download
+            # regardless of debridDownloader — reflect this in the stream name.
+            _SPECIAL_INDEXERS = ("C411", "Torr9", "LaCale", "GenerationFree")
+            is_torbox = bool(self.config.get("TBToken")) or self.config.get("debridDownloader") == "TorBox"
+            is_special = any(s in (torrent_item.indexer or "") for s in _SPECIAL_INDEXERS)
+            downloader = (
+                "TorBox"
+                if is_torbox and is_special
+                else self.config.get("debridDownloader", settings.download_service)
             )
+            name = f"{DOWNLOAD_REQUIRED}download\n{downloader}\n({resolution})"
         return name
 
     def _create_stream_title(
