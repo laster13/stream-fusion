@@ -298,6 +298,81 @@ class BaseDebrid:
         """
         raise NotImplementedError
 
+    async def _get_peer_cache(self, hashes: list, service_name: str = None) -> dict:
+        """POST /api/peer/check on the configured peer instance — HMAC + Fernet.
+
+        Returns {info_hash: cached_data_dict}. Never raises; returns {} on any failure.
+        """
+        peer_url = settings.peer_streamfusion_url
+        key_id = settings.peer_streamfusion_key_id
+        secret = settings.peer_streamfusion_secret
+        if not peer_url or not key_id or not secret or not hashes:
+            return {}
+        svc = service_name or self.service_name
+        try:
+            import json as _json
+            from stream_fusion.utils.peer.crypto import sign_request, decrypt_payload
+            body = _json.dumps({"hashes": hashes, "service": svc}).encode()
+            ts, sig = sign_request(secret, body)
+            session = await self._get_session()
+            async with session.post(
+                f"{peer_url.rstrip('/')}/api/peer/check",
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Peer-Key-Id": key_id,
+                    "X-Peer-Timestamp": ts,
+                    "X-Peer-Signature": sig,
+                },
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                if resp.status != 200:
+                    return {}
+                data = await resp.json()
+            result = decrypt_payload(secret, data["payload"]).get("debrid_cache") or {}
+            if result:
+                logger.debug(
+                    f"{self.__class__.__name__}: peer cache — {len(result)} hits for {svc}"
+                )
+            return result
+        except Exception as e:
+            logger.debug(f"{self.__class__.__name__}: peer cache unavailable ({e})")
+            return {}
+
+    async def _enrich_before_live(
+        self, hashes: list, db_session, redis_client, hits: list
+    ) -> list:
+        """Hook called between L2 (PostgreSQL) and the live API call.
+
+        Queries the configured peer instance for cache hits and warms Redis.
+        Override in subclasses for provider-specific enrichment (e.g. StremThruDebrid).
+        Returns the list of hashes that still need a live API call.
+        """
+        peer_hits = await self._get_peer_cache(hashes)
+        if not peer_hits:
+            return hashes
+
+        if redis_client:
+            try:
+                pipe = redis_client.pipeline()
+                for h, item in peer_hits.items():
+                    pipe.set(
+                        self._avail_cache_key(h),
+                        _jp.encode(item),
+                        ex=self._AVAIL_TTL_CACHED,
+                    )
+                await pipe.execute()
+            except Exception as e:
+                logger.debug(f"{self.__class__.__name__}: peer cache Redis warm failed ({e})")
+
+        hits.extend(peer_hits.values())
+        remaining = [h for h in hashes if h not in peer_hits]
+        logger.debug(
+            f"{self.__class__.__name__}: peer enrichment — "
+            f"{len(peer_hits)} hits, {len(remaining)} remaining"
+        )
+        return remaining
+
     async def get_availability_bulk_cached(
         self, hashes_or_magnets, ip, redis_client, db_session=None
     ):
@@ -386,6 +461,10 @@ class BaseDebrid:
                 logger.warning(
                     f"{self.__class__.__name__}: PG L2 lookup failed ({e}), continuing to API"
                 )
+
+        # --- L2.5: Peer cache enrichment (before live API call) ---
+        if to_check:
+            to_check = await self._enrich_before_live(to_check, db_session, redis_client, hits)
 
         # --- Live API call for remaining misses ---
         if to_check:

@@ -88,7 +88,10 @@
 
 <div class="header-container">
   <h1 id="api-keys-list" class="mb-0">StreamFusion Admin</h1>
-  <a href="{{ url_for('create_api_key_page')(request) }}" class="btn-create-key">Create a new key</a>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <a href="{{ url_for('list_peer_keys')(request) }}" style="background-color:#697ec0;color:#35363d;padding:10px 20px;font-size:16px;border:none;border-radius:5px;cursor:pointer;text-decoration:none;">Peer Keys</a>
+    <a href="{{ url_for('create_api_key_page')(request) }}" class="btn-create-key">Create a new key</a>
+  </div>
 </div>
 
 <table class="api-key-table" id="apiKeyTable">

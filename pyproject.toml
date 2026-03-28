@@ -40,6 +40,7 @@ rank-torrent-name = "^1.9.0"
 orjson = "^3.10.7"
 alembic = "^1.13.2"
 ujson = "^5.10.0"
+cryptography = "^43.0.0"
 
 
 [tool.poetry.group.dev.dependencies]

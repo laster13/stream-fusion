@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .peer-key-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0 8px;
+  }
+  .peer-key-table th, .peer-key-table td {
+    padding: 12px;
+    text-align: left;
+  }
+  .peer-key-table th {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+  .peer-key-table tr {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+  .peer-key-table tr:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+  .key-id-cell {
+    font-family: monospace;
+    font-size: 0.9em;
+    color: #ff79c6;
+  }
+  .action-buttons {
+    display: flex;
+    gap: 5px;
+  }
+  .action-buttons form {
+    display: inline;
+  }
+  .btn {
+    padding: 5px 10px;
+    font-size: 14px;
+    border: none;
+    cursor: pointer;
+  }
+  .btn-secondary { background-color: #2f6746; color: #f8f8f2; }
+  .btn-warning   { background-color: #ffb86c; color: #282a36; }
+  .btn-danger    { background-color: #ff5555; color: #f8f8f2; }
+  .btn-primary   { background-color: #697ec0; color: #35363d; }
+  .btn-info      { background-color: #8be9fd; color: #282a36; }
+  .header-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .btn-create-key {
+    background-color: #4CAF50;
+    color: white;
+    padding: 10px 20px;
+    font-size: 16px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+    text-decoration: none;
+  }
+  .btn-create-key:hover { background-color: #45a049; }
+  .nav-links { display: flex; gap: 10px; align-items: center; }
+  .badge-active   { background-color: #50fa7b; color: #282a36; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; }
+  .badge-inactive { background-color: #ff5555; color: #f8f8f2; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; }
+  .secret-box {
+    background-color: #282a36;
+    border: 1px solid #ffb86c;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 24px;
+  }
+  .secret-box code {
+    word-break: break-all;
+    color: #50fa7b;
+  }
+</style>
+
+<div class="header-container">
+  <h1 class="mb-0">Peer Keys</h1>
+  <div class="nav-links">
+    <a href="{{ url_for('list_api_keys')(request) }}" class="btn btn-info">API Keys</a>
+    <a href="{{ url_for('create_peer_key_page')(request) }}" class="btn-create-key">Create a new peer key</a>
+  </div>
+</div>
+
+{% if new_key %}
+<div class="secret-box">
+  <strong style="color: #ffb86c;">Save these credentials now — the secret will never be shown again.</strong>
+  <br><br>
+  <strong>Key ID:</strong> <code>{{ new_key.key_id }}</code>
+  <button class="btn btn-primary copy-btn" data-value="{{ new_key.key_id }}" style="margin-left:8px;">Copy</button>
+  <br>
+  <strong>Secret:</strong> <code>{{ new_key.secret }}</code>
+  <button class="btn btn-primary copy-btn" data-value="{{ new_key.secret }}" style="margin-left:8px;">Copy</button>
+</div>
+{% endif %}
+
+<table class="peer-key-table" id="peerKeyTable">
+  <thead>
+    <tr>
+      <th>Key ID</th>
+      <th>Name</th>
+      <th>Rate Limit</th>
+      <th>Status</th>
+      <th>Last Used</th>
+      <th>Total Queries</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for key in keys %}
+    <tr>
+      <td class="key-id-cell">
+        <code>{{ key.key_id[:8] }}…</code>
+        <button class="btn btn-primary copy-btn" data-value="{{ key.key_id }}" style="margin-left:4px;">Copy</button>
+      </td>
+      <td>{{ key.name }}</td>
+      <td>{{ key.rate_limit }} req / {{ key.rate_window }}s</td>
+      <td>
+        {% if key.is_active %}
+          <span class="badge-active">Active</span>
+        {% else %}
+          <span class="badge-inactive">Revoked</span>
+        {% endif %}
+      </td>
+      <td>{{ key.last_used_at or 'Never' }}</td>
+      <td>{{ key.total_queries }}</td>
+      <td>
+        <div class="action-buttons">
+          {% if key.is_active %}
+          <form action="{{ url_for('revoke_peer_key')(request) }}" method="post" class="d-inline">
+            <input type="hidden" name="key_id" value="{{ key.key_id }}">
+            <button type="submit" class="btn btn-warning btn-sm">Revoke</button>
+          </form>
+          {% endif %}
+          <form action="{{ url_for('delete_peer_key')(request) }}" method="post" class="d-inline">
+            <input type="hidden" name="key_id" value="{{ key.key_id }}">
+            <button type="submit" class="btn btn-danger btn-sm"
+                    onclick="return confirm('Delete this peer key permanently?')">Delete</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const val = btn.dataset.value;
+        navigator.clipboard.writeText(val).then(() => {
+          const orig = btn.textContent;
+          btn.textContent = 'Copied!';
+          setTimeout(() => { btn.textContent = orig; }, 1500);
+        });
+      });
+    });
+  });
+</script>
+
+{% endblock %}
