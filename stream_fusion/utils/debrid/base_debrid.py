@@ -383,6 +383,7 @@ class BaseDebrid:
           1. L1 — Batch Redis MGET for all hashes.
           2. L2 — For Redis misses: query PostgreSQL (only confirmed-cached, non-expired rows).
                   Warm Redis for PG hits so future requests stay fast.
+          2.5     Optional enrichment hook before live API call (e.g. other streamfusion providers).
           3. Live API call for remaining misses.
           4. Write results:
                Cached     → Redis (10d) + PostgreSQL (30d)
