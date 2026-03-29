@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Recherche par TMDB ID — StreamFusion Admin{% endblock %}
+{% block page_title %}Recherche par TMDB ID{% endblock %}
+
+{% block extra_head %}
+<style>
+    .lang-badge {
+        font-size: 0.72rem;
+        background: rgba(13,110,253,0.12);
+        color: #6ea8fe;
+        border: 1px solid rgba(13,110,253,0.25);
+        border-radius: 4px;
+        padding: 1px 6px;
+    }
+    code.hash-code {
+        font-size: 0.78rem;
+        color: var(--bs-secondary-color);
+        letter-spacing: 0.01em;
+    }
+    .raw-title-cell { font-size: 0.875rem; max-width: 380px; word-break: break-word; line-height: 1.35; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Search bar -->
+<form method="get" action="{{ url_for('search_tmdb_page')(request) }}" class="d-flex gap-2 mb-4" style="max-width:400px;">
+    <input type="number" name="q" value="{{ query }}"
+           class="form-control"
+           placeholder="TMDB ID (ex : 272565)"
+           min="1" autocomplete="off" autofocus>
+    <button type="submit" class="btn btn-primary flex-shrink-0">
+        <i class="bi bi-search me-1"></i>Rechercher
+    </button>
+</form>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+{% if query and not error %}
+    {% if not results %}
+    <div class="text-center text-secondary py-5">
+        <i class="bi bi-inbox fs-2 d-block mb-2"></i>
+        Aucun résultat pour TMDB ID <code class="text-primary">{{ query }}</code>
+    </div>
+    {% else %}
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <span class="text-secondary" style="font-size:0.85rem;">
+            {{ results|length }} entrée(s) pour TMDB ID <code class="text-primary">{{ query }}</code>
+        </span>
+        <input type="text" id="searchInput" class="form-control form-control-sm"
+               style="width:220px;" placeholder="Filtrer (titre, hash, indexeur…)">
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-hover align-middle" id="resultsTable">
+            <thead>
+                <tr style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--bs-secondary-color);">
+                    <th>Titre brut</th>
+                    <th>Taille</th>
+                    <th>Hash</th>
+                    <th>Indexeur</th>
+                    <th style="text-align:right;">Seeders</th>
+                    <th>Langues</th>
+                    <th>Créé le</th>
+                    <th>Mis à jour</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                {% for r in results %}
+                <tr data-search="{{ r.raw_title }} {{ r.info_hash }} {{ r.indexer }}">
+                    <td class="raw-title-cell">
+                        {% if r.type == 'series' %}
+                        <span class="badge me-1" style="font-size:0.65rem;background:rgba(13,202,240,0.15);color:#0dcaf0;border:1px solid rgba(13,202,240,0.3);">S</span>
+                        {% elif r.type == 'movie' %}
+                        <span class="badge me-1" style="font-size:0.65rem;background:rgba(13,110,253,0.15);color:#6ea8fe;border:1px solid rgba(13,110,253,0.3);">M</span>
+                        {% endif %}
+                        {{ r.raw_title }}
+                    </td>
+                    <td style="white-space:nowrap;font-size:0.83rem;">{{ r.size | fmt_size }}</td>
+                    <td>
+                        <div class="d-flex align-items-center gap-1">
+                            <code class="hash-code">{{ r.info_hash[:10] }}…</code>
+                            <button class="btn btn-link btn-sm p-0 copy-btn text-secondary" title="Copier le hash complet"
+                                    data-value="{{ r.info_hash }}">
+                                <i class="bi bi-clipboard" style="font-size:0.8rem;"></i>
+                            </button>
+                        </div>
+                    </td>
+                    <td style="font-size:0.83rem;">{{ r.indexer }}</td>
+                    <td style="text-align:right;font-size:0.83rem;font-variant-numeric:tabular-nums;">{{ r.seeders }}</td>
+                    <td>
+                        <div class="d-flex flex-wrap gap-1">
+                            {% for lang in (r.languages or []) %}
+                            <span class="lang-badge">{{ lang }}</span>
+                            {% endfor %}
+                        </div>
+                    </td>
+                    <td style="white-space:nowrap;">
+                        <span style="font-size:0.8rem;">{{ r.created_at | fmt_date }}</span>
+                    </td>
+                    <td style="white-space:nowrap;">
+                        <div style="font-size:0.8rem;">{{ r.updated_at | fmt_relative }}</div>
+                        <div style="font-size:0.72rem;color:var(--bs-secondary-color);">{{ r.updated_at | fmt_date }}</div>
+                    </td>
+                    <td>
+                        <a href="{{ url_for('search_hash_page')(request) }}?q={{ r.info_hash }}"
+                           class="btn btn-sm btn-outline-info" title="Voir le détail complet par hash">
+                            <i class="bi bi-hash"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div id="emptyMsg" class="text-center text-secondary py-3 d-none" style="font-size:0.85rem;">
+            <i class="bi bi-search me-1"></i>Aucun résultat ne correspond au filtre.
+        </div>
+    </div>
+    {% endif %}
+{% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ── Copy buttons ──
+document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.value).then(() => {
+            const icon = btn.querySelector('i');
+            icon.className = 'bi bi-clipboard-check text-success';
+            setTimeout(() => { icon.className = 'bi bi-clipboard'; }, 1500);
+        });
+    });
+});
+
+// ── Client-side filter ──
+const searchInput = document.getElementById('searchInput');
+if (searchInput) {
+    searchInput.addEventListener('input', function () {
+        const q = this.value.toLowerCase();
+        let visible = 0;
+        document.querySelectorAll('#tableBody tr').forEach(row => {
+            const show = !q || row.dataset.search.toLowerCase().includes(q);
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        const empty = document.getElementById('emptyMsg');
+        if (empty) empty.classList.toggle('d-none', visible > 0);
+    });
+}
+</script>
+{% endblock %}

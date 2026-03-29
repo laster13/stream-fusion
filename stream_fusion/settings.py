@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     )
     use_https: bool = False
     download_service: DebridService | None = None
+    # When False, download (non-cached) streams are hidden from Stremio results.
+    # Set ALLOW_DEBRID_DOWNLOAD=false on public instances to prevent users from
+    # triggering debrid downloads directly from Stremio.
+    allow_debrid_download: bool = True
     no_cache_video_language: NoCacheVideoLanguages = NoCacheVideoLanguages.FR
 
     # PROXY

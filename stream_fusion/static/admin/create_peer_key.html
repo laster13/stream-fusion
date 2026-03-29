@@ -1,56 +1,33 @@
 {% extends "base.html" %}
+{% block title %}Nouvelle peer key — StreamFusion Admin{% endblock %}
+{% block page_title %}Nouvelle peer key{% endblock %}
+
 {% block content %}
-
-<style>
-  .form-container {
-    max-width: 520px;
-  }
-  .form-control {
-    background-color: #44475a;
-    color: #f8f8f2;
-    border: 1px solid #6272a4;
-  }
-  .form-control:focus {
-    background-color: #44475a;
-    color: #f8f8f2;
-    border-color: #bd93f9;
-    box-shadow: 0 0 0 0.2rem rgba(189, 147, 249, 0.25);
-  }
-  .form-label { color: #f8f8f2; }
-  .form-text  { color: #6272a4; }
-  .btn-primary  { background-color: #697ec0; color: #35363d; border: none; }
-  .btn-secondary { background-color: #44475a; color: #f8f8f2; border: none; }
-</style>
-
-<div class="form-container">
-  <h1 class="mb-4">Create Peer Key</h1>
-
-  <form action="{{ url_for('create_peer_key')(request) }}" method="post">
-    <div class="mb-3">
-      <label for="name" class="form-label">Name <span style="color:#ff5555">*</span></label>
-      <input type="text" class="form-control" id="name" name="name" required
-             placeholder="e.g. instance-b-prod">
-      <div class="form-text">Descriptive label — identifies the peer instance this key is for.</div>
-    </div>
-
-    <div class="mb-3">
-      <label for="rate_limit" class="form-label">Rate Limit (requests per window)</label>
-      <input type="number" class="form-control" id="rate_limit" name="rate_limit"
-             value="60" min="1" max="1000">
-    </div>
-
-    <div class="mb-3">
-      <label for="rate_window" class="form-label">Rate Window (seconds)</label>
-      <input type="number" class="form-control" id="rate_window" name="rate_window"
-             value="60" min="10" max="3600">
-      <div class="form-text">The peer can make at most <em>rate_limit</em> requests per <em>rate_window</em> seconds.</div>
-    </div>
-
-    <div class="d-flex gap-2">
-      <button type="submit" class="btn btn-primary px-4">Create</button>
-      <a href="{{ url_for('list_peer_keys')(request) }}" class="btn btn-secondary px-4">Cancel</a>
-    </div>
-  </form>
+<div style="max-width:480px;">
+    <form action="{{ url_for('create_peer_key')(request) }}" method="post">
+        <div class="mb-3">
+            <label for="name" class="form-label">Nom <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="name" name="name" required
+                   placeholder="ex: instance-b-prod">
+            <div class="form-text">Identifiant de l'instance peer à laquelle cette clé est destinée.</div>
+        </div>
+        <div class="mb-3">
+            <label for="rate_limit" class="form-label">Limite de requêtes par fenêtre</label>
+            <input type="number" class="form-control" id="rate_limit" name="rate_limit"
+                   value="60" min="1" max="1000">
+        </div>
+        <div class="mb-4">
+            <label for="rate_window" class="form-label">Fenêtre de temps (secondes)</label>
+            <input type="number" class="form-control" id="rate_window" name="rate_window"
+                   value="60" min="10" max="3600">
+            <div class="form-text">Le peer peut faire au maximum <em>limite</em> requêtes par <em>fenêtre</em> secondes.</div>
+        </div>
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary px-4">
+                <i class="bi bi-plus-lg me-1"></i>Créer
+            </button>
+            <a href="{{ url_for('list_peer_keys')(request) }}" class="btn btn-outline-secondary px-4">Annuler</a>
+        </div>
+    </form>
 </div>
-
 {% endblock %}

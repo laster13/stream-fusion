@@ -1,234 +1,240 @@
 {% extends "base.html" %}
+{% block title %}Clés API — StreamFusion Admin{% endblock %}
+{% block page_title %}Clés API{% endblock %}
+
+{% block extra_head %}
+<style>
+    .filter-btn.active { font-weight: 600; }
+    .key-uuid { font-family: var(--bs-font-monospace); font-size: 0.78rem; color: #67d7f0; letter-spacing: 0.01em; }
+    .date-abs  { font-size: 0.8rem; }
+    .date-rel  { font-size: 0.72rem; color: var(--bs-secondary-color); }
+</style>
+{% endblock %}
+
 {% block content %}
 
-<style>
-  .api-key-table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0 8px;
-  }
-  .api-key-table th, .api-key-table td {
-    padding: 12px;
-    text-align: left;
-  }
-  .api-key-table th {
-    background-color: rgba(255, 255, 255, 0.1);
-    cursor: pointer;
-  }
-  .api-key-table tr {
-    background-color: rgba(255, 255, 255, 0.05);
-  }
-  .api-key-table tr:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-  }
-  .api-key-cell {
-    font-family: monospace;
-    font-size: 0.9em;
-    color: #ff79c6;
-  }
-  .action-buttons {
-    display: flex;
-    gap: 5px;
-  }
-  .btn {
-    padding: 5px 10px;
-    font-size: 14px;
-    border: none;
-    cursor: pointer;
-  }
-  .btn-secondary {
-    background-color: #2f6746;
-    color: #f8f8f2;
-  }
-  .btn-warning {
-    background-color: #ffb86c;
-    color: #282a36;
-  }
-  .btn-danger {
-    background-color: #ff5555;
-    color: #f8f8f2;
-  }
-  .btn-primary {
-    background-color: #697ec0;
-    color: #35363d;
-  }
-  .sort-icon::after {
-    content: '\25B2';
-    margin-left: 5px;
-    display: inline-block;
-  }
-  .sort-icon.desc::after {
-    content: '\25BC';
-  }
-  .action-buttons form {
-    display: inline;
-  }
-  .header-container {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-  }
-
-  .btn-create-key {
-    background-color: #4CAF50;  /* Vert */
-    color: white;
-    padding: 10px 20px;
-    font-size: 16px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    transition: background-color 0.3s;
-  }
-
-  .btn-create-key:hover {
-    background-color: #45a049;  /* Vert un peu plus foncé au survol */
-  }
-</style>
-
-<div class="header-container">
-  <h1 id="api-keys-list" class="mb-0">StreamFusion Admin</h1>
-  <div style="display:flex;gap:10px;align-items:center;">
-    <a href="{{ url_for('list_peer_keys')(request) }}" style="background-color:#697ec0;color:#35363d;padding:10px 20px;font-size:16px;border:none;border-radius:5px;cursor:pointer;text-decoration:none;">Peer Keys</a>
-    <a href="{{ url_for('create_api_key_page')(request) }}" class="btn-create-key">Create a new key</a>
-  </div>
+<!-- Stats bar + controls -->
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        <!-- Search -->
+        <input type="text" id="searchInput" class="form-control form-control-sm"
+               style="width:220px;" placeholder="Rechercher (nom, clé…)">
+        <!-- Filter tabs -->
+        <div class="btn-group btn-group-sm" role="group">
+            <button class="btn btn-outline-secondary filter-btn active" data-filter="all">Toutes <span class="badge bg-secondary ms-1" id="cnt-all">{{ logs|length }}</span></button>
+            <button class="btn btn-outline-success filter-btn" data-filter="active">Actives <span class="badge bg-success ms-1" id="cnt-active">{{ logs | selectattr('is_active') | list | length }}</span></button>
+            <button class="btn btn-outline-danger filter-btn" data-filter="revoked">Révoquées <span class="badge bg-danger ms-1" id="cnt-revoked">{{ logs | rejectattr('is_active') | list | length }}</span></button>
+            <button class="btn btn-outline-info filter-btn" data-filter="never">Sans expiration <span class="badge bg-info ms-1" id="cnt-never">{{ logs | selectattr('never_expire') | list | length }}</span></button>
+        </div>
+    </div>
+    <a href="{{ url_for('create_api_key_page')(request) }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-plus-lg me-1"></i>Nouvelle clé
+    </a>
 </div>
 
-<table class="api-key-table" id="apiKeyTable">
-  <thead>
-    <tr>
-      <th data-sort="apiKey">API Key <span class="sort-icon"></span></th>
-      <th data-sort="name">Name <span class="sort-icon"></span></th>
-      <th data-sort="status">Status <span class="sort-icon"></span></th>
-      <th data-sort="proxified">Proxification <span class="sort-icon"></span></th>
-      <th data-sort="expiration">Expiration Date <span class="sort-icon"></span></th>
-      <th data-sort="lastUse">Last Use <span class="sort-icon"></span></th>
-      <th data-sort="totalUse">Total Use <span class="sort-icon"></span></th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for log in logs %}
-    <tr>
-      <td class="api-key-cell">
-        <code>{{ log.api_key }}</code>
-        <button class="btn btn-primary copy-btn">Copy</button>
-      </td>
-      <td>{{ log.name or 'N/A' }}</td>
-      <td>{{ 'Active' if log.is_active else 'Inactive' }}</td>
-      <td>{{ 'Enabled' if log.proxied_links else 'Disabled' }}</td>
-      <td>{{ 'Never' if log.never_expire else log.expiration_date }}</td>
-      <td>{{ log.latest_query_date or 'N/A' }}</td>
-      <td>{{ log.total_queries }}</td>
-      <td>
-        <div class="action-buttons">
-          {% if log.is_active %}
-          <form action="{{ url_for('revoke_api_key')(request) }}" method="post" class="d-inline">
-            <input type="hidden" name="api_key" value="{{ log.api_key }}">
-            <button type="submit" class="btn btn-warning btn-sm">Revoke</button>
-          </form>
-          {% else %}
-          <form action="{{ url_for('renew_api_key')(request) }}" method="post" class="d-inline">
-            <input type="hidden" name="api_key" value="{{ log.api_key }}">
-            <button type="submit" class="btn btn-secondary btn-sm">Renew</button>
-          </form>
-          {% endif %}
-          <form action="{{ url_for('toggle_proxied_links')(request) }}" method="post" class="d-inline">
-            <input type="hidden" name="api_key" value="{{ log.api_key }}">
-            <button type="submit" class="btn {% if log.proxied_links %}btn-warning{% else %}btn-secondary{% endif %} btn-sm">{% if log.proxied_links %}Disable{% else %}Enable{% endif %} Proxy</button>
-          </form>
-          <form action="{{ url_for('delete_api_key')(request) }}" method="post" class="d-inline">
-            <input type="hidden" name="api_key" value="{{ log.api_key }}">
-            <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure you want to delete this API key?')">Delete</button>
-          </form>
+<!-- Table -->
+<div class="table-responsive">
+    <table class="table table-hover align-middle" id="apiKeyTable">
+        <thead>
+            <tr style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--bs-secondary-color);">
+                <th class="sortable" data-col="0" style="cursor:pointer;">Clé API <i class="bi bi-chevron-expand ms-1 sort-icon"></i></th>
+                <th class="sortable" data-col="1" style="cursor:pointer;">Nom <i class="bi bi-chevron-expand ms-1 sort-icon"></i></th>
+                <th class="sortable" data-col="2" style="cursor:pointer;">Statut <i class="bi bi-chevron-expand ms-1 sort-icon"></i></th>
+                <th>Proxy</th>
+                <th class="sortable" data-col="4" style="cursor:pointer;">Expiration <i class="bi bi-chevron-expand ms-1 sort-icon"></i></th>
+                <th class="sortable" data-col="5" style="cursor:pointer;">Dernière utilisation <i class="bi bi-chevron-expand ms-1 sort-icon"></i></th>
+                <th class="sortable" data-col="6" style="cursor:pointer; text-align:right;">Requêtes <i class="bi bi-chevron-expand ms-1 sort-icon"></i></th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+            {% for log in logs %}
+            <tr
+                data-status="{% if log.is_active %}active{% else %}revoked{% endif %}"
+                data-never="{{ 'true' if log.never_expire else 'false' }}"
+                data-search="{{ log.name or '' }} {{ log.api_key }}">
+                <td>
+                    <span class="key-uuid">{{ log.api_key }}</span>
+                    <button class="btn btn-link btn-sm p-0 ms-1 copy-btn text-secondary" title="Copier"
+                            data-value="{{ log.api_key }}">
+                        <i class="bi bi-clipboard"></i>
+                    </button>
+                </td>
+                <td style="font-size:0.875rem;">{{ log.name or '—' }}</td>
+                <td>
+                    {% if log.is_active %}
+                    <span class="badge bg-success-subtle text-success border border-success-subtle">Actif</span>
+                    {% else %}
+                    <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Révoqué</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if log.proxied_links %}
+                    <span class="badge bg-info-subtle text-info border border-info-subtle">Activé</span>
+                    {% else %}
+                    <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">Désactivé</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if log.never_expire %}
+                    <span class="date-abs text-secondary"><i class="bi bi-infinity me-1"></i>Jamais</span>
+                    {% else %}
+                    <span class="date-abs">{{ log.expiration_date | fmt_date }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="date-abs">{{ log.latest_query_date | fmt_relative }}</div>
+                    {% if log.latest_query_date and log.latest_query_date not in ('—', 'None', None) %}
+                    <div class="date-rel">{{ log.latest_query_date | fmt_date }}</div>
+                    {% endif %}
+                </td>
+                <td style="text-align:right;font-size:0.875rem;font-variant-numeric:tabular-nums;">
+                    {{ "{:,}".format(log.total_queries) }}
+                </td>
+                <td>
+                    <div class="d-flex gap-1">
+                        {% if log.is_active %}
+                        <form action="{{ url_for('revoke_api_key')(request) }}" method="post" class="d-inline">
+                            <input type="hidden" name="api_key" value="{{ log.api_key }}">
+                            <button type="submit" class="btn btn-sm btn-outline-warning" title="Révoquer">
+                                <i class="bi bi-pause-fill"></i>
+                            </button>
+                        </form>
+                        {% else %}
+                        <form action="{{ url_for('renew_api_key')(request) }}" method="post" class="d-inline">
+                            <input type="hidden" name="api_key" value="{{ log.api_key }}">
+                            <button type="submit" class="btn btn-sm btn-outline-success" title="Réactiver">
+                                <i class="bi bi-play-fill"></i>
+                            </button>
+                        </form>
+                        {% endif %}
+                        <form action="{{ url_for('toggle_proxied_links')(request) }}" method="post" class="d-inline">
+                            <input type="hidden" name="api_key" value="{{ log.api_key }}">
+                            <button type="submit" class="btn btn-sm btn-outline-info" title="Toggle proxy">
+                                <i class="bi bi-shuffle"></i>
+                            </button>
+                        </form>
+                        <button type="button" class="btn btn-sm btn-outline-danger delete-btn" title="Supprimer"
+                                data-api-key="{{ log.api_key }}" data-name="{{ log.name or log.api_key|string|truncate(13, true, '…') }}">
+                            <i class="bi bi-trash3"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div id="emptyMsg" class="text-center text-secondary py-4 d-none">
+        <i class="bi bi-search fs-4 d-block mb-2"></i>Aucune clé ne correspond au filtre.
+    </div>
+</div>
+
+<!-- Delete confirm modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h6 class="modal-title fw-semibold">Supprimer la clé API</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-2">
+                Supprimer définitivement la clé <code id="deleteKeyLabel" class="text-info"></code> ?
+                <div class="text-secondary mt-1" style="font-size:0.8rem;">Cette action est irréversible.</div>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Annuler</button>
+                <form id="deleteForm" action="{{ url_for('delete_api_key')(request) }}" method="post" class="d-inline">
+                    <input type="hidden" name="api_key" id="deleteKeyInput">
+                    <button type="submit" class="btn btn-danger btn-sm"><i class="bi bi-trash3 me-1"></i>Supprimer</button>
+                </form>
+            </div>
         </div>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+    </div>
+</div>
 
+{% endblock %}
+
+{% block extra_scripts %}
 <script>
-  document.addEventListener('DOMContentLoaded', function() {
-    const table = document.getElementById('apiKeyTable');
-    const headers = table.querySelectorAll('th');
-    let currentSort = { column: null, direction: 'asc' };
+const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+let activeFilter = 'all';
+let searchQuery = '';
 
-    headers.forEach(header => {
-      header.addEventListener('click', () => {
-        const column = header.dataset.sort;
-        if (column) {
-          const direction = currentSort.column === column && currentSort.direction === 'asc' ? 'desc' : 'asc';
-          sortTable(column, direction);
-          updateSortIcons(header, direction);
-          currentSort = { column, direction };
-        }
-      });
-    });
-
-    function sortTable(column, direction) {
-      const tbody = table.querySelector('tbody');
-      const rows = Array.from(tbody.querySelectorAll('tr'));
-      
-      const sortedRows = rows.sort((a, b) => {
-        const aValue = a.querySelector(`td:nth-child(${getColumnIndex(column)})`).textContent.trim();
-        const bValue = b.querySelector(`td:nth-child(${getColumnIndex(column)})`).textContent.trim();
-        
-        if (column === 'totalUse') {
-          return direction === 'asc' ? 
-            parseInt(aValue) - parseInt(bValue) : 
-            parseInt(bValue) - parseInt(aValue);
-        } else {
-          return direction === 'asc' ? 
-            aValue.localeCompare(bValue) : 
-            bValue.localeCompare(aValue);
-        }
-      });
-
-      while (tbody.firstChild) {
-        tbody.removeChild(tbody.firstChild);
-      }
-
-      tbody.append(...sortedRows);
-    }
-
-    function updateSortIcons(clickedHeader, direction) {
-      headers.forEach(header => {
-        const icon = header.querySelector('.sort-icon');
-        if (icon) {
-          icon.className = 'sort-icon';
-        }
-      });
-      const clickedIcon = clickedHeader.querySelector('.sort-icon');
-      if (clickedIcon) {
-        clickedIcon.classList.add(direction);
-      }
-    }
-
-    function getColumnIndex(column) {
-      const columnMap = {
-        'apiKey': 1,
-        'name': 2,
-        'status': 3,
-        'proxified': 4,
-        'expiration': 5,
-        'lastUse': 6,
-        'totalUse': 7
-      };
-      return columnMap[column];
-    }
-
-    // Implement copy functionality
-    table.addEventListener('click', (e) => {
-      if (e.target.classList.contains('copy-btn')) {
-        const apiKey = e.target.parentElement.querySelector('code').textContent;
-        navigator.clipboard.writeText(apiKey).then(() => {
-          alert('API Key copied to clipboard!');
+// ── Copy buttons ──
+document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.value).then(() => {
+            const icon = btn.querySelector('i');
+            icon.className = 'bi bi-clipboard-check text-success';
+            setTimeout(() => { icon.className = 'bi bi-clipboard'; }, 1500);
         });
-      }
     });
+});
 
-  });
+// ── Delete modal ──
+document.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.getElementById('deleteKeyLabel').textContent = btn.dataset.name;
+        document.getElementById('deleteKeyInput').value = btn.dataset.apiKey;
+        deleteModal.show();
+    });
+});
+
+// ── Filter tabs ──
+document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeFilter = btn.dataset.filter;
+        applyFilters();
+    });
+});
+
+// ── Search ──
+document.getElementById('searchInput').addEventListener('input', function () {
+    searchQuery = this.value.toLowerCase();
+    applyFilters();
+});
+
+function applyFilters() {
+    let visible = 0;
+    document.querySelectorAll('#tableBody tr').forEach(row => {
+        const matchFilter =
+            activeFilter === 'all' ||
+            (activeFilter === 'active'  && row.dataset.status === 'active') ||
+            (activeFilter === 'revoked' && row.dataset.status === 'revoked') ||
+            (activeFilter === 'never'   && row.dataset.never === 'true');
+        const matchSearch = !searchQuery || row.dataset.search.toLowerCase().includes(searchQuery);
+        const show = matchFilter && matchSearch;
+        row.style.display = show ? '' : 'none';
+        if (show) visible++;
+    });
+    document.getElementById('emptyMsg').classList.toggle('d-none', visible > 0);
+}
+
+// ── Sort ──
+const tbody = document.getElementById('tableBody');
+let sortState = { col: null, dir: 'asc' };
+
+document.querySelectorAll('th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+        const col = parseInt(th.dataset.col);
+        const dir = sortState.col === col && sortState.dir === 'asc' ? 'desc' : 'asc';
+        sortState = { col, dir };
+
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort((a, b) => {
+            const av = a.querySelectorAll('td')[col]?.textContent.trim() || '';
+            const bv = b.querySelectorAll('td')[col]?.textContent.trim() || '';
+            const isNum = col === 6;
+            const cmp = isNum ? (+av.replace(/,/g,'')) - (+bv.replace(/,/g,'')) : av.localeCompare(bv);
+            return dir === 'asc' ? cmp : -cmp;
+        });
+        rows.forEach(r => tbody.appendChild(r));
+
+        document.querySelectorAll('th.sortable .sort-icon').forEach(i => { i.className = 'bi bi-chevron-expand ms-1 sort-icon'; });
+        th.querySelector('.sort-icon').className = `bi bi-chevron-${dir === 'asc' ? 'up' : 'down'} ms-1 sort-icon`;
+    });
+});
 </script>
-
 {% endblock %}
