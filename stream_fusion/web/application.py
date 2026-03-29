@@ -13,6 +13,7 @@ from stream_fusion.logging_config import configure_logging
 from stream_fusion.version import get_version
 from stream_fusion.web.api.router import api_router
 from stream_fusion.web.admin import router as admin_router
+from stream_fusion.web.register import router as register_router
 from stream_fusion.web.root.router import root_router
 from stream_fusion.web.playback.router import stream_router
 from stream_fusion.settings import settings
@@ -52,6 +53,7 @@ def get_app() -> FastAPI:
 
     # Main router for the API.
     app.include_router(router=root_router)
+    app.include_router(router=register_router)
     app.include_router(router=stream_router)
     app.include_router(router=api_router, prefix="/api")
     app.include_router(router=admin_router, prefix="/admin")
