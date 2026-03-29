@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+{% set csrf_token = csrf_token_gen() %}<!DOCTYPE html>
 <html lang="fr" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
@@ -307,5 +307,21 @@
     });
 </script>
 {% block extra_scripts %}{% endblock %}
+<script>
+// Server-generated CSRF token — automatically injected into all POST forms
+window.__ADMIN_CSRF__ = "{{ csrf_token }}";
+document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (form.method && form.method.toLowerCase() === 'post') {
+        if (!form.querySelector('input[name="csrf_token"]')) {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'csrf_token';
+            input.value = window.__ADMIN_CSRF__ || '';
+            form.appendChild(input);
+        }
+    }
+});
+</script>
 </body>
 </html>

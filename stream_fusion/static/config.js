@@ -260,14 +260,22 @@ function updateDebridOrderList() {
     debridOrderList.innerHTML = '';
 
     let debridOrder = [];
-    const currentUrl = window.location.href;
-    let data = currentUrl.match(/\/([^\/]+)\/configure$/);
-    if (data && data[1]) {
-        try {
-            const decodedData = JSON.parse(atob(data[1]));
-            debridOrder = decodedData.service || [];
-        } catch (error) {
-            console.warn("No valid debrid order data in URL, using default order.");
+
+    // 1. Priorité : config en localStorage
+    const _stored = localStorage.getItem('streamfusion_config');
+    if (_stored) {
+        try { debridOrder = JSON.parse(_stored).service || []; } catch (e) { /* ignore */ }
+    }
+
+    // 2. Fallback : anciennes URLs base64
+    if (debridOrder.length === 0) {
+        const _data = window.location.href.match(/\/([^\/]+)\/configure$/);
+        if (_data && _data[1]) {
+            try {
+                debridOrder = JSON.parse(atob(_data[1])).service || [];
+            } catch (error) {
+                console.warn("No valid debrid order data in URL, using default order.");
+            }
         }
     }
 
@@ -655,14 +663,29 @@ function ensureDebridConsistency() {
 }
 
 function loadData() {
-    const currentUrl = window.location.href;
-    let data = currentUrl.match(/\/([^\/]+)\/configure$/);
     let decodedData = {};
-    if (data && data[1]) {
+
+    // 1. Priorité : config stockée en localStorage (populée par getLink après chiffrement)
+    const stored = localStorage.getItem('streamfusion_config');
+    if (stored) {
         try {
-            decodedData = JSON.parse(atob(data[1]));
-        } catch (error) {
-            console.warn("No valid data to decode in URL, using default values.");
+            decodedData = JSON.parse(stored);
+        } catch (e) {
+            console.warn("Config localStorage invalide, suppression.");
+            localStorage.removeItem('streamfusion_config');
+        }
+    }
+
+    // 2. Fallback : anciennes URLs base64 (rétrocompatibilité avec les bookmarks existants)
+    if (Object.keys(decodedData).length === 0) {
+        const currentUrl = window.location.href;
+        const data = currentUrl.match(/\/([^\/]+)\/configure$/);
+        if (data && data[1]) {
+            try {
+                decodedData = JSON.parse(atob(data[1]));
+            } catch (error) {
+                console.warn("Pas de données base64 valides dans l'URL, valeurs par défaut utilisées.");
+            }
         }
     }
 
@@ -860,7 +883,7 @@ function validateApiKey(apiKey) {
     return true;
 }
 
-function getLink(method) {
+async function getLink(method) {
     const apiKey = document.getElementById('ApiKey').value;
     
     // Vérifier l'API key en premier
@@ -950,19 +973,43 @@ function getLink(method) {
         return false;
     }
 
-    const encodedData = btoa(JSON.stringify(data));
-    const stremio_link = `${window.location.host}/${encodedData}/manifest.json`;
+    // Appel serveur pour chiffrement Fernet (protégé par token CSRF)
+    let token;
+    try {
+        const csrfToken = window.__CSRF_TOKEN__ || '';
+        const response = await fetch('/api/config/encode', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ config: data })
+        });
+        if (!response.ok) {
+            throw new Error(`Erreur serveur: ${response.status}`);
+        }
+        const result = await response.json();
+        token = result.token;
+        if (!result.encrypted) {
+            console.warn('CONFIG_SECRET_KEY absente sur le serveur — config encodée en Base64 seulement (non chiffrée).');
+        }
+    } catch (err) {
+        alert(`Échec de l'encodage de la configuration: ${err.message}`);
+        return false;
+    }
+
+    // Stocker la config brute en localStorage pour repopuler /{config}/configure
+    localStorage.setItem('streamfusion_config', JSON.stringify(data));
+
+    const manifestUrl = window.location.protocol + '//' + window.location.host + '/' + token + '/manifest.json';
 
     if (method === 'link') {
-        window.open(`stremio://${stremio_link}`, "_blank");
+        window.open('stremio://' + window.location.host + '/' + token + '/manifest.json', "_blank");
     } else if (method === 'copy') {
-        const link = window.location.protocol + '//' + stremio_link;
-        navigator.clipboard.writeText(link).then(() => {
-            alert('Link copied to clipboard');
-        }, () => {
-            alert('Error copying link to clipboard');
-        });
+        await navigator.clipboard.writeText(manifestUrl);
     }
+
+    return manifestUrl;
 }
 
 let showLanguageCheckBoxes = true;

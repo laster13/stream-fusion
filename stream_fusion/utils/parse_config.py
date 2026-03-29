@@ -1,11 +1,11 @@
 import json
 
-from stream_fusion.utils.string_encoding import decodeb64
+from stream_fusion.utils.string_encoding import decrypt_config
 from stream_fusion.logging_config import logger
 
 
-def parse_config(b64config):
-    config = json.loads(decodeb64(b64config))
+def parse_config(config_token):
+    config = json.loads(decrypt_config(config_token))
 
     if "languages" not in config:
         config["languages"] = [config["language"]]

@@ -8,7 +8,7 @@ from aiohttp_socks import ProxyConnector
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from stream_fusion.logging_config import configure_logging
+from stream_fusion.logging_config import configure_logging, logger
 from stream_fusion.services.postgresql.base import Base
 from stream_fusion.services.postgresql.models import load_all_models
 from stream_fusion.settings import settings
@@ -47,6 +47,13 @@ async def lifespan_setup(
     app.middleware_stack = None
     _setup_db(app)
     app.middleware_stack = app.build_middleware_stack()
+
+    if not settings.config_secret_key:
+        logger.warning(
+            "CONFIG_SECRET_KEY non configurée. Les URLs de configuration utiliseront "
+            "un encodage Base64 réversible (non chiffré). Définir CONFIG_SECRET_KEY "
+            "pour activer le chiffrement Fernet des tokens de configuration."
+        )
 
     if settings.playback_proxy and settings.proxy_url:
         parsed_url = URL(settings.proxy_url)

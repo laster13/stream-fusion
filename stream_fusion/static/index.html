@@ -9,6 +9,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.14.0/Sortable.min.js"></script>
     <script>
         const secretKey = "{{ session_key }}";
+        window.__CSRF_TOKEN__ = "{{ csrf_token }}";
     </script>
     <title>Stream-Fusion — Configuration</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">

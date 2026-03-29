@@ -343,6 +343,7 @@ document.getElementById('confirmBtn').addEventListener('click', () => {
 document.getElementById('toastClose').addEventListener('click', hideToast);
 
 async function runAction(url, fd) {
+    fd.append('csrf_token', window.__ADMIN_CSRF__ || '');
     try {
         const res  = await fetch(url, { method: 'POST', body: fd });
         const data = await res.json();
