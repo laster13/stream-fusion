@@ -8,6 +8,7 @@ from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
 from stream_fusion.settings import settings
 from stream_fusion.utils.parse_config import parse_config
 from stream_fusion.utils.security.security_api_key import check_api_key
+from stream_fusion.utils.string_encoding import generate_csrf_token
 from stream_fusion.version import get_version
 from stream_fusion.web.root.config.schemas import ManifestResponse
 
@@ -46,6 +47,7 @@ async def configure(request: Request):
         "generationfree_unique_account": settings.generationfree_unique_account,
         "pm_unique_account": settings.pm_unique_account,
         "allow_public_key_registration": settings.allow_public_key_registration,
+        "csrf_token": generate_csrf_token(),
     })
 
 

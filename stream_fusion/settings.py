@@ -140,6 +140,10 @@ class Settings(BaseSettings):
     # SECURITY
     secret_api_key: str | None = None
     security_hide_docs: bool = True
+    # Fernet encryption key for config tokens embedded in addon URLs.
+    # Must persist across restarts — changing this key invalidates all existing config URLs.
+    # If not set, falls back to plain Base64 encoding (unencrypted).
+    config_secret_key: str | None = None
 
     # POSTGRESQL_DB
     # TODO: Change the values, but break dev environment

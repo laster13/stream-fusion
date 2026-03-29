@@ -20,11 +20,15 @@ from stream_fusion.web.api.auth.schemas import UsageLogs, UsageLog
 from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
 from stream_fusion.services.redis.redis_config import get_redis_dependency
+from stream_fusion.utils.string_encoding import generate_csrf_token, verify_csrf_token
 from stream_fusion.web.api.utils import ensure_uuid
 
 router = APIRouter()
 
 templates = Jinja2Templates(directory=settings.admin_template_dir)
+# Expose the CSRF token generator as a Jinja2 global —
+# base.html calls {% set csrf_token = csrf_token_gen() %} once per render.
+templates.env.globals["csrf_token_gen"] = generate_csrf_token
 
 _DEFAULT_SESSION_KEY = "331cbfe48117fcba53d09572b10d2fc293d86131dc51be46d8aa9843c2e9f48d"
 
@@ -60,6 +64,7 @@ def _build_config_view(s) -> dict:
             "session_key_is_default": s.session_key == _DEFAULT_SESSION_KEY,
             "security_hide_docs": s.security_hide_docs,
             "secret_api_key_set": _masked(s.secret_api_key),
+            "config_secret_key_set": _masked(s.config_secret_key),
         },
         "debrid": [
             {"name": "Real-Debrid",    "token_set": _masked(s.rd_token),         "unique": s.rd_unique_account},
@@ -226,6 +231,29 @@ async def session_based_security(
     return True
 
 
+def admin_context(request: Request, **kwargs) -> dict:
+    """Base context for all admin templates — injects the CSRF token."""
+    return {"request": request, "csrf_token": generate_csrf_token(), **kwargs}
+
+
+async def require_csrf(request: Request):
+    """
+    Validates the CSRF token on admin POST routes.
+    Reads the token from the form field 'csrf_token' or the 'X-CSRF-Token' header.
+    """
+    token = ""
+    try:
+        form = await request.form()
+        token = form.get("csrf_token", "")
+    except Exception:
+        pass
+    if not token:
+        token = request.headers.get("X-CSRF-Token", "")
+    if not verify_csrf_token(token):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Invalid or expired CSRF token.")
+
+
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
 @router.get("/", response_class=HTMLResponse)
@@ -366,6 +394,7 @@ async def create_api_key_page(
 async def create_api_key(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     name: str = Form(None),
     never_expires: bool = Form(False),
     proxied_links: bool = Form(False),
@@ -386,6 +415,7 @@ async def create_api_key(
 async def revoke_api_key(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     api_key: str = Form(...),
     apikey_dao: APIKeyDAO = Depends(),
 ):
@@ -403,6 +433,7 @@ async def revoke_api_key(
 async def renew_api_key(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     api_key: str = Form(...),
     apikey_dao: APIKeyDAO = Depends(),
 ):
@@ -423,6 +454,7 @@ async def renew_api_key(
 async def delete_api_key(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     api_key: str = Form(...),
     apikey_dao: APIKeyDAO = Depends(),
 ):
@@ -443,6 +475,7 @@ async def delete_api_key(
 async def toggle_proxied_links(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     api_key: str = Form(...),
     apikey_dao: APIKeyDAO = Depends(),
 ):
@@ -495,6 +528,7 @@ async def create_peer_key_page(
 async def create_peer_key(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     name: str = Form(...),
     rate_limit: int = Form(60),
     rate_window: int = Form(60),
@@ -516,6 +550,7 @@ async def create_peer_key(
 async def revoke_peer_key(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     key_id: str = Form(...),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -533,6 +568,7 @@ async def revoke_peer_key(
 async def delete_peer_key(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     key_id: str = Form(...),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -562,6 +598,7 @@ async def maintenance_page(
 async def clean_expired_api_keys(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     days: int = Form(30),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -569,12 +606,15 @@ async def clean_expired_api_keys(
         return JSONResponse({"error": "Non authentifié"}, status_code=401)
 
     try:
-        result = await db.execute(text("""
-            DELETE FROM api_keys
-            WHERE NOT never_expire
-              AND (latest_query_date IS NULL OR latest_query_date < EXTRACT(EPOCH FROM NOW() - INTERVAL ':days days')::BIGINT)
-              AND expiration_date < EXTRACT(EPOCH FROM NOW())::BIGINT
-        """).bindparams(days=days))
+        result = await db.execute(
+            text("""
+                DELETE FROM api_keys
+                WHERE NOT never_expire
+                  AND (latest_query_date IS NULL OR latest_query_date < EXTRACT(EPOCH FROM NOW())::BIGINT - :seconds)
+                  AND expiration_date < EXTRACT(EPOCH FROM NOW())::BIGINT
+            """),
+            {"seconds": days * 86400},
+        )
         await db.commit()
         count = result.rowcount
         logger.warning(f"Admin maintenance: deleted {count} expired API keys (inactive > {days} days)")
@@ -589,6 +629,7 @@ async def clean_expired_api_keys(
 async def clean_expired_debrid_cache(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     db: AsyncSession = Depends(get_db_session),
 ):
     if isinstance(authenticated, RedirectResponse):
@@ -608,6 +649,7 @@ async def clean_expired_debrid_cache(
 async def purge_debrid_cache(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     db: AsyncSession = Depends(get_db_session),
 ):
     if isinstance(authenticated, RedirectResponse):
@@ -629,6 +671,7 @@ async def purge_debrid_cache(
 async def clean_old_torrents(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     days: int = Form(90),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -654,6 +697,7 @@ async def clean_old_torrents(
 async def flush_redis_all(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     redis_client=get_redis_dependency(),
 ):
     if isinstance(authenticated, RedirectResponse):
@@ -672,6 +716,7 @@ async def flush_redis_all(
 async def flush_redis_pattern(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     pattern: str = Form(...),
     redis_client=get_redis_dependency(),
 ):
@@ -707,6 +752,7 @@ async def flush_redis_pattern(
 async def reset_api_key_counters(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     db: AsyncSession = Depends(get_db_session),
 ):
     if isinstance(authenticated, RedirectResponse):
@@ -727,6 +773,7 @@ async def reset_api_key_counters(
 async def reset_peer_key_counters(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     db: AsyncSession = Depends(get_db_session),
 ):
     if isinstance(authenticated, RedirectResponse):
@@ -860,6 +907,7 @@ async def list_mappings(
 async def create_mapping(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     imdb_id: str = Form(...),
     tmdb_id: str = Form(None),
     title_override: str = Form(None),
@@ -896,6 +944,7 @@ async def create_mapping(
 async def edit_mapping(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     mapping_id: int = Form(...),
     imdb_id: str = Form(...),
     tmdb_id: str = Form(None),
@@ -945,6 +994,7 @@ async def config_page(
 async def delete_mapping(
     request: Request,
     authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
     mapping_id: int = Form(...),
     db: AsyncSession = Depends(get_db_session),
 ):

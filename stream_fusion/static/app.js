@@ -104,26 +104,16 @@ function showToast(msg, type, duration) {
 
 // ═══ GENERATEUR MANIFEST ═══
 var _manifestUrl = '';
-var _suppressCopyAlert = false;
 
-function generateManifest() {
+async function generateManifest() {
     if (typeof window.clearValidationErrors === 'function') window.clearValidationErrors();
     document.getElementById('manifestResult').classList.remove('show');
     _manifestUrl = '';
 
-    _suppressCopyAlert = true;
-
-    var _origWrite = navigator.clipboard.writeText.bind(navigator.clipboard);
-    navigator.clipboard.writeText = function(text) {
-        _manifestUrl = text;
-        return Promise.resolve();
-    };
-
-    var result = getLink('copy');
-    navigator.clipboard.writeText = _origWrite;
-    setTimeout(function() { _suppressCopyAlert = false; }, 500);
-
-    if (result === false || !_manifestUrl) return;
+    // getLink est async — on l'appelle avec 'none' pour obtenir l'URL sans side effect
+    var manifestUrl = await getLink('none');
+    if (!manifestUrl) return;
+    _manifestUrl = manifestUrl;
 
     // TEST MANIFEST - VÉRIFICATION CLÉ API
     var btn = document.getElementById('generateBtn');
@@ -200,10 +190,6 @@ function installToStremio() {
     window.alert = function(msg) {
         if (!msg) return;
         var s = String(msg).toLowerCase();
-
-        if (_suppressCopyAlert && (s.indexOf('copied') !== -1 || s.indexOf('clipboard') !== -1)) {
-            return;
-        }
 
         if (s.indexOf('copied') !== -1 || s.indexOf('copié') !== -1 || s.indexOf('clipboard') !== -1) {
             showToast('Manifest copié dans le presse-papier !', 'success', 3000);

@@ -190,7 +190,7 @@ class TorrentSmartContainer:
 
         for item in best_matching:
             if item.parsed_data is None:
-                self.logger.debug(
+                self.logger.trace(
                     f"TorrentSmartContainer.get_best_matching: Item '{item.raw_title[:60]}' missing parsed_data, parsing now"
                 )
                 item.parsed_data = parse(item.raw_title)
@@ -334,7 +334,7 @@ class TorrentSmartContainer:
         for info_hash, details in response.items():
             normalized_hash = self._normalize_hash(info_hash)
             if "rd" not in details:
-                self.logger.debug(
+                self.logger.trace(
                     f"TorrentSmartContainer: Skipping hash {normalized_hash}: no RealDebrid data"
                 )
                 continue
@@ -346,7 +346,7 @@ class TorrentSmartContainer:
                 )
                 continue
 
-            self.logger.debug(
+            self.logger.trace(
                 f"Processing {torrent_item.type}: {torrent_item.raw_title}"
             )
             files = []
@@ -604,7 +604,7 @@ class TorrentSmartContainer:
                                 self._update_file_details(
                                     item, [file_info], debrid="PM"
                                 )
-                                self.logger.debug(
+                                self.logger.trace(
                                     f"TorrentSmartContainer: Updated movie file details for {item.raw_title}: {file_info}"
                                 )
 
@@ -766,7 +766,7 @@ class TorrentSmartContainer:
                 item.availability = debrid_code
 
             elif item.type == "movie":
-                self.logger.debug(
+                self.logger.trace(
                     f"TorrentSmartContainer: Processing movie files for {item.raw_title}"
                 )
 
@@ -782,7 +782,7 @@ class TorrentSmartContainer:
 
                 if file_infos:
                     self._update_file_details(item, file_infos, debrid=debrid_code)
-                    self.logger.debug(
+                    self.logger.trace(
                         f"TorrentSmartContainer: Updated movie file details for {item.raw_title}"
                     )
                     continue
@@ -945,7 +945,7 @@ class TorrentSmartContainer:
                     )
                     continue
 
-                self.logger.debug(
+                self.logger.trace(
                     f"TorrentSmartContainer: Adding movie file: {file_name}"
                 )
                 explicit_index = file.get("index")
