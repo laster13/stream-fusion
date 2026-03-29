@@ -1,49 +1,311 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="dark">
+<html lang="fr" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StreamFusion Users Management</title>
+    <title>{% block title %}StreamFusion Admin{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
-        .theme-switch {
-            position: fixed;
-            top: 10px;
-            right: 10px;
+        :root {
+            --sidebar-width: 240px;
+            --topbar-height: 56px;
+            --sidebar-bg: #1a1d21;
+            --sidebar-hover: #2c3036;
+            --sidebar-active-color: #0d6efd;
+            --sidebar-active-bg: rgba(13, 110, 253, 0.15);
         }
+
         body {
-            transition: background-color 0.3s ease, color 0.3s ease;
+            transition: background-color 0.2s ease, color 0.2s ease;
+            min-height: 100vh;
         }
-        [data-bs-theme="dark"] {
-            --bs-body-bg: #212529;
-            --bs-body-color: #f8f9fa;
+
+        /* ── Sidebar ── */
+        #sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: var(--sidebar-width);
+            height: 100vh;
+            background-color: var(--sidebar-bg);
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            border-right: 1px solid rgba(255,255,255,0.07);
+            overflow-y: auto;
         }
+
+        .sidebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 18px 20px;
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #fff;
+            text-decoration: none;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
+            flex-shrink: 0;
+        }
+
+        .sidebar-brand .brand-icon {
+            font-size: 1.4rem;
+            color: var(--sidebar-active-color);
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 12px 0;
+        }
+
+        .sidebar-section {
+            padding: 8px 20px 4px;
+            font-size: 0.68rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.35);
+            margin-top: 8px;
+        }
+
+        .sidebar-link {
+            display: flex;
+            align-items: center;
+            gap: 11px;
+            padding: 9px 20px;
+            color: rgba(255,255,255,0.65);
+            text-decoration: none;
+            font-size: 0.875rem;
+            transition: all 0.15s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .sidebar-link:hover {
+            background-color: var(--sidebar-hover);
+            color: rgba(255,255,255,0.9);
+        }
+
+        .sidebar-link.active {
+            background-color: var(--sidebar-active-bg);
+            color: #fff;
+            border-left-color: var(--sidebar-active-color);
+            font-weight: 500;
+        }
+
+        .sidebar-link i {
+            font-size: 1rem;
+            width: 18px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .sidebar-footer {
+            padding: 16px 20px;
+            border-top: 1px solid rgba(255,255,255,0.07);
+            flex-shrink: 0;
+        }
+
+        .sidebar-footer .logout-link {
+            display: flex;
+            align-items: center;
+            gap: 11px;
+            color: rgba(255,255,255,0.45);
+            text-decoration: none;
+            font-size: 0.875rem;
+            transition: color 0.15s;
+        }
+
+        .sidebar-footer .logout-link:hover {
+            color: #dc3545;
+        }
+
+        /* ── Topbar ── */
+        #topbar {
+            position: fixed;
+            top: 0;
+            left: var(--sidebar-width);
+            right: 0;
+            height: var(--topbar-height);
+            background-color: var(--bs-body-bg);
+            border-bottom: 1px solid var(--bs-border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            z-index: 999;
+        }
+
+        .topbar-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--bs-body-color);
+            margin: 0;
+        }
+
+        /* ── Main content ── */
+        #main-content {
+            margin-left: var(--sidebar-width);
+            margin-top: var(--topbar-height);
+            padding: 28px;
+            min-height: calc(100vh - var(--topbar-height));
+        }
+
+        /* ── Theme toggle ── */
+        .theme-toggle-btn {
+            background: none;
+            border: 1px solid var(--bs-border-color);
+            color: var(--bs-body-color);
+            padding: 5px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.15s;
+        }
+        .theme-toggle-btn:hover {
+            background: var(--bs-secondary-bg);
+        }
+
+        /* ── Stat cards ── */
+        .stat-card {
+            border: 1px solid var(--bs-border-color);
+            border-radius: 10px;
+            padding: 20px;
+            background: var(--bs-secondary-bg);
+        }
+        .stat-card .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .stat-card .stat-label {
+            font-size: 0.8rem;
+            color: var(--bs-secondary-color);
+            margin-top: 4px;
+        }
+        .stat-card .stat-icon {
+            font-size: 1.8rem;
+            opacity: 0.4;
+        }
+
+        /* ── Light mode sidebar overrides ── */
+        [data-bs-theme="light"] #sidebar {
+            background-color: #f0f2f5;
+            border-right-color: rgba(0,0,0,0.1);
+        }
+        [data-bs-theme="light"] .sidebar-brand { color: #212529; border-bottom-color: rgba(0,0,0,0.1); }
+        [data-bs-theme="light"] .sidebar-link { color: rgba(0,0,0,0.6); }
+        [data-bs-theme="light"] .sidebar-link:hover { background-color: #e2e6ea; color: rgba(0,0,0,0.85); }
+        [data-bs-theme="light"] .sidebar-link.active { color: #0d6efd; background-color: rgba(13,110,253,0.08); }
+        [data-bs-theme="light"] .sidebar-footer { border-top-color: rgba(0,0,0,0.1); }
+        [data-bs-theme="light"] .sidebar-footer .logout-link { color: rgba(0,0,0,0.4); }
+        [data-bs-theme="light"] .sidebar-section { color: rgba(0,0,0,0.35); }
     </style>
+    {% block extra_head %}{% endblock %}
 </head>
 <body>
-    <div class="theme-switch form-check form-switch">
-        <input class="form-check-input" type="checkbox" id="themeSwitch" checked>
-        <label class="form-check-label" for="themeSwitch">Dark Mode</label>
+
+<!-- Sidebar -->
+<nav id="sidebar">
+    <a class="sidebar-brand" href="{{ url_for('dashboard')(request) }}">
+        <i class="bi bi-lightning-fill brand-icon"></i>
+        StreamFusion
+    </a>
+
+    <div class="sidebar-nav">
+        <div class="sidebar-section">Général</div>
+        <a class="sidebar-link {% if '/dashboard' in request.url.path %}active{% endif %}"
+           href="{{ url_for('dashboard')(request) }}">
+            <i class="bi bi-speedometer2"></i> Dashboard
+        </a>
+
+        <div class="sidebar-section">Accès</div>
+        <a class="sidebar-link {% if 'api-keys' in request.url.path or 'create-api-key' in request.url.path %}active{% endif %}"
+           href="{{ url_for('list_api_keys')(request) }}">
+            <i class="bi bi-key"></i> Clés API
+        </a>
+        <a class="sidebar-link {% if 'peer-keys' in request.url.path or 'create-peer-key' in request.url.path %}active{% endif %}"
+           href="{{ url_for('list_peer_keys')(request) }}">
+            <i class="bi bi-diagram-3"></i> Peer Keys
+        </a>
+
+        <div class="sidebar-section">Données</div>
+        <a class="sidebar-link {% if '/mappings' in request.url.path %}active{% endif %}"
+           href="{{ url_for('list_mappings')(request) }}">
+            <i class="bi bi-arrow-left-right"></i> Mappings méta
+        </a>
+        <a class="sidebar-link {% if '/maintenance' in request.url.path %}active{% endif %}"
+           href="{{ url_for('maintenance_page')(request) }}">
+            <i class="bi bi-tools"></i> Maintenance
+        </a>
+        <a class="sidebar-link {% if '/config' in request.url.path %}active{% endif %}"
+           href="{{ url_for('config_page')(request) }}">
+            <i class="bi bi-sliders"></i> Configuration
+        </a>
+
+        <div class="sidebar-section">Recherche</div>
+        <a class="sidebar-link {% if '/search/hash' in request.url.path %}active{% endif %}"
+           href="{{ url_for('search_hash_page')(request) }}">
+            <i class="bi bi-hash"></i> Par hash
+        </a>
+        <a class="sidebar-link {% if '/search/tmdb' in request.url.path %}active{% endif %}"
+           href="{{ url_for('search_tmdb_page')(request) }}">
+            <i class="bi bi-film"></i> Par TMDB ID
+        </a>
     </div>
-    <div class="container mt-5">
-        {% block content %}{% endblock %}
+
+    <div class="sidebar-footer">
+        <a class="logout-link" href="{{ url_for('logout')(request) }}">
+            <i class="bi bi-box-arrow-left"></i> Déconnexion
+        </a>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        const themeSwitch = document.getElementById('themeSwitch');
-        themeSwitch.addEventListener('change', function() {
-            if (this.checked) {
-                document.documentElement.setAttribute('data-bs-theme', 'dark');
-                localStorage.setItem('theme', 'dark');
-            } else {
-                document.documentElement.setAttribute('data-bs-theme', 'light');
-                localStorage.setItem('theme', 'light');
-            }
-        });
-    
-        const savedTheme = localStorage.getItem('theme') || 'dark';
-        document.documentElement.setAttribute('data-bs-theme', savedTheme);
-        themeSwitch.checked = savedTheme === 'dark';
-    </script>
+</nav>
+
+<!-- Topbar -->
+<header id="topbar">
+    <h6 class="topbar-title">{% block page_title %}Administration{% endblock %}</h6>
+    <div class="d-flex align-items-center gap-3">
+        <button class="theme-toggle-btn" id="themeToggle">
+            <i class="bi bi-moon-fill" id="themeIcon"></i>
+            <span id="themeLabel">Sombre</span>
+        </button>
+    </div>
+</header>
+
+<!-- Main content -->
+<main id="main-content">
+    {% block content %}{% endblock %}
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const themeToggle = document.getElementById('themeToggle');
+    const themeIcon = document.getElementById('themeIcon');
+    const themeLabel = document.getElementById('themeLabel');
+    const html = document.documentElement;
+
+    function applyTheme(theme) {
+        html.setAttribute('data-bs-theme', theme);
+        localStorage.setItem('sf-theme', theme);
+        if (theme === 'dark') {
+            themeIcon.className = 'bi bi-moon-fill';
+            themeLabel.textContent = 'Sombre';
+        } else {
+            themeIcon.className = 'bi bi-sun-fill';
+            themeLabel.textContent = 'Clair';
+        }
+    }
+
+    const savedTheme = localStorage.getItem('sf-theme') || 'dark';
+    applyTheme(savedTheme);
+
+    themeToggle.addEventListener('click', () => {
+        applyTheme(html.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark');
+    });
+</script>
+{% block extra_scripts %}{% endblock %}
 </body>
 </html>

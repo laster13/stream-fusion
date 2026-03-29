@@ -1,0 +1,962 @@
+import time
+from fastapi import APIRouter, Request, Depends, Form
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.security import APIKeyHeader
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.status import HTTP_303_SEE_OTHER
+import secrets
+import uuid
+from datetime import timedelta
+
+from stream_fusion.services.postgresql.dependencies import get_db_session
+from stream_fusion.services.postgresql.schemas.apikey_schemas import APIKeyCreate, APIKeyUpdate
+from stream_fusion.utils.security.security_secret import SecretManager
+from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
+from stream_fusion.services.postgresql.dao.peerkey_dao import PeerKeyDAO
+from stream_fusion.services.postgresql.dao.debridcache_dao import DebridCacheDAO
+from stream_fusion.web.api.auth.schemas import UsageLogs, UsageLog
+from stream_fusion.logging_config import logger
+from stream_fusion.settings import settings
+from stream_fusion.services.redis.redis_config import get_redis_dependency
+from stream_fusion.web.api.utils import ensure_uuid
+
+router = APIRouter()
+
+templates = Jinja2Templates(directory=settings.admin_template_dir)
+
+_DEFAULT_SESSION_KEY = "331cbfe48117fcba53d09572b10d2fc293d86131dc51be46d8aa9843c2e9f48d"
+
+
+def _masked(value) -> bool:
+    return bool(value and str(value).strip())
+
+
+def _build_config_view(s) -> dict:
+    def proxy_host_only(url) -> str | None:
+        if not url:
+            return None
+        try:
+            from yarl import URL as YURL
+            u = YURL(str(url))
+            return f"{u.scheme}://{u.host}:{u.port}"
+        except Exception:
+            return str(url)[:80]
+
+    return {
+        "session_key_is_default": s.session_key == _DEFAULT_SESSION_KEY,
+        "general": {
+            "host": s.host,
+            "port": s.port,
+            "workers_count": s.workers_count,
+            "use_https": s.use_https,
+            "log_level": s.log_level.value,
+            "debug": s.debug,
+            "allow_debrid_download": s.allow_debrid_download,
+            "download_service": s.download_service.value if s.download_service else None,
+        },
+        "security": {
+            "session_key_is_default": s.session_key == _DEFAULT_SESSION_KEY,
+            "security_hide_docs": s.security_hide_docs,
+            "secret_api_key_set": _masked(s.secret_api_key),
+        },
+        "debrid": [
+            {"name": "Real-Debrid",    "token_set": _masked(s.rd_token),         "unique": s.rd_unique_account},
+            {"name": "AllDebrid",      "token_set": _masked(s.ad_token),         "unique": s.ad_unique_account},
+            {"name": "TorBox",         "token_set": _masked(s.tb_token),         "unique": s.tb_unique_account},
+            {"name": "Premiumize",     "token_set": _masked(s.pm_token),         "unique": s.pm_unique_account},
+            {"name": "Debrid-Link",    "token_set": _masked(s.dl_token),         "unique": s.dl_unique_account},
+            {"name": "EasyDebrid",     "token_set": _masked(s.ed_token),         "unique": s.ed_unique_account},
+            {"name": "Offcloud",       "token_set": _masked(s.oc_credentials),   "unique": s.oc_unique_account},
+            {"name": "PikPak",         "token_set": _masked(s.pp_credentials),   "unique": s.pp_unique_account},
+        ],
+        "proxy": {
+            "proxy_url": proxy_host_only(s.proxy_url),
+            "playback_proxy": s.playback_proxy,
+            "proxy_buffer_size_kb": s.proxy_buffer_size // 1024,
+            "playback_limit_requests": s.playback_limit_requests,
+            "playback_limit_seconds": s.playback_limit_seconds,
+        },
+        "peer": {
+            "url": s.peer_streamfusion_url or None,
+            "key_id_set": _masked(s.peer_streamfusion_key_id),
+            "secret_set": _masked(s.peer_streamfusion_secret),
+        },
+        "indexers": [
+            {"name": "Jackett",        "enabled": s.jackett_enable,        "url": f"{s.jackett_schema}://{s.jackett_host}:{s.jackett_port}", "key_set": _masked(s.jackett_api_key)},
+            {"name": "YGG / YGGFlix",  "enabled": _masked(s.ygg_passkey),  "url": s.yggflix_url,  "key_set": _masked(s.ygg_passkey)},
+            {"name": "Sharewood",      "enabled": s.sharewood_enable,      "url": s.sharewood_url, "key_set": _masked(s.sharewood_passkey)},
+            {"name": "C411",           "enabled": s.c411_enable,           "url": s.c411_url,      "key_set": _masked(s.c411_api_key) or _masked(s.c411_passkey)},
+            {"name": "Torr9",          "enabled": s.torr9_enable,          "url": s.torr9_url,     "key_set": _masked(s.torr9_api_key)},
+            {"name": "LaCale",         "enabled": s.lacale_enable,         "url": s.lacale_url,    "key_set": _masked(s.lacale_api_key)},
+            {"name": "GénérationFree", "enabled": s.generationfree_enable, "url": s.generationfree_url, "key_set": _masked(s.generationfree_api_key)},
+            {"name": "Zilean",         "enabled": True,                    "url": f"{s.zilean_schema}://{s.zilean_host}", "key_set": None},
+        ],
+        "tmdb": {
+            "language": s.tmdb_language,
+            "api_key_set": _masked(s.tmdb_api_key),
+        },
+        "redis": {
+            "host": s.redis_host,
+            "port": s.redis_port,
+            "db": s.redis_db,
+            "expiration_days": round(s.redis_expiration / 86400, 1),
+            "password_set": _masked(s.redis_password),
+        },
+        "postgresql": {
+            "host": s.pg_host,
+            "port": s.pg_port,
+            "database": s.pg_base,
+            "user": s.pg_user,
+            "pool_size": s.pg_pool_size,
+            "max_overflow": s.pg_max_overflow,
+        },
+    }
+
+SECRET_KEY_NAME = "secret-key"
+secret_header = APIKeyHeader(name=SECRET_KEY_NAME, auto_error=False)
+
+secret = SecretManager()
+
+
+def custom_url_for(name: str, **path_params: any) -> str:
+    def wrapper(request: Request):
+        url = request.url_for(name, **path_params)
+        if settings.use_https:
+            return str(url.replace(scheme="https"))
+        return str(url)
+
+    return wrapper
+
+
+templates.env.globals["url_for"] = custom_url_for
+
+
+def _fmt_date(value) -> str:
+    """Format a Unix timestamp or datetime to 'DD MMM. YYYY HH:MM'."""
+    from datetime import datetime as _dt
+    if value is None or value in ('', 'None', '—'):
+        return '—'
+    if value == 'Unlimited':
+        return 'Unlimited'
+    if isinstance(value, (int, float)) and value > 0:
+        return _dt.fromtimestamp(int(value)).strftime('%d %b. %Y %H:%M')
+    if hasattr(value, 'strftime'):
+        return value.strftime('%d %b. %Y %H:%M')
+    return str(value)
+
+
+def _fmt_relative(value) -> str:
+    """Show relative time (il y a Xj) for recent dates, absolute for older ones."""
+    import time as _t
+    from datetime import datetime as _dt
+    if value is None or value in ('', 'None', '—'):
+        return '—'
+    ts = None
+    if isinstance(value, (int, float)) and value > 0:
+        ts = int(value)
+    elif hasattr(value, 'timestamp'):
+        ts = int(value.timestamp())
+    if ts is None:
+        return '—'
+    diff = int(_t.time()) - ts
+    if diff < 60:
+        return "À l'instant"
+    if diff < 3600:
+        return f"il y a {diff // 60} min"
+    if diff < 86400:
+        return f"il y a {diff // 3600}h"
+    if diff < 7 * 86400:
+        return f"il y a {diff // 86400}j"
+    return _dt.fromtimestamp(ts).strftime('%d %b. %Y')
+
+
+def _fmt_size(value) -> str:
+    try:
+        b = int(value)
+    except (TypeError, ValueError):
+        return '—'
+    if b >= 1024 ** 3:
+        return f"{b / 1024 ** 3:.2f} Go"
+    if b >= 1024 ** 2:
+        return f"{b / 1024 ** 2:.1f} Mo"
+    if b >= 1024:
+        return f"{b / 1024:.0f} Ko"
+    return f"{b} o"
+
+
+templates.env.filters['fmt_date'] = _fmt_date
+templates.env.filters['fmt_relative'] = _fmt_relative
+templates.env.filters['fmt_size'] = _fmt_size
+
+
+def redirect_to_login(request: Request):
+    return RedirectResponse(
+        url=custom_url_for("login_page")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+async def get_session_id_from_request(request: Request):
+    session_id = request.session.get("session_id")
+    if not session_id:
+        return None
+    return session_id
+
+
+async def session_based_security(
+    request: Request,
+    session_id: str = Depends(get_session_id_from_request),
+    redis_client=get_redis_dependency(),
+):
+    if not session_id:
+        return redirect_to_login(request)
+
+    secret_key = redis_client.get(session_id)
+    if not secret_key:
+        request.session.clear()
+        return redirect_to_login(request)
+
+    if not secrets.compare_digest(secret_key.decode(), secret.value):
+        redis_client.delete(session_id)
+        request.session.clear()
+        return redirect_to_login(request)
+
+    redis_client.expire(session_id, timedelta(hours=2))
+    return True
+
+
+# ── Auth ───────────────────────────────────────────────────────────────────────
+
+@router.get("/", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+
+@router.post("/login")
+async def login(
+    request: Request,
+    secret_key: str = Form(...),
+    redis_client=get_redis_dependency(),
+):
+    if secrets.compare_digest(secret_key, secret.value):
+        session_id = str(uuid.uuid4())
+        redis_client.setex(session_id, timedelta(hours=2), secret_key)
+        request.session["session_id"] = session_id
+        logger.info("Admin login successful")
+        return RedirectResponse(
+            url=custom_url_for("dashboard")(request), status_code=HTTP_303_SEE_OTHER
+        )
+    logger.warning("Admin login attempt with invalid secret key")
+    return templates.TemplateResponse(
+        "login.html", {"request": request, "error": "Clé secrète invalide"}
+    )
+
+
+@router.get("/logout")
+async def logout(request: Request, redis_client=get_redis_dependency()):
+    session_id = request.session.get("session_id")
+    if session_id:
+        redis_client.delete(session_id)
+    request.session.clear()
+    return RedirectResponse(
+        url=custom_url_for("login_page")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+
+@router.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    apikey_dao: APIKeyDAO = Depends(),
+    db: AsyncSession = Depends(get_db_session),
+    redis_client=get_redis_dependency(),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    # API keys stats
+    usage_stats = await apikey_dao.get_usage_stats()
+    total_keys = len(usage_stats)
+    active_keys = sum(1 for k in usage_stats if k.is_active)
+
+    # Peer keys count — direct SQL to avoid session.begin() conflict
+    try:
+        r = await db.execute(text("SELECT COUNT(*) FROM peer_keys WHERE is_active = true"))
+        active_peers = r.scalar() or 0
+    except Exception:
+        active_peers = 0
+
+    # Debrid cache count
+    try:
+        result = await db.execute(text("SELECT COUNT(*) FROM debrid_cache"))
+        debrid_cache_count = result.scalar() or 0
+    except Exception:
+        debrid_cache_count = 0
+
+    # Torrent items count
+    try:
+        result = await db.execute(text("SELECT COUNT(*) FROM torrent_items"))
+        torrent_count = result.scalar() or 0
+    except Exception:
+        torrent_count = 0
+
+    # Redis status
+    try:
+        redis_ok = bool(redis_client.ping())
+    except Exception:
+        redis_ok = False
+
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "total_keys": total_keys,
+        "active_keys": active_keys,
+        "active_peers": active_peers,
+        "debrid_cache_count": debrid_cache_count,
+        "torrent_count": torrent_count,
+        "redis_ok": redis_ok,
+    })
+
+
+# ── API Keys ──────────────────────────────────────────────────────────────────
+
+@router.get("/api-keys", response_class=HTMLResponse)
+async def list_api_keys(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    apikey_dao: APIKeyDAO = Depends(),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    usage_stats = await apikey_dao.get_usage_stats()
+    usage_logs = UsageLogs(
+        logs=[
+            UsageLog(
+                api_key=key.api_key,
+                is_active=key.is_active,
+                never_expire=key.never_expire,
+                expiration_date=(key.expiration_date if key.expiration_date else "Unlimited"),
+                latest_query_date=(key.latest_query_date if key.latest_query_date else "None"),
+                total_queries=key.total_queries,
+                name=key.name if key.name else "JohnDoe",
+                proxied_links=key.proxied_links,
+            )
+            for key in usage_stats
+        ]
+    )
+    return templates.TemplateResponse(
+        "api_keys.html", {"request": request, "logs": usage_logs.logs}
+    )
+
+
+@router.get("/create-api-key", response_class=HTMLResponse)
+async def create_api_key_page(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+    return templates.TemplateResponse("create_api_key.html", {"request": request})
+
+
+@router.post("/create-api-key")
+async def create_api_key(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    name: str = Form(None),
+    never_expires: bool = Form(False),
+    proxied_links: bool = Form(False),
+    apikey_dao: APIKeyDAO = Depends(),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    key = APIKeyCreate(name=name, never_expire=never_expires, proxied_links=proxied_links)
+    await apikey_dao.create_key(key)
+    logger.info(f"Admin: API key created (name={name})")
+    return RedirectResponse(
+        url=custom_url_for("list_api_keys")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+@router.post("/revoke-api-key")
+async def revoke_api_key(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    api_key: str = Form(...),
+    apikey_dao: APIKeyDAO = Depends(),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    api_key_uuid = ensure_uuid(api_key)
+    await apikey_dao.revoke_key(api_key_uuid)
+    return RedirectResponse(
+        url=custom_url_for("list_api_keys")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+@router.post("/renew-api-key")
+async def renew_api_key(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    api_key: str = Form(...),
+    apikey_dao: APIKeyDAO = Depends(),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    api_key_uuid = ensure_uuid(api_key)
+    try:
+        await apikey_dao.renew_key(api_key_uuid)
+    except Exception as e:
+        logger.error(f"Admin: failed to renew API key: {e}")
+    return RedirectResponse(
+        url=custom_url_for("list_api_keys")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+@router.post("/delete-api-key")
+async def delete_api_key(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    api_key: str = Form(...),
+    apikey_dao: APIKeyDAO = Depends(),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    api_key_uuid = ensure_uuid(api_key)
+    try:
+        await apikey_dao.delete_key(api_key_uuid)
+    except Exception as e:
+        logger.error(f"Admin: failed to delete API key: {e}")
+    return RedirectResponse(
+        url=custom_url_for("list_api_keys")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+@router.post("/toggle-proxied-links")
+async def toggle_proxied_links(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    api_key: str = Form(...),
+    apikey_dao: APIKeyDAO = Depends(),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    api_key_uuid = ensure_uuid(api_key)
+    try:
+        key_info = await apikey_dao.get_key_by_uuid(api_key_uuid)
+        if key_info:
+            current_value = getattr(key_info, "proxied_links", False)
+            await apikey_dao.update_key(api_key_uuid, APIKeyUpdate(proxied_links=not current_value))
+    except Exception as e:
+        logger.error(f"Admin: failed to toggle proxied links: {e}")
+    return RedirectResponse(
+        url=custom_url_for("list_api_keys")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+# ── Peer Keys ──────────────────────────────────────────────────────────────────
+
+@router.get("/peer-keys", response_class=HTMLResponse)
+async def list_peer_keys(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    dao = PeerKeyDAO(db)
+    keys = await dao.list_keys()
+    new_key = request.session.pop("new_peer_key", None)
+    return templates.TemplateResponse(
+        "peer_keys.html", {"request": request, "keys": keys, "new_key": new_key}
+    )
+
+
+@router.get("/create-peer-key", response_class=HTMLResponse)
+async def create_peer_key_page(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+    return templates.TemplateResponse("create_peer_key.html", {"request": request})
+
+
+@router.post("/create-peer-key")
+async def create_peer_key(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    name: str = Form(...),
+    rate_limit: int = Form(60),
+    rate_window: int = Form(60),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    dao = PeerKeyDAO(db)
+    result = await dao.create_key(name=name, rate_limit=rate_limit, rate_window=rate_window)
+    logger.success(f"Admin: peer key created for '{name}' ({result['key_id'][:8]}…)")
+    request.session["new_peer_key"] = result
+    return RedirectResponse(
+        url=custom_url_for("list_peer_keys")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+@router.post("/revoke-peer-key")
+async def revoke_peer_key(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    key_id: str = Form(...),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    dao = PeerKeyDAO(db)
+    await dao.revoke_key(key_id)
+    return RedirectResponse(
+        url=custom_url_for("list_peer_keys")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+@router.post("/delete-peer-key")
+async def delete_peer_key(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    key_id: str = Form(...),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    dao = PeerKeyDAO(db)
+    await dao.delete_key(key_id)
+    return RedirectResponse(
+        url=custom_url_for("list_peer_keys")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+# ── Maintenance ────────────────────────────────────────────────────────────────
+
+@router.get("/maintenance", response_class=HTMLResponse)
+async def maintenance_page(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+    return templates.TemplateResponse("maintenance.html", {"request": request})
+
+
+@router.post("/maintenance/clean-expired-api-keys")
+async def clean_expired_api_keys(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    days: int = Form(30),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    try:
+        result = await db.execute(text("""
+            DELETE FROM api_keys
+            WHERE NOT never_expire
+              AND (latest_query_date IS NULL OR latest_query_date < EXTRACT(EPOCH FROM NOW() - INTERVAL ':days days')::BIGINT)
+              AND expiration_date < EXTRACT(EPOCH FROM NOW())::BIGINT
+        """).bindparams(days=days))
+        await db.commit()
+        count = result.rowcount
+        logger.warning(f"Admin maintenance: deleted {count} expired API keys (inactive > {days} days)")
+        return JSONResponse({"success": True, "deleted": count, "message": f"{count} clé(s) API supprimée(s)"})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: clean-expired-api-keys failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/clean-expired-debrid-cache")
+async def clean_expired_debrid_cache(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    try:
+        dao = DebridCacheDAO(db)
+        count = await dao.delete_expired()
+        logger.warning(f"Admin maintenance: deleted {count} expired debrid cache entries")
+        return JSONResponse({"success": True, "deleted": count, "message": f"{count} entrée(s) expirée(s) supprimée(s)"})
+    except Exception as e:
+        logger.error(f"Admin maintenance: clean-expired-debrid-cache failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/purge-debrid-cache")
+async def purge_debrid_cache(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    try:
+        result = await db.execute(text("DELETE FROM debrid_cache"))
+        await db.commit()
+        count = result.rowcount
+        logger.warning(f"Admin maintenance: purged entire debrid cache ({count} rows)")
+        return JSONResponse({"success": True, "deleted": count, "message": f"Cache debrid vidé ({count} entrées)"})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: purge-debrid-cache failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/clean-old-torrents")
+async def clean_old_torrents(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    days: int = Form(90),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    try:
+        cutoff = int(time.time()) - (days * 86400)
+        result = await db.execute(
+            text("DELETE FROM torrent_items WHERE updated_at < :cutoff").bindparams(cutoff=cutoff)
+        )
+        await db.commit()
+        count = result.rowcount
+        logger.warning(f"Admin maintenance: deleted {count} torrent items not updated in {days} days")
+        return JSONResponse({"success": True, "deleted": count, "message": f"{count} torrent(s) non mis à jour depuis {days} jours supprimé(s)"})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: clean-old-torrents failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/flush-redis-all")
+async def flush_redis_all(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    redis_client=get_redis_dependency(),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    try:
+        redis_client.flushdb()
+        logger.warning("Admin maintenance: Redis FLUSHDB executed")
+        return JSONResponse({"success": True, "message": "Cache Redis entièrement vidé"})
+    except Exception as e:
+        logger.error(f"Admin maintenance: flush-redis-all failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/flush-redis-pattern")
+async def flush_redis_pattern(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    pattern: str = Form(...),
+    redis_client=get_redis_dependency(),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    # Whitelist des patterns autorisés pour éviter toute suppression accidentelle de session
+    allowed_patterns = {
+        "stream":   ["stream_link:*", "direct_link:*", "ready:*", "download:*"],
+        "catalog":  ["catalog:*", "tmdbid_item:*"],
+        "ratelimit":["ratelimit:*"],
+        "metadata": ["imdbid_item:*", "tmdbid_item:*", "tmdbid_to_imdbid:*"],
+        "peer":     ["peer:*"],
+    }
+
+    if pattern not in allowed_patterns:
+        return JSONResponse({"success": False, "message": "Pattern non autorisé"}, status_code=400)
+
+    try:
+        total_deleted = 0
+        for p in allowed_patterns[pattern]:
+            keys = redis_client.keys(p)
+            if keys:
+                total_deleted += redis_client.delete(*keys)
+        logger.warning(f"Admin maintenance: flushed Redis pattern '{pattern}' ({total_deleted} keys deleted)")
+        return JSONResponse({"success": True, "deleted": total_deleted, "message": f"{total_deleted} clé(s) Redis supprimée(s) (pattern: {pattern})"})
+    except Exception as e:
+        logger.error(f"Admin maintenance: flush-redis-pattern failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/reset-api-key-counters")
+async def reset_api_key_counters(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        result = await db.execute(text("UPDATE api_keys SET total_queries = 0, latest_query_date = NULL"))
+        await db.commit()
+        count = result.rowcount
+        logger.warning(f"Admin maintenance: reset query counters for {count} API keys")
+        return JSONResponse({"success": True, "message": f"Compteurs réinitialisés pour {count} clé(s) API"})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: reset-api-key-counters failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/reset-peer-key-counters")
+async def reset_peer_key_counters(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        result = await db.execute(text("UPDATE peer_keys SET total_queries = 0, last_used_at = NULL"))
+        await db.commit()
+        count = result.rowcount
+        logger.warning(f"Admin maintenance: reset query counters for {count} peer keys")
+        return JSONResponse({"success": True, "message": f"Compteurs réinitialisés pour {count} peer key(s)"})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: reset-peer-key-counters failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.get("/maintenance/stats")
+async def maintenance_stats(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+    redis_client=get_redis_dependency(),
+):
+    """Return table row counts and Redis key counts as JSON for the maintenance stats panel."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    tables = ["api_keys", "peer_keys", "debrid_cache", "torrent_items", "metadata_mappings"]
+    pg_stats = {}
+    for table in tables:
+        try:
+            r = await db.execute(text(f"SELECT COUNT(*) FROM {table}"))
+            pg_stats[table] = r.scalar() or 0
+        except Exception:
+            pg_stats[table] = "?"
+
+    redis_stats = {}
+    try:
+        info = redis_client.info("memory")
+        redis_stats["used_memory_human"] = info.get("used_memory_human", "?")
+        redis_stats["total_keys"] = redis_client.dbsize()
+    except Exception:
+        redis_stats = {"used_memory_human": "?", "total_keys": "?"}
+
+    return JSONResponse({"pg": pg_stats, "redis": redis_stats})
+
+
+# ── Torrent search ────────────────────────────────────────────────────────────
+
+@router.get("/search/hash", response_class=HTMLResponse)
+async def search_hash_page(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    q: str = None,
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    results = []
+    error = None
+    if q:
+        q = q.strip().lower()
+        try:
+            rows = await db.execute(
+                text("SELECT * FROM torrent_items WHERE info_hash = :h ORDER BY created_at DESC").bindparams(h=q)
+            )
+            results = [dict(r) for r in rows.mappings().all()]
+        except Exception as e:
+            error = str(e)
+
+    return templates.TemplateResponse("search_hash.html", {
+        "request": request, "results": results, "query": q or "", "error": error,
+    })
+
+
+@router.get("/search/tmdb", response_class=HTMLResponse)
+async def search_tmdb_page(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    q: str = None,
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    results = []
+    error = None
+    if q:
+        try:
+            tmdb_id = int(q.strip())
+            rows = await db.execute(
+                text("""
+                    SELECT raw_title, size, info_hash, trackers, indexer,
+                           seeders, languages, type, tmdb_id, created_at, updated_at
+                    FROM torrent_items
+                    WHERE tmdb_id = :tid
+                    ORDER BY seeders DESC
+                    LIMIT 500
+                """).bindparams(tid=tmdb_id)
+            )
+            results = [dict(r) for r in rows.mappings().all()]
+        except ValueError:
+            error = "Le TMDB ID doit être un entier."
+        except Exception as e:
+            error = str(e)
+
+    return templates.TemplateResponse("search_tmdb.html", {
+        "request": request, "results": results, "query": q or "", "error": error,
+    })
+
+
+# ── Metadata Mappings ─────────────────────────────────────────────────────────
+
+@router.get("/mappings", response_class=HTMLResponse)
+async def list_mappings(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    from stream_fusion.services.postgresql.dao.metadatamapping_dao import MetadataMappingDAO
+    dao = MetadataMappingDAO(db)
+    mappings = await dao.list_all()
+    return templates.TemplateResponse("mappings.html", {"request": request, "mappings": mappings})
+
+
+@router.post("/mappings/create")
+async def create_mapping(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    imdb_id: str = Form(...),
+    tmdb_id: str = Form(None),
+    title_override: str = Form(None),
+    media_type: str = Form("series"),
+    notes: str = Form(None),
+    search_titles: str = Form(None),
+    year_override: int = Form(None),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    from stream_fusion.services.postgresql.dao.metadatamapping_dao import MetadataMappingDAO
+    dao = MetadataMappingDAO(db)
+    parsed_search_titles = [t.strip() for t in search_titles.split(",") if t.strip()] if search_titles else None
+    try:
+        mapping = await dao.create(
+            imdb_id=imdb_id.strip(),
+            tmdb_id=tmdb_id.strip() if tmdb_id else None,
+            title_override=title_override.strip() if title_override else None,
+            media_type=media_type,
+            notes=notes.strip() if notes else None,
+            search_titles=parsed_search_titles,
+            year_override=year_override,
+        )
+        logger.info(f"Admin: metadata mapping created for {imdb_id}")
+        return JSONResponse({"success": True, "id": mapping.id})
+    except Exception as e:
+        logger.error(f"Admin: failed to create mapping: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/mappings/edit")
+async def edit_mapping(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    mapping_id: int = Form(...),
+    imdb_id: str = Form(...),
+    tmdb_id: str = Form(None),
+    title_override: str = Form(None),
+    media_type: str = Form("series"),
+    notes: str = Form(None),
+    search_titles: str = Form(None),
+    year_override: int = Form(None),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    from stream_fusion.services.postgresql.dao.metadatamapping_dao import MetadataMappingDAO
+    dao = MetadataMappingDAO(db)
+    parsed_search_titles = [t.strip() for t in search_titles.split(",") if t.strip()] if search_titles else None
+    try:
+        await dao.update(
+            mapping_id=mapping_id,
+            imdb_id=imdb_id.strip(),
+            tmdb_id=tmdb_id.strip() if tmdb_id else None,
+            title_override=title_override.strip() if title_override else None,
+            media_type=media_type,
+            notes=notes.strip() if notes else None,
+            search_titles=parsed_search_titles,
+            year_override=year_override,
+        )
+        logger.info(f"Admin: metadata mapping {mapping_id} updated")
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"Admin: failed to update mapping {mapping_id}: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.get("/config", response_class=HTMLResponse)
+async def config_page(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+    cfg = _build_config_view(settings)
+    return templates.TemplateResponse("config_page.html", {"request": request, "cfg": cfg})
+
+
+@router.post("/mappings/delete")
+async def delete_mapping(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    mapping_id: int = Form(...),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    from stream_fusion.services.postgresql.dao.metadatamapping_dao import MetadataMappingDAO
+    dao = MetadataMappingDAO(db)
+    try:
+        await dao.delete(mapping_id)
+        logger.info(f"Admin: metadata mapping {mapping_id} deleted")
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"Admin: failed to delete mapping {mapping_id}: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)

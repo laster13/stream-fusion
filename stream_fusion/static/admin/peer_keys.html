@@ -1,165 +1,239 @@
 {% extends "base.html" %}
+{% block title %}Peer Keys — StreamFusion Admin{% endblock %}
+{% block page_title %}Peer Keys{% endblock %}
+
+{% block extra_head %}
+<style>
+    .key-uuid { font-family: var(--bs-font-monospace); font-size: 0.78rem; color: #67d7f0; letter-spacing: 0.01em; }
+    .date-abs  { font-size: 0.8rem; }
+    .date-rel  { font-size: 0.72rem; color: var(--bs-secondary-color); }
+</style>
+{% endblock %}
+
 {% block content %}
 
-<style>
-  .peer-key-table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0 8px;
-  }
-  .peer-key-table th, .peer-key-table td {
-    padding: 12px;
-    text-align: left;
-  }
-  .peer-key-table th {
-    background-color: rgba(255, 255, 255, 0.1);
-  }
-  .peer-key-table tr {
-    background-color: rgba(255, 255, 255, 0.05);
-  }
-  .peer-key-table tr:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-  }
-  .key-id-cell {
-    font-family: monospace;
-    font-size: 0.9em;
-    color: #ff79c6;
-  }
-  .action-buttons {
-    display: flex;
-    gap: 5px;
-  }
-  .action-buttons form {
-    display: inline;
-  }
-  .btn {
-    padding: 5px 10px;
-    font-size: 14px;
-    border: none;
-    cursor: pointer;
-  }
-  .btn-secondary { background-color: #2f6746; color: #f8f8f2; }
-  .btn-warning   { background-color: #ffb86c; color: #282a36; }
-  .btn-danger    { background-color: #ff5555; color: #f8f8f2; }
-  .btn-primary   { background-color: #697ec0; color: #35363d; }
-  .btn-info      { background-color: #8be9fd; color: #282a36; }
-  .header-container {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-  }
-  .btn-create-key {
-    background-color: #4CAF50;
-    color: white;
-    padding: 10px 20px;
-    font-size: 16px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    transition: background-color 0.3s;
-    text-decoration: none;
-  }
-  .btn-create-key:hover { background-color: #45a049; }
-  .nav-links { display: flex; gap: 10px; align-items: center; }
-  .badge-active   { background-color: #50fa7b; color: #282a36; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; }
-  .badge-inactive { background-color: #ff5555; color: #f8f8f2; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; }
-  .secret-box {
-    background-color: #282a36;
-    border: 1px solid #ffb86c;
-    border-radius: 6px;
-    padding: 16px;
-    margin-bottom: 24px;
-  }
-  .secret-box code {
-    word-break: break-all;
-    color: #50fa7b;
-  }
-</style>
-
-<div class="header-container">
-  <h1 class="mb-0">Peer Keys</h1>
-  <div class="nav-links">
-    <a href="{{ url_for('list_api_keys')(request) }}" class="btn btn-info">API Keys</a>
-    <a href="{{ url_for('create_peer_key_page')(request) }}" class="btn-create-key">Create a new peer key</a>
-  </div>
-</div>
-
 {% if new_key %}
-<div class="secret-box">
-  <strong style="color: #ffb86c;">Save these credentials now — the secret will never be shown again.</strong>
-  <br><br>
-  <strong>Key ID:</strong> <code>{{ new_key.key_id }}</code>
-  <button class="btn btn-primary copy-btn" data-value="{{ new_key.key_id }}" style="margin-left:8px;">Copy</button>
-  <br>
-  <strong>Secret:</strong> <code>{{ new_key.secret }}</code>
-  <button class="btn btn-primary copy-btn" data-value="{{ new_key.secret }}" style="margin-left:8px;">Copy</button>
+<div class="alert border mb-4" style="background:rgba(255,184,108,0.1);border-color:rgba(255,184,108,0.4)!important;border-radius:10px;">
+    <div class="d-flex align-items-center gap-2 mb-3">
+        <i class="bi bi-exclamation-triangle-fill text-warning fs-5"></i>
+        <strong class="text-warning">Sauvegardez ces identifiants maintenant — le secret ne sera plus affiché.</strong>
+    </div>
+    <div class="mb-2">
+        <label class="form-label mb-1" style="font-size:0.75rem;color:var(--bs-secondary-color);">KEY ID</label>
+        <div class="d-flex align-items-center gap-2">
+            <code class="text-info" style="font-size:0.85rem;word-break:break-all;">{{ new_key.key_id }}</code>
+            <button class="btn btn-sm btn-outline-secondary copy-btn flex-shrink-0" data-value="{{ new_key.key_id }}">
+                <i class="bi bi-clipboard"></i>
+            </button>
+        </div>
+    </div>
+    <div>
+        <label class="form-label mb-1" style="font-size:0.75rem;color:var(--bs-secondary-color);">SECRET</label>
+        <div class="d-flex align-items-center gap-2">
+            <code class="text-success" style="font-size:0.85rem;word-break:break-all;">{{ new_key.secret }}</code>
+            <button class="btn btn-sm btn-outline-secondary copy-btn flex-shrink-0" data-value="{{ new_key.secret }}">
+                <i class="bi bi-clipboard"></i>
+            </button>
+        </div>
+    </div>
 </div>
 {% endif %}
 
-<table class="peer-key-table" id="peerKeyTable">
-  <thead>
-    <tr>
-      <th>Key ID</th>
-      <th>Name</th>
-      <th>Rate Limit</th>
-      <th>Status</th>
-      <th>Last Used</th>
-      <th>Total Queries</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for key in keys %}
-    <tr>
-      <td class="key-id-cell">
-        <code>{{ key.key_id[:8] }}…</code>
-        <button class="btn btn-primary copy-btn" data-value="{{ key.key_id }}" style="margin-left:4px;">Copy</button>
-      </td>
-      <td>{{ key.name }}</td>
-      <td>{{ key.rate_limit }} req / {{ key.rate_window }}s</td>
-      <td>
-        {% if key.is_active %}
-          <span class="badge-active">Active</span>
-        {% else %}
-          <span class="badge-inactive">Revoked</span>
-        {% endif %}
-      </td>
-      <td>{{ key.last_used_at or 'Never' }}</td>
-      <td>{{ key.total_queries }}</td>
-      <td>
-        <div class="action-buttons">
-          {% if key.is_active %}
-          <form action="{{ url_for('revoke_peer_key')(request) }}" method="post" class="d-inline">
-            <input type="hidden" name="key_id" value="{{ key.key_id }}">
-            <button type="submit" class="btn btn-warning btn-sm">Revoke</button>
-          </form>
-          {% endif %}
-          <form action="{{ url_for('delete_peer_key')(request) }}" method="post" class="d-inline">
-            <input type="hidden" name="key_id" value="{{ key.key_id }}">
-            <button type="submit" class="btn btn-danger btn-sm"
-                    onclick="return confirm('Delete this peer key permanently?')">Delete</button>
-          </form>
+<!-- Controls -->
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        <input type="text" id="searchInput" class="form-control form-control-sm"
+               style="width:200px;" placeholder="Rechercher par nom…">
+        <div class="btn-group btn-group-sm" role="group">
+            <button class="btn btn-outline-secondary filter-btn active" data-filter="all">Toutes <span class="badge bg-secondary ms-1">{{ keys|length }}</span></button>
+            <button class="btn btn-outline-success filter-btn" data-filter="active">Actives <span class="badge bg-success ms-1">{{ keys | selectattr('is_active') | list | length }}</span></button>
+            <button class="btn btn-outline-danger filter-btn" data-filter="revoked">Révoquées <span class="badge bg-danger ms-1">{{ keys | rejectattr('is_active') | list | length }}</span></button>
         </div>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+    </div>
+    <a href="{{ url_for('create_peer_key_page')(request) }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-plus-lg me-1"></i>Nouvelle peer key
+    </a>
+</div>
 
+<!-- Table -->
+<div class="table-responsive">
+    <table class="table table-hover align-middle" id="peerTable">
+        <thead>
+            <tr style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--bs-secondary-color);">
+                <th class="sortable" data-col="0" style="cursor:pointer;">Key ID <i class="bi bi-chevron-expand ms-1 sort-icon"></i></th>
+                <th class="sortable" data-col="1" style="cursor:pointer;">Nom <i class="bi bi-chevron-expand ms-1 sort-icon"></i></th>
+                <th>Rate Limit</th>
+                <th class="sortable" data-col="3" style="cursor:pointer;">Statut <i class="bi bi-chevron-expand ms-1 sort-icon"></i></th>
+                <th class="sortable" data-col="4" style="cursor:pointer;">Créé le <i class="bi bi-chevron-expand ms-1 sort-icon"></i></th>
+                <th class="sortable" data-col="5" style="cursor:pointer;">Dernière utilisation <i class="bi bi-chevron-expand ms-1 sort-icon"></i></th>
+                <th class="sortable" data-col="6" style="cursor:pointer; text-align:right;">Requêtes <i class="bi bi-chevron-expand ms-1 sort-icon"></i></th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+            {% for key in keys %}
+            <tr data-status="{% if key.is_active %}active{% else %}revoked{% endif %}"
+                data-search="{{ key.name }} {{ key.key_id }}">
+                <td>
+                    <span class="key-uuid">{{ key.key_id }}</span>
+                    <button class="btn btn-link btn-sm p-0 ms-1 copy-btn text-secondary" title="Copier"
+                            data-value="{{ key.key_id }}">
+                        <i class="bi bi-clipboard"></i>
+                    </button>
+                </td>
+                <td style="font-size:0.875rem;">{{ key.name }}</td>
+                <td style="font-size:0.8rem;color:var(--bs-secondary-color);">
+                    {{ key.rate_limit }} req / {{ key.rate_window }}s
+                </td>
+                <td>
+                    {% if key.is_active %}
+                    <span class="badge bg-success-subtle text-success border border-success-subtle">Actif</span>
+                    {% else %}
+                    <span class="badge bg-danger-subtle text-danger border border-danger-subtle">Révoqué</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="date-abs">{{ key.created_at | fmt_date }}</span>
+                </td>
+                <td>
+                    <div class="date-abs">{{ key.last_used_at | fmt_relative }}</div>
+                    {% if key.last_used_at %}
+                    <div class="date-rel">{{ key.last_used_at | fmt_date }}</div>
+                    {% endif %}
+                </td>
+                <td style="text-align:right;font-size:0.875rem;font-variant-numeric:tabular-nums;">
+                    {{ "{:,}".format(key.total_queries) }}
+                </td>
+                <td>
+                    <div class="d-flex gap-1">
+                        {% if key.is_active %}
+                        <form action="{{ url_for('revoke_peer_key')(request) }}" method="post" class="d-inline">
+                            <input type="hidden" name="key_id" value="{{ key.key_id }}">
+                            <button type="submit" class="btn btn-sm btn-outline-warning" title="Révoquer">
+                                <i class="bi bi-pause-fill"></i>
+                            </button>
+                        </form>
+                        {% endif %}
+                        <button type="button" class="btn btn-sm btn-outline-danger delete-btn" title="Supprimer"
+                                data-key-id="{{ key.key_id }}" data-name="{{ key.name }}">
+                            <i class="bi bi-trash3"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div id="emptyMsg" class="text-center text-secondary py-4 d-none">
+        <i class="bi bi-search fs-4 d-block mb-2"></i>Aucune peer key ne correspond au filtre.
+    </div>
+</div>
+
+<!-- Delete confirm modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h6 class="modal-title fw-semibold">Supprimer la peer key</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-2">
+                Supprimer définitivement la peer key <strong id="deleteKeyName" class="text-info"></strong> ?
+                <div class="text-secondary mt-1" style="font-size:0.8rem;">Cette action est irréversible.</div>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Annuler</button>
+                <form id="deleteForm" action="{{ url_for('delete_peer_key')(request) }}" method="post" class="d-inline">
+                    <input type="hidden" name="key_id" id="deleteKeyInput">
+                    <button type="submit" class="btn btn-danger btn-sm"><i class="bi bi-trash3 me-1"></i>Supprimer</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
 <script>
-  document.addEventListener('DOMContentLoaded', function () {
-    document.querySelectorAll('.copy-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const val = btn.dataset.value;
-        navigator.clipboard.writeText(val).then(() => {
-          const orig = btn.textContent;
-          btn.textContent = 'Copied!';
-          setTimeout(() => { btn.textContent = orig; }, 1500);
-        });
-      });
-    });
-  });
-</script>
+const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+let activeFilter = 'all';
+let searchQuery = '';
 
+// ── Copy buttons ──
+document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.value).then(() => {
+            const icon = btn.querySelector('i');
+            icon.className = 'bi bi-clipboard-check text-success';
+            setTimeout(() => { icon.className = 'bi bi-clipboard'; }, 1500);
+        });
+    });
+});
+
+// ── Delete modal ──
+document.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.getElementById('deleteKeyName').textContent = btn.dataset.name;
+        document.getElementById('deleteKeyInput').value = btn.dataset.keyId;
+        deleteModal.show();
+    });
+});
+
+// ── Filter tabs ──
+document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeFilter = btn.dataset.filter;
+        applyFilters();
+    });
+});
+
+// ── Search ──
+document.getElementById('searchInput').addEventListener('input', function () {
+    searchQuery = this.value.toLowerCase();
+    applyFilters();
+});
+
+function applyFilters() {
+    let visible = 0;
+    document.querySelectorAll('#tableBody tr').forEach(row => {
+        const matchFilter =
+            activeFilter === 'all' ||
+            (activeFilter === 'active'  && row.dataset.status === 'active') ||
+            (activeFilter === 'revoked' && row.dataset.status === 'revoked');
+        const matchSearch = !searchQuery || row.dataset.search.toLowerCase().includes(searchQuery);
+        const show = matchFilter && matchSearch;
+        row.style.display = show ? '' : 'none';
+        if (show) visible++;
+    });
+    document.getElementById('emptyMsg').classList.toggle('d-none', visible > 0);
+}
+
+// ── Sort ──
+const tbody = document.getElementById('tableBody');
+let sortState = { col: null, dir: 'asc' };
+
+document.querySelectorAll('th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+        const col = parseInt(th.dataset.col);
+        const dir = sortState.col === col && sortState.dir === 'asc' ? 'desc' : 'asc';
+        sortState = { col, dir };
+
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort((a, b) => {
+            const av = a.querySelectorAll('td')[col]?.textContent.trim() || '';
+            const bv = b.querySelectorAll('td')[col]?.textContent.trim() || '';
+            const isNum = col === 6;
+            const cmp = isNum ? (+av.replace(/,/g,'')) - (+bv.replace(/,/g,'')) : av.localeCompare(bv);
+            return dir === 'asc' ? cmp : -cmp;
+        });
+        rows.forEach(r => tbody.appendChild(r));
+
+        document.querySelectorAll('th.sortable .sort-icon').forEach(i => { i.className = 'bi bi-chevron-expand ms-1 sort-icon'; });
+        th.querySelector('.sort-icon').className = `bi bi-chevron-${dir === 'asc' ? 'up' : 'down'} ms-1 sort-icon`;
+    });
+});
+</script>
 {% endblock %}

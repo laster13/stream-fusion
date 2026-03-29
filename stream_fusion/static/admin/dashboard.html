@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — StreamFusion Admin{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-xl-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value text-primary">{{ active_keys }}</div>
+                    <div class="stat-label">Clés API actives</div>
+                </div>
+                <i class="bi bi-key stat-icon text-primary"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value text-success">{{ active_peers }}</div>
+                    <div class="stat-label">Peer Keys actives</div>
+                </div>
+                <i class="bi bi-diagram-3 stat-icon text-success"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value text-warning">{{ "{:,}".format(debrid_cache_count) }}</div>
+                    <div class="stat-label">Cache debrid</div>
+                </div>
+                <i class="bi bi-database stat-icon text-warning"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value text-info">{{ "{:,}".format(torrent_count) }}</div>
+                    <div class="stat-label">Torrents indexés</div>
+                </div>
+                <i class="bi bi-magnet stat-icon text-info"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="stat-card h-100">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-lightning-charge me-2 text-primary"></i>Actions rapides</h6>
+            <div class="d-flex flex-column gap-2">
+                <a href="{{ url_for('create_api_key_page')(request) }}" class="btn btn-sm btn-outline-primary text-start">
+                    <i class="bi bi-plus-circle me-2"></i>Créer une clé API
+                </a>
+                <a href="{{ url_for('create_peer_key_page')(request) }}" class="btn btn-sm btn-outline-success text-start">
+                    <i class="bi bi-plus-circle me-2"></i>Créer une peer key
+                </a>
+                <a href="{{ url_for('list_mappings')(request) }}" class="btn btn-sm btn-outline-info text-start">
+                    <i class="bi bi-arrow-left-right me-2"></i>Gérer les mappings
+                </a>
+                <a href="{{ url_for('config_page')(request) }}" class="btn btn-sm btn-outline-secondary text-start">
+                    <i class="bi bi-gear me-2"></i>Configuration de l'instance
+                </a>
+                <a href="{{ url_for('maintenance_page')(request) }}" class="btn btn-sm btn-outline-warning text-start">
+                    <i class="bi bi-tools me-2"></i>Maintenance
+                </a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="stat-card h-100">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-info-circle me-2 text-secondary"></i>Base de données</h6>
+            <dl class="mb-0" style="font-size:0.85rem;">
+                <div class="d-flex justify-content-between py-1 border-bottom border-secondary border-opacity-25">
+                    <dt class="fw-normal" style="color:var(--bs-secondary-color);">Redis</dt>
+                    <dd class="mb-0 {% if redis_ok %}text-success{% else %}text-danger{% endif %}">
+                        {% if redis_ok %}<i class="bi bi-check-circle-fill"></i> Connecté{% else %}<i class="bi bi-x-circle-fill"></i> Hors ligne{% endif %}
+                    </dd>
+                </div>
+                <div class="d-flex justify-content-between py-1 border-bottom border-secondary border-opacity-25">
+                    <dt class="fw-normal" style="color:var(--bs-secondary-color);">PostgreSQL</dt>
+                    <dd class="mb-0 text-success"><i class="bi bi-check-circle-fill"></i> Connecté</dd>
+                </div>
+                <div class="d-flex justify-content-between py-1 border-bottom border-secondary border-opacity-25">
+                    <dt class="fw-normal" style="color:var(--bs-secondary-color);">Cache debrid</dt>
+                    <dd class="mb-0">{{ "{:,}".format(debrid_cache_count) }} entrées</dd>
+                </div>
+                <div class="d-flex justify-content-between py-1">
+                    <dt class="fw-normal" style="color:var(--bs-secondary-color);">Torrents indexés</dt>
+                    <dd class="mb-0">{{ "{:,}".format(torrent_count) }}</dd>
+                </div>
+            </dl>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mt-1">
+    <div class="col-12">
+        <div class="stat-card">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-search me-2 text-info"></i>Recherche dans la base</h6>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <form action="{{ url_for('search_hash_page')(request) }}" method="get" class="d-flex gap-2">
+                        <input type="text" name="q" class="form-control form-control-sm font-monospace"
+                               placeholder="info_hash (40 car. hex)" maxlength="40"
+                               style="font-size:0.82rem;">
+                        <button type="submit" class="btn btn-sm btn-outline-info flex-shrink-0">
+                            <i class="bi bi-hash me-1"></i>Par hash
+                        </button>
+                    </form>
+                </div>
+                <div class="col-md-6">
+                    <form action="{{ url_for('search_tmdb_page')(request) }}" method="get" class="d-flex gap-2">
+                        <input type="number" name="q" class="form-control form-control-sm"
+                               placeholder="TMDB ID (ex : 272565)" min="1"
+                               style="font-size:0.82rem;">
+                        <button type="submit" class="btn btn-sm btn-outline-primary flex-shrink-0">
+                            <i class="bi bi-film me-1"></i>Par TMDB ID
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

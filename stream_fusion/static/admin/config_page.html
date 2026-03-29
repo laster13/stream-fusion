@@ -1,0 +1,373 @@
+{% extends "base.html" %}
+{% block title %}Configuration — StreamFusion Admin{% endblock %}
+{% block page_title %}Configuration de l'instance{% endblock %}
+
+{% block extra_head %}
+<style>
+    .cfg-card {
+        border: 1px solid var(--bs-border-color);
+        border-radius: 10px;
+        background: var(--bs-secondary-bg);
+        overflow: hidden;
+        height: 100%;
+    }
+    .cfg-card-header {
+        padding: 13px 20px;
+        border-bottom: 1px solid var(--bs-border-color);
+        font-weight: 600;
+        font-size: 0.875rem;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .cfg-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 20px;
+        border-bottom: 1px solid var(--bs-border-color);
+        gap: 12px;
+        font-size: 0.83rem;
+        min-height: 38px;
+    }
+    .cfg-row:last-child { border-bottom: none; }
+    .cfg-label {
+        color: var(--bs-secondary-color);
+        flex-shrink: 0;
+    }
+    .cfg-value {
+        font-weight: 500;
+        text-align: right;
+        word-break: break-all;
+    }
+    .cfg-mono {
+        font-family: var(--bs-font-monospace);
+        font-size: 0.8rem;
+        color: var(--bs-body-color);
+    }
+
+    /* Indexer table */
+    .idx-table {
+        width: 100%;
+        font-size: 0.82rem;
+        border-collapse: collapse;
+    }
+    .idx-table th {
+        padding: 8px 20px;
+        color: var(--bs-secondary-color);
+        font-weight: 500;
+        border-bottom: 1px solid var(--bs-border-color);
+        text-align: left;
+    }
+    .idx-table td {
+        padding: 8px 20px;
+        border-bottom: 1px solid var(--bs-border-color);
+        vertical-align: middle;
+    }
+    .idx-table tr:last-child td { border-bottom: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if cfg.session_key_is_default %}
+<div class="alert alert-danger d-flex align-items-center gap-2 mb-4" role="alert" style="font-size:0.875rem;">
+    <i class="bi bi-shield-exclamation fs-5 flex-shrink-0"></i>
+    <div>
+        <strong>Avertissement de sécurité :</strong> La variable <code>SESSION_KEY</code> utilise la valeur par défaut non sécurisée.
+        Définissez <code>SESSION_KEY</code> dans vos variables d'environnement avec une valeur unique et secrète.
+    </div>
+</div>
+{% endif %}
+
+<div class="row g-3">
+
+    <!-- Général -->
+    <div class="col-md-6">
+        <div class="cfg-card">
+            <div class="cfg-card-header">
+                <i class="bi bi-gear text-primary"></i> Général
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Hôte</span>
+                <span class="cfg-value cfg-mono">{{ cfg.general.host }}:{{ cfg.general.port }}</span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Workers</span>
+                <span class="cfg-value">{{ cfg.general.workers_count }}</span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">HTTPS</span>
+                <span class="cfg-value">
+                    {% if cfg.general.use_https %}<span class="badge bg-success">Activé</span>{% else %}<span class="badge bg-secondary">Désactivé</span>{% endif %}
+                </span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Log level</span>
+                <span class="cfg-value cfg-mono">{{ cfg.general.log_level }}</span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Debug</span>
+                <span class="cfg-value">
+                    {% if cfg.general.debug %}<span class="badge bg-warning text-dark">Activé</span>{% else %}<span class="badge bg-secondary">Désactivé</span>{% endif %}
+                </span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Debrid downloads</span>
+                <span class="cfg-value">
+                    {% if cfg.general.allow_debrid_download %}<span class="badge bg-success">Autorisé</span>{% else %}<span class="badge bg-secondary">Masqué</span>{% endif %}
+                </span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Service préféré</span>
+                <span class="cfg-value">
+                    {% if cfg.general.download_service %}<span class="cfg-mono">{{ cfg.general.download_service }}</span>{% else %}<span class="text-secondary">Non défini</span>{% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sécurité -->
+    <div class="col-md-6">
+        <div class="cfg-card">
+            <div class="cfg-card-header">
+                <i class="bi bi-shield-lock text-warning"></i> Sécurité
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">SESSION_KEY</span>
+                <span class="cfg-value">
+                    {% if cfg.security.session_key_is_default %}
+                        <span class="badge bg-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>Défaut — non sécurisé</span>
+                    {% else %}
+                        <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Personnalisé</span>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Clé API secrète</span>
+                <span class="cfg-value">
+                    {% if cfg.security.secret_api_key_set %}<span class="badge bg-success">Configurée</span>{% else %}<span class="badge bg-secondary">Non configurée</span>{% endif %}
+                </span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Masquer la doc API</span>
+                <span class="cfg-value">
+                    {% if cfg.security.security_hide_docs %}<span class="badge bg-success">Oui</span>{% else %}<span class="badge bg-warning text-dark">Non</span>{% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Services Debrid -->
+    <div class="col-12">
+        <div class="cfg-card">
+            <div class="cfg-card-header">
+                <i class="bi bi-cloud-arrow-down text-info"></i> Services Debrid
+            </div>
+            <table class="idx-table">
+                <thead>
+                    <tr>
+                        <th>Service</th>
+                        <th>Token / Credentials</th>
+                        <th>Compte unique</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for svc in cfg.debrid %}
+                    <tr>
+                        <td class="fw-500">{{ svc.name }}</td>
+                        <td>
+                            {% if svc.token_set %}
+                                <span class="badge bg-success">Configuré</span>
+                            {% else %}
+                                <span class="badge bg-secondary text-white-50">Non configuré</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if svc.unique %}
+                                <span class="badge bg-primary">Serveur</span>
+                            {% else %}
+                                <span class="badge bg-secondary text-white-50">Non</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Proxy -->
+    <div class="col-md-6">
+        <div class="cfg-card">
+            <div class="cfg-card-header">
+                <i class="bi bi-hdd-network text-secondary"></i> Proxy
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Proxy URL</span>
+                <span class="cfg-value cfg-mono">
+                    {% if cfg.proxy.proxy_url %}{{ cfg.proxy.proxy_url }}{% else %}<span class="text-secondary">Non configuré</span>{% endif %}
+                </span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Playback proxy</span>
+                <span class="cfg-value">
+                    {% if cfg.proxy.playback_proxy is none %}<span class="badge bg-secondary">Auto</span>
+                    {% elif cfg.proxy.playback_proxy %}<span class="badge bg-success">Activé</span>
+                    {% else %}<span class="badge bg-secondary">Désactivé</span>{% endif %}
+                </span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Buffer size</span>
+                <span class="cfg-value">{{ cfg.proxy.proxy_buffer_size_kb }} KB</span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Rate limit</span>
+                <span class="cfg-value">{{ cfg.proxy.playback_limit_requests }} req / {{ cfg.proxy.playback_limit_seconds }}s</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Peer -->
+    <div class="col-md-6">
+        <div class="cfg-card">
+            <div class="cfg-card-header">
+                <i class="bi bi-diagram-3 text-success"></i> Peer Cache
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">URL Peer</span>
+                <span class="cfg-value cfg-mono">
+                    {% if cfg.peer.url %}{{ cfg.peer.url }}{% else %}<span class="text-secondary">Non configuré</span>{% endif %}
+                </span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Key ID</span>
+                <span class="cfg-value">
+                    {% if cfg.peer.key_id_set %}<span class="badge bg-success">Configuré</span>{% else %}<span class="badge bg-secondary">Non configuré</span>{% endif %}
+                </span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Secret</span>
+                <span class="cfg-value">
+                    {% if cfg.peer.secret_set %}<span class="badge bg-success">Configuré</span>{% else %}<span class="badge bg-secondary">Non configuré</span>{% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Indexeurs -->
+    <div class="col-12">
+        <div class="cfg-card">
+            <div class="cfg-card-header">
+                <i class="bi bi-search text-primary"></i> Indexeurs
+            </div>
+            <table class="idx-table">
+                <thead>
+                    <tr>
+                        <th>Indexeur</th>
+                        <th>Activé</th>
+                        <th>URL</th>
+                        <th>Clé / Passkey</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for idx in cfg.indexers %}
+                    <tr>
+                        <td class="fw-500">{{ idx.name }}</td>
+                        <td>
+                            {% if idx.enabled %}
+                                <span class="badge bg-success">Oui</span>
+                            {% else %}
+                                <span class="badge bg-secondary text-white-50">Non</span>
+                            {% endif %}
+                        </td>
+                        <td class="cfg-mono" style="color:var(--bs-secondary-color);font-size:0.78rem;">{{ idx.url }}</td>
+                        <td>
+                            {% if idx.key_set is none %}
+                                <span class="text-secondary" style="font-size:0.78rem;">—</span>
+                            {% elif idx.key_set %}
+                                <span class="badge bg-success">Configurée</span>
+                            {% else %}
+                                <span class="badge bg-secondary text-white-50">Non configurée</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TMDB -->
+    <div class="col-md-4">
+        <div class="cfg-card">
+            <div class="cfg-card-header">
+                <i class="bi bi-film text-warning"></i> TMDB
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Langue</span>
+                <span class="cfg-value cfg-mono">{{ cfg.tmdb.language }}</span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">API Key</span>
+                <span class="cfg-value">
+                    {% if cfg.tmdb.api_key_set %}<span class="badge bg-success">Configurée</span>{% else %}<span class="badge bg-secondary">Non configurée</span>{% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Redis -->
+    <div class="col-md-4">
+        <div class="cfg-card">
+            <div class="cfg-card-header">
+                <i class="bi bi-hdd-stack text-danger"></i> Redis
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Hôte</span>
+                <span class="cfg-value cfg-mono">{{ cfg.redis.host }}:{{ cfg.redis.port }}</span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Base (DB)</span>
+                <span class="cfg-value cfg-mono">{{ cfg.redis.db }}</span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Expiration</span>
+                <span class="cfg-value">{{ cfg.redis.expiration_days }} jours</span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Mot de passe</span>
+                <span class="cfg-value">
+                    {% if cfg.redis.password_set %}<span class="badge bg-success">Configuré</span>{% else %}<span class="badge bg-secondary">Non configuré</span>{% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- PostgreSQL -->
+    <div class="col-md-4">
+        <div class="cfg-card">
+            <div class="cfg-card-header">
+                <i class="bi bi-database text-primary"></i> PostgreSQL
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Hôte</span>
+                <span class="cfg-value cfg-mono">{{ cfg.postgresql.host }}:{{ cfg.postgresql.port }}</span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Base</span>
+                <span class="cfg-value cfg-mono">{{ cfg.postgresql.database }}</span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Utilisateur</span>
+                <span class="cfg-value cfg-mono">{{ cfg.postgresql.user }}</span>
+            </div>
+            <div class="cfg-row">
+                <span class="cfg-label">Pool size</span>
+                <span class="cfg-value">{{ cfg.postgresql.pool_size }} (overflow +{{ cfg.postgresql.max_overflow }})</span>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

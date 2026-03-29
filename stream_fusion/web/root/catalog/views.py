@@ -141,6 +141,16 @@ async def create_meta_object(details, item_type: str, imdb_id: str, include_epis
 
 
 async def get_tmdb_id_from_imdb(imdb_id: str) -> str:
+    # Check DB mapping first to avoid unnecessary TMDB API calls
+    try:
+        from stream_fusion.services.postgresql.dao.metadatamapping_dao import lookup_mapping_by_imdb_id
+        db_mapping = await lookup_mapping_by_imdb_id(imdb_id)
+        if db_mapping and db_mapping.tmdb_id:
+            logger.debug(f"catalog: DB mapping {imdb_id} → tmdb_id={db_mapping.tmdb_id}")
+            return db_mapping.tmdb_id
+    except Exception as e:
+        logger.warning(f"catalog: DB mapping lookup failed for {imdb_id}: {e}")
+
     results = await asyncio.to_thread(find.find_by_imdb_id, imdb_id)
     if results.movie_results:
         return results.movie_results[0]["id"]
@@ -332,8 +342,19 @@ async def get_catalog(
                         imdb_id = cached_imdb_id.decode('utf-8') if isinstance(cached_imdb_id, bytes) else cached_imdb_id
                         logger.debug(f"IMDb ID found in cache for TMDB ID {tmdb_id}: {imdb_id}")
                     else:
-                        external_ids = await asyncio.to_thread(tv.external_ids, tmdb_id)
-                        imdb_id = external_ids.get("imdb_id")
+                        # Check DB mapping before hitting TMDB API
+                        try:
+                            from stream_fusion.services.postgresql.dao.metadatamapping_dao import lookup_mapping_by_tmdb_id
+                            db_mapping = await lookup_mapping_by_tmdb_id(str(tmdb_id))
+                            if db_mapping and db_mapping.imdb_id:
+                                imdb_id = db_mapping.imdb_id
+                                logger.debug(f"catalog: DB mapping tmdb_id={tmdb_id} → {imdb_id}")
+                            else:
+                                external_ids = await asyncio.to_thread(tv.external_ids, tmdb_id)
+                                imdb_id = external_ids.get("imdb_id")
+                        except Exception:
+                            external_ids = await asyncio.to_thread(tv.external_ids, tmdb_id)
+                            imdb_id = external_ids.get("imdb_id")
 
                 if not imdb_id:
                     logger.warning(f"No IMDb ID found for TMDB ID: {tmdb_id}")
