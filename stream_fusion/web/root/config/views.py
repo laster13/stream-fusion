@@ -44,6 +44,8 @@ async def configure(request: Request):
         "lacale_unique_account": settings.lacale_unique_account,
         "generationfree_enable": settings.generationfree_enable,
         "generationfree_unique_account": settings.generationfree_unique_account,
+        "pm_unique_account": settings.pm_unique_account,
+        "allow_public_key_registration": settings.allow_public_key_registration,
     })
 
 
