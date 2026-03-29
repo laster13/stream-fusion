@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     # Set ALLOW_DEBRID_DOWNLOAD=false on public instances to prevent users from
     # triggering debrid downloads directly from Stremio.
     allow_debrid_download: bool = True
+    # When True, a public self-registration page is available at /register for users to
+    # generate their own API keys. Set ALLOW_PUBLIC_KEY_REGISTRATION=true on open/public
+    # instances. Defaults to False (admin-managed keys only).
+    allow_public_key_registration: bool = False
     no_cache_video_language: NoCacheVideoLanguages = NoCacheVideoLanguages.FR
 
     # PROXY

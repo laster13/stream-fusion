@@ -13,13 +13,18 @@ document.addEventListener('DOMContentLoaded', function () {
     updateProviderFields();
     updateDebridOrderList();
     toggleStremThruFields();
-    
+
+    // Appliqué en dernier via setTimeout(0) pour garantir que tous les appels
+    // synchrones précédents (updateProviderFields, etc.) sont terminés avant
+    // de figer l'état visuel des boutons OAuth sur les tokens déjà présents.
+    setTimeout(restoreAuthStates, 0);
+
     const apiKeyInput = document.getElementById('ApiKey');
     if (apiKeyInput) {
         apiKeyInput.addEventListener('blur', function() {
             validateApiKeyWithoutAlert(this.value);
         });
-        
+
         if (apiKeyInput.value && apiKeyInput.value.trim() !== '') {
             validateApiKeyWithoutAlert(apiKeyInput.value);
         }
@@ -524,11 +529,16 @@ function updateProviderFields() {
     allDebrids.forEach(id => {
         const checkbox = document.getElementById(id);
         if (!checkbox) return;
-        const isChecked = checkbox.checked || checkbox.disabled;
-        serviceStates[id] = isChecked;
+        // isActive : service compté comme actif (compte unique serveur OU activé par l'utilisateur)
+        // → utilisé pour la liste d'ordre des débrideurs et les stats globales
+        const isActive = checkbox.checked || checkbox.disabled;
+        // needsCredentials : l'utilisateur a activé le service lui-même (pas un compte unique serveur)
+        // → si disabled, le serveur possède déjà le token, l'utilisateur n'a rien à configurer
+        const needsCredentials = checkbox.checked && !checkbox.disabled;
+        serviceStates[id] = isActive;
 
         // Déterminer l'ID du div de credentials correspondant
-        let credDivId = ''; 
+        let credDivId = '';
         switch (id) {
             case 'debrid_rd': credDivId = 'rd_token_info_div'; break;
             case 'debrid_ad': credDivId = 'ad_token_info_div'; break;
@@ -541,12 +551,13 @@ function updateProviderFields() {
         }
 
         // Afficher/masquer le div de credentials
+        // On n'affiche que si l'utilisateur a activé le service lui-même (compte non-unique)
         if (credDivId) {
-            setElementDisplay(credDivId, isChecked ? 'block' : 'none');
+            setElementDisplay(credDivId, needsCredentials ? 'block' : 'none');
         }
 
         // Avertissement si un service nécessitant StremThru est coché sans que StremThru soit configuré
-        if (unimplementedDebrids.includes(id) && isChecked) {
+        if (unimplementedDebrids.includes(id) && isActive) {
             anyUnimplementedChecked = true;
         }
     });
@@ -759,6 +770,61 @@ function loadData() {
     updateDebridDownloaderOptions();
     updateDebridOrderList();
     ensureDebridConsistency();
+    restoreAuthStates();
+}
+
+// Restaure l'état visuel "connecté" des boutons OAuth quand un token est déjà présent
+// (chargement depuis URL ou retour sur la page de config avec un lien existant).
+function restoreAuthStates() {
+    // Real-Debrid
+    const rdTokenEl = document.getElementById('rd_token_info');
+    const rdBtn     = document.getElementById('rd-auth-button');
+    if (rdTokenEl && rdBtn && rdTokenEl.value && rdTokenEl.value.trim()) {
+        applyConnectedState(
+            rdBtn,
+            rdTokenEl,
+            "S'authentifier avec Real-Debrid",
+            '✓ Déjà connecté à Real-Debrid',
+            'rd-reauth-btn'
+        );
+    }
+
+    // AllDebrid
+    const adTokenEl = document.getElementById('ad_token_info');
+    const adBtn     = document.getElementById('ad-auth-button');
+    if (adTokenEl && adBtn && adTokenEl.value && adTokenEl.value.trim()) {
+        applyConnectedState(
+            adBtn,
+            adTokenEl,
+            "S'authentifier avec AllDebrid",
+            '✓ Déjà connecté à AllDebrid',
+            'ad-reauth-btn'
+        );
+    }
+}
+
+// Applique l'état visuel "connecté" sur un bouton OAuth et ajoute un lien "Reconnecter"
+function applyConnectedState(btn, tokenEl, originalText, connectedText, reauthId) {
+    btn.disabled    = true;
+    btn.textContent = connectedText;
+    btn.classList.add('opacity-50', 'cursor-not-allowed');
+
+    if (document.getElementById(reauthId)) return; // déjà injecté
+
+    const reauthBtn = document.createElement('button');
+    reauthBtn.type      = 'button';
+    reauthBtn.id        = reauthId;
+    reauthBtn.textContent = 'Reconnecter';
+    reauthBtn.className = 'btn-oauth';
+    reauthBtn.style.cssText = 'font-size:0.8rem;padding:5px 12px;opacity:0.65;margin-left:8px;';
+    reauthBtn.onclick = function () {
+        tokenEl.value = '';
+        btn.disabled  = false;
+        btn.textContent = originalText;
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        reauthBtn.remove();
+    };
+    btn.parentNode.insertBefore(reauthBtn, btn.nextSibling);
 }
 
 // Fonction pour valider l'API key
