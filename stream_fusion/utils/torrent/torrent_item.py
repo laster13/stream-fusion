@@ -1,3 +1,4 @@
+import urllib.parse
 from RTN import parse
 from RTN.models import ParsedData
 from urllib.parse import quote
@@ -8,11 +9,13 @@ from stream_fusion.logging_config import logger
 
 # Private indexer names that strip credentials before caching
 _PRIVATE_CREDENTIAL_INDEXERS = {
-    "Sharewood - API",
     "C411 - API",
     "Torr9 - API",
     "LaCale - API",
     "GenerationFree - API",
+    "ABN - API",
+    "G3MINI - API",
+    "TheOldSchool - API",
 }
 
 # Indexers that TorBox handles better than other debrid services.
@@ -23,6 +26,9 @@ _TORBOX_PREFERRED_INDEXERS = {
     "Torr9 - API",
     "LaCale - API",
     "GenerationFree - API",
+    "ABN - API",
+    "G3MINI - API",
+    "TheOldSchool - API",
 }
 
 
@@ -68,42 +74,107 @@ class TorrentItem:
         magnet = self.magnet
         torrent_download = self.torrent_download
 
-        # Only add tracker credentials when the file must be downloaded (⬇️).
-        # When the file is already cached on the debrid service (⚡), the tracker
-        # URL is not needed and exposing credentials in the stream URL is unnecessary.
+        # Only add tracker credentials when the file must be downloaded.
+        # When the file is already cached on the debrid service, credentials are not needed.
         if self.info_hash and self.indexer in _PRIVATE_CREDENTIAL_INDEXERS and not self.availability:
-            if self.indexer == "C411 - API" and settings.c411_api_key:
-                c411_tracker = settings.c411_passkey or ""
-                if c411_tracker and magnet and "&tr=" not in magnet:
-                    magnet = f"{magnet}&tr={quote(c411_tracker, safe='')}"
-                if not torrent_download:
-                    base = settings.c411_url.rstrip("/")
-                    torrent_download = f"{base}/api?t=get&id={self.info_hash}&apikey={settings.c411_api_key}"
 
-            elif self.indexer == "Torr9 - API" and settings.torr9_api_key:
-                if magnet and "&tr=" not in magnet:
-                    torr9_tracker = f"https://tracker.torr9.xyz/announce/{settings.torr9_api_key}"
+            if self.indexer == "C411 - API":
+                api_key, passkey = None, None
+                if settings.c411_unique_account and settings.c411_api_key:
+                    api_key = settings.c411_api_key
+                    passkey = settings.c411_passkey  # full announce URL
+                elif config:
+                    api_key = config.get("c411ApiKey") or settings.c411_api_key
+                    passkey = config.get("c411Passkey") or settings.c411_passkey
+                if passkey and magnet and "&tr=" not in magnet:
+                    tracker_url = f"{settings.c411_url.rstrip('/')}/announce/{passkey}"
+                    magnet = f"{magnet}&tr={quote(tracker_url, safe='')}"
+                if api_key and not torrent_download:
+                    base = settings.c411_url.rstrip("/")
+                    torrent_download = f"{base}/api?t=get&id={self.info_hash}&apikey={api_key}"
+
+            elif self.indexer == "Torr9 - API":
+                # For Torr9, passkey == api_key
+                api_key = None
+                if settings.torr9_unique_account and settings.torr9_api_key:
+                    api_key = settings.torr9_api_key
+                elif config:
+                    api_key = config.get("torr9ApiKey") or settings.torr9_api_key
+                if api_key and magnet and "&tr=" not in magnet:
+                    torr9_tracker = f"https://tracker.torr9.xyz/announce/{api_key}"
                     magnet = f"{magnet}&tr={quote(torr9_tracker, safe='')}"
 
-            elif self.indexer == "LaCale - API" and settings.lacale_api_key:
-                if magnet and "&tr=" not in magnet:
-                    lacale_tracker = f"https://tracker.lacale.fr/announce/{settings.lacale_api_key}"
+            elif self.indexer == "LaCale - API":
+                api_key = None
+                if settings.lacale_unique_account and settings.lacale_api_key:
+                    api_key = settings.lacale_api_key
+                elif config:
+                    api_key = config.get("lacaleApiKey") or settings.lacale_api_key
+                if api_key and magnet and "&tr=" not in magnet:
+                    lacale_tracker = f"https://tracker.lacale.fr/announce/{api_key}"
                     magnet = f"{magnet}&tr={quote(lacale_tracker, safe='')}"
 
-            elif self.indexer == "GenerationFree - API" and settings.generationfree_api_key:
-                if magnet and "&tr=" not in magnet:
-                    generationfree_tracker = f"https://tracker.generationfree.fr/announce/{settings.generationfree_api_key}"
-                    magnet = f"{magnet}&tr={quote(generationfree_tracker, safe='')}"
-
-            elif self.indexer == "Sharewood - API":
-                sharewood_passkey = None
-                if settings.sharewood_unique_account and settings.sharewood_passkey:
-                    sharewood_passkey = settings.sharewood_passkey
+            elif self.indexer == "GenerationFree - API":
+                api_key, passkey = None, None
+                if settings.generationfree_unique_account and settings.generationfree_api_key:
+                    api_key = settings.generationfree_api_key
+                    passkey = settings.generationfree_passkey
                 elif config:
-                    sharewood_passkey = config.get("sharewoodPasskey")
-                if sharewood_passkey and magnet and f"{settings.sharewood_url}/announce/" not in magnet:
-                    tracker = f"{settings.sharewood_url}/announce/{sharewood_passkey}"
-                    magnet = f"{magnet}&tr={quote(tracker, safe='')}"
+                    api_key = config.get("generationfreeApiKey") or settings.generationfree_api_key
+                    passkey = config.get("generationfreePasskey") or settings.generationfree_passkey
+                announce_key = passkey or api_key
+                if announce_key and magnet and "&tr=" not in magnet:
+                    base = (settings.generationfree_url or "https://generation-free.org").rstrip("/")
+                    tracker_url = f"{base}/announce/{announce_key}"
+                    magnet = f"{magnet}&tr={quote(tracker_url, safe='')}"
+                if api_key and torrent_download:
+                    torrent_download = self._inject_api_token(torrent_download, api_key)
+
+            elif self.indexer == "ABN - API":
+                api_key, passkey = None, None
+                if settings.abn_unique_account and settings.abn_api_key:
+                    api_key = settings.abn_api_key
+                    passkey = settings.abn_passkey
+                elif config:
+                    api_key = config.get("abnApiKey") or settings.abn_api_key
+                    passkey = config.get("abnPasskey") or settings.abn_passkey
+                announce_key = passkey or api_key
+                if announce_key and magnet and "&tr=" not in magnet:
+                    base = (settings.abn_url or "https://abn.lol").rstrip("/")
+                    tracker_url = f"{base}/announce/{announce_key}"
+                    magnet = f"{magnet}&tr={quote(tracker_url, safe='')}"
+                if api_key and torrent_download:
+                    torrent_download = self._inject_api_token(torrent_download, api_key)
+
+            elif self.indexer == "G3MINI - API":
+                api_key, passkey = None, None
+                if settings.g3mini_unique_account and settings.g3mini_api_key:
+                    api_key = settings.g3mini_api_key
+                    passkey = settings.g3mini_passkey
+                elif config:
+                    api_key = config.get("g3miniApiKey") or settings.g3mini_api_key
+                    passkey = config.get("g3miniPasskey") or settings.g3mini_passkey
+                if passkey and magnet and "&tr=" not in magnet:
+                    base = (settings.g3mini_url or "https://gemini-tracker.org").rstrip("/")
+                    tracker_url = f"{base}/announce/{passkey}"
+                    magnet = f"{magnet}&tr={quote(tracker_url, safe='')}"
+                if api_key and torrent_download:
+                    torrent_download = self._inject_api_token(torrent_download, api_key)
+
+            elif self.indexer == "TheOldSchool - API":
+                api_key, passkey = None, None
+                if settings.theoldschool_unique_account and settings.theoldschool_api_key:
+                    api_key = settings.theoldschool_api_key
+                    passkey = settings.theoldschool_passkey
+                elif config:
+                    api_key = config.get("theoldschoolApiKey") or settings.theoldschool_api_key
+                    passkey = config.get("theoldschoolPasskey") or settings.theoldschool_passkey
+                if passkey and magnet and "&tr=" not in magnet:
+                    base = (settings.theoldschool_url or "https://theoldschool.cc").rstrip("/")
+                    tracker_url = f"{base}/announce/{passkey}"
+                    magnet = f"{magnet}&tr={quote(tracker_url, safe='')}"
+                if api_key and torrent_download:
+                    torrent_download = self._inject_api_token(torrent_download, api_key)
 
         query = {
             "magnet": magnet,
@@ -127,6 +198,18 @@ class TorrentItem:
             query["preferred_service"] = "TorBox"
 
         return query
+
+    @staticmethod
+    def _inject_api_token(download_url: str, api_key: str) -> str:
+        """Add api_token to a download URL that was stripped before caching."""
+        try:
+            parsed = urllib.parse.urlparse(download_url)
+            params = dict(urllib.parse.parse_qsl(parsed.query))
+            params["api_token"] = api_key
+            new_query = urllib.parse.urlencode(params)
+            return parsed._replace(query=new_query).geturl()
+        except Exception:
+            return download_url
 
     def to_dict(self):
         resolution = getattr(self.parsed_data, 'resolution', 'UNKNOWN') if self.parsed_data else 'NONE'

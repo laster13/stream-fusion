@@ -3,7 +3,7 @@ const qualityExclusions = ['2160p', '1080p', '720p', '480p', 'rips', 'cam', 'hev
 const languages = ['en', 'fr', 'multi', 'vfq'];
 
 
-const implementedDebrids = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'sharewood', 'yggflix'];
+const implementedDebrids = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'yggflix'];
 
 const unimplementedDebrids = ['debrid_dl', 'debrid_ed', 'debrid_oc', 'debrid_pk'];
 
@@ -237,7 +237,7 @@ function resetADAuthButton() {
 }
 
 function handleUniqueAccounts() {
-    const accounts = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'sharewood', 'yggflix', 'c411', 'torr9', 'lacale', 'generationfree'];
+    const accounts = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'yggflix', 'c411', 'torr9', 'lacale', 'generationfree', 'abn', 'g3mini', 'theoldschool'];
 
     accounts.forEach(account => {
         const checkbox = document.getElementById(account);
@@ -518,20 +518,33 @@ function updateProviderFields() {
 
     // Vérifier l'état des autres éléments de l'interface
     const yggflixChecked = document.getElementById('yggflix')?.checked || document.getElementById('yggflix')?.disabled;
-    const sharewoodChecked = document.getElementById('sharewood')?.checked || document.getElementById('sharewood')?.disabled;
     const torboxChecked = document.getElementById('debrid_tb')?.checked || document.getElementById('debrid_tb')?.disabled;
     const c411Checked = document.getElementById('c411')?.checked || document.getElementById('c411')?.disabled;
     const torr9Checked = document.getElementById('torr9')?.checked || document.getElementById('torr9')?.disabled;
     const lacaleChecked = document.getElementById('lacale')?.checked || document.getElementById('lacale')?.disabled;
     const generationfreeChecked = document.getElementById('generationfree')?.checked || document.getElementById('generationfree')?.disabled;
+    const abnChecked = document.getElementById('abn')?.checked || document.getElementById('abn')?.disabled;
+    const g3miniChecked = document.getElementById('g3mini')?.checked || document.getElementById('g3mini')?.disabled;
+    const theoldschoolChecked = document.getElementById('theoldschool')?.checked || document.getElementById('theoldschool')?.disabled;
 
     // Afficher/masquer les champs spécifiques
-    setElementDisplay('sharewood-fields', sharewoodChecked ? 'block' : 'none');
     setElementDisplay('tb_debrid-fields', torboxChecked ? 'block' : 'none');
     setElementDisplay('c411-fields', c411Checked ? 'block' : 'none');
     setElementDisplay('torr9-fields', torr9Checked ? 'block' : 'none');
     setElementDisplay('lacale-fields', lacaleChecked ? 'block' : 'none');
     setElementDisplay('generationfree-fields', generationfreeChecked ? 'block' : 'none');
+    setElementDisplay('abn-fields', abnChecked ? 'block' : 'none');
+    setElementDisplay('g3mini-fields', g3miniChecked ? 'block' : 'none');
+    setElementDisplay('theoldschool-fields', theoldschoolChecked ? 'block' : 'none');
+
+    // Afficher/masquer les sélecteurs de phase de recherche
+    setElementDisplay('c411-category-row', c411Checked ? 'block' : 'none');
+    setElementDisplay('torr9-category-row', torr9Checked ? 'block' : 'none');
+    setElementDisplay('lacale-category-row', lacaleChecked ? 'block' : 'none');
+    setElementDisplay('generationfree-category-row', generationfreeChecked ? 'block' : 'none');
+    setElementDisplay('abn-category-row', abnChecked ? 'block' : 'none');
+    setElementDisplay('g3mini-category-row', g3miniChecked ? 'block' : 'none');
+    setElementDisplay('theoldschool-category-row', theoldschoolChecked ? 'block' : 'none');
 
     // Traiter tous les débrideurs
     allDebrids.forEach(id => {
@@ -704,7 +717,6 @@ function loadData() {
         jackett: false,
         zilean: true,
         yggflix: true,
-        sharewood: false,
         maxSize: '150',
         resultsPerQuality: '10',
         maxResults: '30',
@@ -727,6 +739,11 @@ function loadData() {
         torr9: true,
         lacale: true,
         generationfree: false,
+        abn: false,
+        g3mini: false,
+        theoldschool: false,
+        yggflixPriority: true,
+        rdMinCachedBeforeCheck: 3,
     };
 
     Object.keys(defaultConfig).forEach(key => {
@@ -765,11 +782,18 @@ function loadData() {
     setElementValue('ad_token_info', decodedData.ADToken, '');
     setElementValue('tb_token_info', decodedData.TBToken, '');
     setElementValue('pm_token_info', decodedData.PMToken, '');
-    setElementValue('sharewoodPasskey', decodedData.sharewoodPasskey, '');
     setElementValue('c411ApiKey', decodedData.c411ApiKey, '');
+    setElementValue('c411Passkey', decodedData.c411Passkey, '');
     setElementValue('torr9ApiKey', decodedData.torr9ApiKey, '');
     setElementValue('lacaleApiKey', decodedData.lacaleApiKey, '');
     setElementValue('generationfreeApiKey', decodedData.generationfreeApiKey, '');
+    setElementValue('generationfreePasskey', decodedData.generationfreePasskey, '');
+    setElementValue('abnApiKey', decodedData.abnApiKey, '');
+    setElementValue('abnPasskey', decodedData.abnPasskey, '');
+    setElementValue('g3miniApiKey', decodedData.g3miniApiKey, '');
+    setElementValue('g3miniPasskey', decodedData.g3miniPasskey, '');
+    setElementValue('theoldschoolApiKey', decodedData.theoldschoolApiKey, '');
+    setElementValue('theoldschoolPasskey', decodedData.theoldschoolPasskey, '');
     setElementValue('ApiKey', decodedData.apiKey, '');
     setElementValue('exclusion-keywords', (decodedData.exclusionKeywords || []).join(', '), '');
     
@@ -781,6 +805,19 @@ function loadData() {
 
     handleUniqueAccounts();
     updateProviderFields();
+
+    // Restaurer les catégories de phase de recherche par indexeur
+    const _defaultCats = {
+        c411: 'priority_private', torr9: 'priority_private',
+        lacale: 'intermediary_private', generationfree: 'intermediary_private',
+        g3mini: 'intermediary_private', theoldschool: 'intermediary_private',
+        abn: 'fallback_private',
+    };
+    const _savedCats = decodedData.indexerCategories || {};
+    for (const [key, defaultCat] of Object.entries(_defaultCats)) {
+        const select = document.getElementById(key + 'Category');
+        if (select) select.value = _savedCats[key] || defaultCat;
+    }
 
     const debridDownloader = decodedData.debridDownloader;
     if (debridDownloader) {
@@ -901,15 +938,25 @@ async function getLink(method) {
         PMToken: document.getElementById('pm_token_info')?.value,
         TBUsenet: document.getElementById('tb_usenet')?.checked,
         TBSearch: document.getElementById('tb_search')?.checked,
-        sharewoodPasskey: document.getElementById('sharewoodPasskey')?.value,
         c411: document.getElementById('c411')?.checked || document.getElementById('c411')?.disabled || false,
         torr9: document.getElementById('torr9')?.checked || document.getElementById('torr9')?.disabled || false,
         lacale: document.getElementById('lacale')?.checked || document.getElementById('lacale')?.disabled || false,
         c411ApiKey: document.getElementById('c411ApiKey')?.value || '',
+        c411Passkey: document.getElementById('c411Passkey')?.value || '',
         torr9ApiKey: document.getElementById('torr9ApiKey')?.value || '',
         lacaleApiKey: document.getElementById('lacaleApiKey')?.value || '',
         generationfree: document.getElementById('generationfree')?.checked || document.getElementById('generationfree')?.disabled || false,
         generationfreeApiKey: document.getElementById('generationfreeApiKey')?.value || '',
+        generationfreePasskey: document.getElementById('generationfreePasskey')?.value || '',
+        abn: document.getElementById('abn')?.checked || document.getElementById('abn')?.disabled || false,
+        abnApiKey: document.getElementById('abnApiKey')?.value || '',
+        abnPasskey: document.getElementById('abnPasskey')?.value || '',
+        g3mini: document.getElementById('g3mini')?.checked || document.getElementById('g3mini')?.disabled || false,
+        g3miniApiKey: document.getElementById('g3miniApiKey')?.value || '',
+        g3miniPasskey: document.getElementById('g3miniPasskey')?.value || '',
+        theoldschool: document.getElementById('theoldschool')?.checked || document.getElementById('theoldschool')?.disabled || false,
+        theoldschoolApiKey: document.getElementById('theoldschoolApiKey')?.value || '',
+        theoldschoolPasskey: document.getElementById('theoldschoolPasskey')?.value || '',
         maxSize: parseInt(document.getElementById('maxSize').value) || 16,
         exclusionKeywords: document.getElementById('exclusion-keywords').value.split(',').map(keyword => keyword.trim()).filter(keyword => keyword !== ''),
         languages: languages.filter(lang => document.getElementById(lang).checked),
@@ -917,11 +964,33 @@ async function getLink(method) {
         resultsPerQuality: parseInt(document.getElementById('resultsPerQuality').value) || 5,
         maxResults: parseInt(document.getElementById('maxResults').value) || 5,
         minCachedResults: parseInt(document.getElementById('minCachedResults').value) || 5,
+        rdMinCachedBeforeCheck: parseInt(document.getElementById('rdMinCachedBeforeCheck').value) ?? 3,
         exclusion: qualityExclusions.filter(quality => document.getElementById(quality).checked),
         jackett: document.getElementById('jackett')?.checked,
         zilean: document.getElementById('zilean')?.checked,
         yggflix: document.getElementById('yggflix')?.checked,
-        sharewood: document.getElementById('sharewood')?.checked,
+        yggflixPriority: document.getElementById('yggflixPriority')?.checked !== false,
+        indexerCategories: (() => {
+            const cats = {};
+            const _privCats = {
+                c411: 'priority_private', torr9: 'priority_private',
+                lacale: 'intermediary_private', generationfree: 'intermediary_private',
+                g3mini: 'intermediary_private', theoldschool: 'intermediary_private',
+                abn: 'fallback_private',
+            };
+            for (const [key, defaultCat] of Object.entries(_privCats)) {
+                const cb = document.getElementById(key);
+                const enabled = cb?.checked || cb?.disabled || false;
+                const select = document.getElementById(key + 'Category');
+                cats[key] = enabled ? (select?.value || defaultCat) : 'disabled';
+            }
+            // Indexeurs à catégorie fixe
+            const yggEl = document.getElementById('yggflix');
+            cats.yggflix = (yggEl?.checked || yggEl?.disabled) ? 'public' : 'disabled';
+            cats.zilean = document.getElementById('zilean')?.checked ? 'fallback_private' : 'disabled';
+            cats.jackett = document.getElementById('jackett')?.checked ? 'fallback_private' : 'disabled';
+            return cats;
+        })(),
         yggtorrentCtg: document.getElementById('ctg_yggtorrent')?.checked,
         yggflixCtg: document.getElementById('ctg_yggflix')?.checked,
         torrenting: false,
@@ -952,11 +1021,13 @@ async function getLink(method) {
     if (data.service.includes('Offcloud') && document.getElementById('offcloud_credentials') && !data.offcloudCredentials) missingRequiredFields.push("Offcloud Credentials");
     if (data.service.includes('PikPak') && document.getElementById('pikpak_credentials') && !data.pikpakCredentials) missingRequiredFields.push("PikPak Credentials");
     if (data.languages.length === 0) missingRequiredFields.push("Languages");
-    if (data.sharewood && document.getElementById('sharewoodPasskey') && !data.sharewoodPasskey) missingRequiredFields.push("Sharewood Passkey");
     if (data.c411 && document.getElementById('c411ApiKey') && !data.c411ApiKey) missingRequiredFields.push("C411 API Key");
     if (data.torr9 && document.getElementById('torr9ApiKey') && !data.torr9ApiKey) missingRequiredFields.push("Torr9 API Key");
     if (data.lacale && document.getElementById('lacaleApiKey') && !data.lacaleApiKey) missingRequiredFields.push("LaCale API Key");
     if (data.generationfree && document.getElementById('generationfreeApiKey') && !data.generationfreeApiKey) missingRequiredFields.push("Generation Free API Key");
+    if (data.abn && document.getElementById('abnApiKey') && !data.abnApiKey) missingRequiredFields.push("ABN API Key");
+    if (data.g3mini && document.getElementById('g3miniApiKey') && !data.g3miniApiKey) missingRequiredFields.push("G3MINI API Key");
+    if (data.theoldschool && document.getElementById('theoldschoolApiKey') && !data.theoldschoolApiKey) missingRequiredFields.push("TheOldSchool API Key");
     if (data.stremthru && !data.stremthruUrl) missingRequiredFields.push("StremThru URL");
 
     if (missingRequiredFields.length > 0) {
@@ -964,14 +1035,7 @@ async function getLink(method) {
         return false;
     }
 
-    function validatePasskey(passkey) {
-        return /^[a-zA-Z0-9]{32}$/.test(passkey);
-    }
 
-    if (data.sharewood && data.sharewoodPasskey && !validatePasskey(data.sharewoodPasskey)) {
-        alert('Sharewood Passkey doit contenir exactement 32 caractères alphanumériques');
-        return false;
-    }
 
     // Appel serveur pour chiffrement Fernet (protégé par token CSRF)
     let token;

@@ -181,12 +181,13 @@ class Settings(BaseSettings):
     # When True (default), users can enable the indexer and optionally provide their own
     # credentials — unless a server-side unique account is configured, in which case
     # the server credentials are used for everyone.
-    # Can be overridden via environment variable (e.g. SHAREWOOD_ENABLE=false).
-    sharewood_enable: bool = True
     c411_enable: bool = True
     torr9_enable: bool = True
     lacale_enable: bool = True
     generationfree_enable: bool = True
+    abn_enable: bool = True
+    g3mini_enable: bool = True
+    theoldschool_enable: bool = True
 
     # ZILEAN DMM API
     zilean_schema: str = "https"
@@ -219,16 +220,10 @@ class Settings(BaseSettings):
     ygg_passkey: str | None = None
     ygg_unique_account: bool = False
 
-    # SHAREWOOD
-    sharewood_url: str = "https://www.sharewood.tv"
-    sharewood_max_workers: int = 4
-    sharewood_passkey: str | None = None
-    sharewood_unique_account: bool = check_env_variable("SHAREWOOD_PASSKEY")
-
     # C411 TORZNAB
     c411_url: str = "https://c411.org"
     c411_api_key: str | None = None  # Env: C411_API_KEY — Torznab access key
-    c411_passkey: str | None = None  # Env: C411_PASSKEY — full tracker announce URL
+    c411_passkey: str | None = None  # Env: C411_PASSKEY — passkey for announce URL
     c411_unique_account: bool = check_env_variable("C411_API_KEY")
 
     # TORR9 TORZNAB
@@ -244,7 +239,27 @@ class Settings(BaseSettings):
     # GENERATIONFREE
     generationfree_url: str = "https://generation-free.org"
     generationfree_api_key: str | None = None
+    generationfree_passkey: str | None = None          # Env: GENERATIONFREE_PASSKEY
     generationfree_unique_account: bool = check_env_variable("GENERATIONFREE_API_KEY")
+
+    # ABN (Abnormal)
+    abn_url: str = "https://abn.lol"
+    abn_api_url: str = "https://api.abn.lol"
+    abn_api_key: str | None = None                     # Env: ABN_API_KEY
+    abn_passkey: str | None = None                     # Env: ABN_PASSKEY (announce URL)
+    abn_unique_account: bool = check_env_variable("ABN_API_KEY")
+
+    # G3MINI (Gemini Tracker)
+    g3mini_url: str = "https://gemini-tracker.org"
+    g3mini_api_key: str | None = None                  # Env: G3MINI_API_KEY
+    g3mini_passkey: str | None = None                  # Env: G3MINI_PASSKEY
+    g3mini_unique_account: bool = check_env_variable("G3MINI_API_KEY")
+
+    # THEOLDSCHOOL
+    theoldschool_url: str = "https://theoldschool.cc"
+    theoldschool_api_key: str | None = None            # Env: THEOLDSCHOOL_API_KEY
+    theoldschool_passkey: str | None = None            # Env: THEOLDSCHOOL_PASSKEY
+    theoldschool_unique_account: bool = check_env_variable("THEOLDSCHOOL_API_KEY")
 
     # ADMIN
     admin_template_dir: str = "/app/stream_fusion/static/admin"

@@ -21,7 +21,6 @@ from stream_fusion.logging_config import logger
 from stream_fusion.utils.jackett.jackett_result import JackettResult
 from stream_fusion.utils.jackett.jackett_service import JackettService
 from stream_fusion.utils.parser.parser_service import StreamParser
-from stream_fusion.utils.sharewood.sharewood_service import SharewoodService
 from stream_fusion.utils.yggfilx.yggflix_service import YggflixService
 from stream_fusion.utils.metdata.cinemeta import Cinemeta
 from stream_fusion.utils.metdata.tmdb import TMDB
@@ -41,6 +40,9 @@ from stream_fusion.utils.torr9.torr9_service import Torr9Service
 from stream_fusion.utils.torr9.torr9_result import Torr9Result as Torr9SearchResult
 from stream_fusion.utils.lacale.lacale_service import LaCaleService
 from stream_fusion.utils.generationfree.generationfree_service import GenerationFreeService
+from stream_fusion.utils.abn.abn_service import AbnService
+from stream_fusion.utils.g3mini.g3mini_service import G3MiniService
+from stream_fusion.utils.theoldschool.theoldschool_service import TheOldSchoolService
 from stream_fusion.settings import settings
 from stream_fusion.web.utils import get_client_ip
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,13 +73,16 @@ def has_stremthru_enabled(debrid_services):
     return any(type(debrid).__name__ == "StremThru" for debrid in debrid_services)
 
 
-# Indexers stored in Postgres (sourced from direct APIs, not Jackett/Sharewood/Zilean)
+# Indexers stored in Postgres (sourced from direct APIs, not Jackett/Zilean)
 _POSTGRES_INDEXERS = frozenset({
     "Yggtorrent - API",
     "C411 - API",
     "Torr9 - API",
     "LaCale - API",
     "GenerationFree - API",
+    "ABN - API",
+    "G3MINI - API",
+    "TheOldSchool - API",
 })
 
 
@@ -508,8 +513,20 @@ async def get_results(
     async def get_search_results(media, config):
         search_results = []
         torrent_service = TorrentService(config, torrent_dao)
+        categories = config.get("indexerCategories", {})
 
-        # --- Step 1: Parallel fetch from all fast sources (API-based, no fallback) ---
+        def _get_cat(key):
+            return categories.get(key, "fallback_private")
+
+        def _count_private(results):
+            """Count results from non-public indexers (used to trigger next search phases)."""
+            return sum(
+                1 for r in results
+                if _get_cat((r.indexer.split()[0] if r.indexer else "").lower()) != "public"
+            )
+
+        # --- Fetch helpers (each checks its own enable flags) ---
+
         async def _fetch_c411_raw():
             if not config.get("c411") or not settings.c411_enable:
                 return []
@@ -573,76 +590,125 @@ async def get_results(
                 logger.warning(f"Search: Yggflix search failed, skipping: {str(e)}")
             return []
 
-        c411_raw, torr9_raw, lacale_raw, yggflix_raw, generationfree_raw = (
-            await asyncio.gather(
-                _fetch_c411_raw(),
-                _fetch_torr9_raw(),
-                _fetch_lacale_raw(),
-                _fetch_yggflix_raw(),
-                _fetch_generationfree_raw(),
-            )
-        )
+        async def _fetch_abn_raw():
+            if not config.get("abn") or not settings.abn_enable:
+                return []
+            try:
+                abn_service = AbnService(config, session=http_session)
+                raw = await abn_service.search(media)
+                return raw if raw else []
+            except Exception as e:
+                logger.warning(f"Search: ABN search failed, skipping: {str(e)}")
+            return []
 
-        # Process each fast source sequentially (convert_and_process has DB writes)
-        for raw, source_name in [
-            (c411_raw, "C411"),
-            (torr9_raw, "Torr9"),
-            (lacale_raw, "LaCale"),
-            (generationfree_raw, "GenerationFree"),
-            (yggflix_raw, "Yggflix"),
-        ]:
-            if raw:
-                processed = await torrent_service.convert_and_process(raw)
-                logger.success(f"Search: Found {len(processed)} results from {source_name}")
-                search_results = merge_items(search_results, processed)
+        async def _fetch_g3mini_raw():
+            if not config.get("g3mini") or not settings.g3mini_enable:
+                return []
+            try:
+                g3mini_service = G3MiniService(config, session=http_session)
+                raw = await g3mini_service.search(media)
+                return raw if raw else []
+            except Exception as e:
+                logger.warning(f"Search: G3MINI search failed, skipping: {str(e)}")
+            return []
 
-        min_cached = int(config["minCachedResults"])
+        async def _fetch_theoldschool_raw():
+            if not config.get("theoldschool") or not settings.theoldschool_enable:
+                return []
+            try:
+                theoldschool_service = TheOldSchoolService(config, session=http_session)
+                raw = await theoldschool_service.search(media)
+                return raw if raw else []
+            except Exception as e:
+                logger.warning(f"Search: TheOldSchool search failed, skipping: {str(e)}")
+            return []
 
-        # --- Step 2: Fallback sources — only queried when fast sources are insufficient ---
-
-        # Zilean (cached torrent index)
-        if config["zilean"] and len(search_results) < min_cached:
-            zilean_service = ZileanService(config, session=http_session)
-            zilean_search_results = await zilean_service.search(media)
-            if zilean_search_results:
-                logger.success(
-                    f"Search: Found {len(zilean_search_results)} results from Zilean"
-                )
-                zilean_search_results = [
+        async def _fetch_zilean_raw():
+            if not config.get("zilean"):
+                return []
+            try:
+                zilean_service = ZileanService(config, session=http_session)
+                raw = await zilean_service.search(media)
+                if not raw:
+                    return []
+                logger.success(f"Search: Found {len(raw)} results from Zilean")
+                return [
                     ZileanResult().from_api_cached_item(torrent, media)
-                    for torrent in zilean_search_results
+                    for torrent in raw
                     if len(getattr(torrent, "info_hash", "")) == 40
                 ]
-                zilean_search_results = await torrent_service.convert_and_process(
-                    zilean_search_results
-                )
-                logger.info(f"Search: Zilean final search results: {len(zilean_search_results)}")
-                search_results = merge_items(search_results, zilean_search_results)
-
-        # Sharewood (private tracker, requires credentials)
-        if config["sharewood"] and settings.sharewood_enable and len(search_results) < min_cached:
-            try:
-                sharewood_service = SharewoodService(config, session=http_session)
-                sharewood_search_results = await sharewood_service.search(media)
-                if sharewood_search_results:
-                    logger.success(
-                        f"Search: Found {len(sharewood_search_results)} results from Sharewood"
-                    )
-                    sharewood_search_results = await torrent_service.convert_and_process(
-                        sharewood_search_results
-                    )
-                    search_results = merge_items(search_results, sharewood_search_results)
             except Exception as e:
-                logger.warning(f"Search: Sharewood search failed, skipping: {str(e)}")
+                logger.warning(f"Search: Zilean search failed, skipping: {str(e)}")
+            return []
 
-        # Jackett (last resort: slow, broad search)
-        if config["jackett"] and len(search_results) < min_cached:
-            jackett_service = JackettService(config, session=http_session)
-            jackett_search_results = await jackett_service.search(media)
-            logger.success(f"Search: Found {len(jackett_search_results)} results from Jackett")
-            if jackett_search_results:
-                torrent_results = await torrent_service.convert_and_process(jackett_search_results)
-                search_results = merge_items(search_results, torrent_results)
+        async def _fetch_jackett_raw():
+            if not config.get("jackett"):
+                return []
+            try:
+                jackett_service = JackettService(config, session=http_session)
+                raw = await jackett_service.search(media)
+                logger.success(f"Search: Found {len(raw)} results from Jackett")
+                return raw if raw else []
+            except Exception as e:
+                logger.warning(f"Search: Jackett search failed, skipping: {str(e)}")
+            return []
+
+        # Mapping: config key -> (fetch coroutine, display name)
+        ALL_FETCHERS = [
+            ("c411",          _fetch_c411_raw,         "C411"),
+            ("torr9",         _fetch_torr9_raw,        "Torr9"),
+            ("lacale",        _fetch_lacale_raw,       "LaCale"),
+            ("generationfree", _fetch_generationfree_raw, "GenerationFree"),
+            ("abn",           _fetch_abn_raw,          "ABN"),
+            ("g3mini",        _fetch_g3mini_raw,       "G3MINI"),
+            ("theoldschool",  _fetch_theoldschool_raw, "TheOldSchool"),
+            ("zilean",        _fetch_zilean_raw,       "Zilean"),
+            ("jackett",       _fetch_jackett_raw,      "Jackett"),
+            ("yggflix",       _fetch_yggflix_raw,      "Yggflix"),
+        ]
+
+        async def _run_phase(target_categories):
+            """Fetch all indexers in target_categories in parallel, process sequentially, return merged results."""
+            fetchers = [(k, fn, name) for k, fn, name in ALL_FETCHERS if _get_cat(k) in target_categories]
+            if not fetchers:
+                return []
+            raw_list = await asyncio.gather(*[fn() for _, fn, _ in fetchers])
+            phase_results = []
+            for (key, _, name), raw in zip(fetchers, raw_list):
+                if not raw:
+                    continue
+                processed = await torrent_service.convert_and_process(raw)
+                if processed:
+                    logger.success(f"Search: Found {len(processed)} results from {name}")
+                    phase_results = merge_items(phase_results, processed)
+            return phase_results
+
+        min_cached = int(config["minCachedResults"])
+        yggflix_priority = config.get("yggflixPriority", True)
+
+        # --- Phase 1: priority_private (always) + public if yggflixPriority=True ---
+        phase1_cats = {"priority_private", "public"} if yggflix_priority else {"priority_private"}
+        phase1 = await _run_phase(phase1_cats)
+        search_results = merge_items(search_results, phase1)
+        logger.info(f"Search: Phase 1 complete — {_count_private(search_results)} private results")
+
+        # --- Phase 2: intermediary_private (if private results insufficient) ---
+        if _count_private(search_results) < min_cached:
+            phase2 = await _run_phase({"intermediary_private"})
+            search_results = merge_items(search_results, phase2)
+            logger.info(f"Search: Phase 2 complete — {_count_private(search_results)} private results")
+
+        # --- Phase 3: fallback_private (if still insufficient) ---
+        if _count_private(search_results) < min_cached:
+            phase3 = await _run_phase({"fallback_private"})
+            search_results = merge_items(search_results, phase3)
+            logger.info(f"Search: Phase 3 complete — {_count_private(search_results)} private results")
+
+        # --- Phase 4: public after private phases (only if yggflixPriority=False) ---
+        if not yggflix_priority:
+            phase4 = await _run_phase({"public"})
+            search_results = merge_items(search_results, phase4)
+            logger.info(f"Search: Phase 4 (public) complete — {len(search_results)} total results")
 
         return search_results
 
@@ -685,7 +751,7 @@ async def get_results(
                 expiration=settings.redis_expiration,
             )
             logger.success(
-                f"Search: Cached {len(external_results)} external results in Redis (Sharewood/Zilean/Jackett)"
+                f"Search: Cached {len(external_results)} external results in Redis (Zilean/Jackett)"
             )
         else:
             logger.success(
@@ -729,6 +795,21 @@ async def get_results(
                 )
 
         logger.success(f"Search: Final number of filtered results: {len(filtered_results)}")
+
+        # --- Retroactive TMDB ID assignment for keyword-based trackers ---
+        # Keyword-only trackers (ABN, YGGFlix) cache items without tmdb_id to avoid
+        # mismatch. Now that filter_items() has confirmed these results match the media
+        # via title matching, we can safely assign the tmdb_id retroactively.
+        if hasattr(media, "tmdb_id") and media.tmdb_id:
+            tmdb_id_int = int(media.tmdb_id)
+            updates = []
+            for item in filtered_results:
+                if item.tmdb_id is None and item.indexer in _POSTGRES_INDEXERS:
+                    updates.append(torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int))
+                    item.tmdb_id = tmdb_id_int
+            if updates:
+                await asyncio.gather(*updates)
+
         return filtered_results
 
     # --- Search: aggregate results from Postgres + external sources, apply quality filter ---
@@ -742,7 +823,27 @@ async def get_results(
 
         if config["debrid"]:
             _avail_redis = await RedisCache(config).get_redis_client()
+            max_results = int(config.get("maxResults", 5))
             for debrid in debrid_services:
+                # Early exit: enough cached results already, no need to query further debrid services
+                cached_count = torrent_smart_container.get_cached_count()
+                if cached_count >= max_results:
+                    logger.info(
+                        f"Search: {cached_count} cached results ≥ maxResults ({max_results}), "
+                        f"skipping {type(debrid).__name__} and remaining services"
+                    )
+                    break
+
+                # RealDebrid-specific threshold: skip RD if prior services found enough results.
+                # RD API is slow (~3s for a few hashes) and rate-limited — only worth calling as last resort.
+                if type(debrid).__name__ == "RealDebrid":
+                    rd_min = int(config.get("rdMinCachedBeforeCheck", 3))
+                    if rd_min > 0 and cached_count >= rd_min:
+                        logger.info(
+                            f"Search: {cached_count} cached results ≥ rdMinCachedBeforeCheck ({rd_min}), skipping RealDebrid"
+                        )
+                        continue
+
                 hashes = torrent_smart_container.get_unaviable_hashes()
                 if not hashes:
                     logger.debug(f"Search: All items already marked available, skipping {type(debrid).__name__} check")
@@ -774,6 +875,23 @@ async def get_results(
                     )
 
         best_matching_results = torrent_smart_container.get_best_matching()
+
+        # Exclude results from public indexers (e.g. Yggflix) that are not instantly cached
+        # at the debrid service — non-cached public torrents require a download, not a stream.
+        _public_indexer_keys = {
+            k for k, v in config.get("indexerCategories", {}).items() if v == "public"
+        }
+        if _public_indexer_keys:
+            before = len(best_matching_results)
+            best_matching_results = [
+                item for item in best_matching_results
+                if (item.indexer.split()[0].lower() if item.indexer else "") not in _public_indexer_keys
+                or item.availability
+            ]
+            excluded = before - len(best_matching_results)
+            if excluded:
+                logger.info(f"Search: Excluded {excluded} non-cached public indexer result(s)")
+
         best_matching_results = sort_items(best_matching_results, config)
         logger.info(f"Search: Found {len(best_matching_results)} best matching results")
 

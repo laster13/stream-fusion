@@ -91,11 +91,13 @@ def _build_config_view(s) -> dict:
         "indexers": [
             {"name": "Jackett",        "enabled": s.jackett_enable,        "url": f"{s.jackett_schema}://{s.jackett_host}:{s.jackett_port}", "key_set": _masked(s.jackett_api_key)},
             {"name": "YGG / YGGFlix",  "enabled": _masked(s.ygg_passkey),  "url": s.yggflix_url,  "key_set": _masked(s.ygg_passkey)},
-            {"name": "Sharewood",      "enabled": s.sharewood_enable,      "url": s.sharewood_url, "key_set": _masked(s.sharewood_passkey)},
             {"name": "C411",           "enabled": s.c411_enable,           "url": s.c411_url,      "key_set": _masked(s.c411_api_key) or _masked(s.c411_passkey)},
             {"name": "Torr9",          "enabled": s.torr9_enable,          "url": s.torr9_url,     "key_set": _masked(s.torr9_api_key)},
             {"name": "LaCale",         "enabled": s.lacale_enable,         "url": s.lacale_url,    "key_set": _masked(s.lacale_api_key)},
             {"name": "GénérationFree", "enabled": s.generationfree_enable, "url": s.generationfree_url, "key_set": _masked(s.generationfree_api_key)},
+            {"name": "ABN",            "enabled": s.abn_enable,            "url": s.abn_url,        "key_set": _masked(s.abn_api_key)},
+            {"name": "G3MINI",         "enabled": s.g3mini_enable,         "url": s.g3mini_url,     "key_set": _masked(s.g3mini_api_key)},
+            {"name": "TheOldSchool",   "enabled": s.theoldschool_enable,   "url": s.theoldschool_url, "key_set": _masked(s.theoldschool_api_key)},
             {"name": "Zilean",         "enabled": True,                    "url": f"{s.zilean_schema}://{s.zilean_host}", "key_set": None},
         ],
         "tmdb": {

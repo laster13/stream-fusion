@@ -65,40 +65,22 @@ def get_item_hdr_priority(item: TorrentItem) -> int:
     return get_hdr_priority(getattr(item.parsed_data, "hdr", []))
 
 
+_CATEGORY_SORT_PRIORITY = {
+    "priority_private":    1,
+    "intermediary_private": 2,
+    "fallback_private":    3,
+    "public":              4,
+}
+
+
 def get_indexer_priority_for_sort(indexer, config=None) -> int:
-    """Return sort priority for a given indexer (lower = higher priority)."""
-    is_torbox = config and (
-        config.get("debridDownloader") == "TorBox"
-        or "TorBox" in config.get("service", [])
-    )
-    if is_torbox:
-        indexer_priority = {
-            "C411": 3,
-            "Torr9": 2,
-            "LaCale": 1,
-            "GenerationFree": 3,
-            "Yggtorrent": 1,
-            "DMM": 3,
-            "Public": 4,
-            "Sharewood": 5,
-            "Jackett": 6,
-        }
-    else:
-        indexer_priority = {
-            "C411": 3,
-            "Torr9": 2,
-            "LaCale": 4,
-            "GenerationFree": 4,
-            "Yggtorrent": 1,
-            "DMM": 3,
-            "Public": 4,
-            "Sharewood": 5,
-            "Jackett": 6,
-        }
-    indexer_name = indexer.split(" ")[0] if indexer and " " in indexer else indexer
-    priority = indexer_priority.get(indexer_name, 999)
+    """Return sort priority for a given indexer derived from its search category (lower = higher priority)."""
+    indexer_name = (indexer.split(" ")[0] if indexer and " " in indexer else (indexer or "")).lower()
+    categories = config.get("indexerCategories", {}) if config else {}
+    category = categories.get(indexer_name, "fallback_private")
+    priority = _CATEGORY_SORT_PRIORITY.get(category, 999)
     logger.trace(
-        f"Filters: Indexer '{indexer}' -> extracted '{indexer_name}' -> priority {priority} (TorBox={is_torbox})"
+        f"Filters: Indexer '{indexer}' -> key '{indexer_name}' -> category '{category}' -> priority {priority}"
     )
     return priority
 
