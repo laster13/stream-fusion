@@ -12,16 +12,20 @@ from stream_fusion.logging_config import logger
 class YggflixAPI:
     TORZNAB_NS = {"torznab": "http://torznab.com/schemas/2015/feed"}
 
-    def __init__(self, pool_connections=10, pool_maxsize=50, max_retries=1, timeout=10):
+    def __init__(self, pool_connections=10, pool_maxsize=50, max_retries=3, timeout=10):
         self.base_url = settings.yggflix_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
 
+        # Retry up to 3 times with a short exponential backoff (0.3 s, 0.6 s, 1.2 s).
+        # Do NOT honour Retry-After — the YGG relay can send very long values (5+ s)
+        # which would make each retried request extremely slow.
         retry_strategy = Retry(
             total=max_retries,
-            backoff_factor=0.2,
+            backoff_factor=0.3,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET", "OPTIONS"],
+            respect_retry_after_header=False,
         )
         adapter = HTTPAdapter(
             pool_connections=pool_connections,
@@ -31,19 +35,25 @@ class YggflixAPI:
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
 
-    def _make_request(self, params=None):
+    def _make_request(self, params=None) -> Optional[str]:
+        """Make a GET request and return the raw response text, or None on failure."""
         try:
             response = self.session.get(self.base_url, params=params or {}, timeout=self.timeout)
             response.raise_for_status()
             return response.text
+        except requests.exceptions.RetryError as e:
+            # All retries exhausted (typically due to rate-limiting).
+            # Return None so the caller can skip this query gracefully.
+            logger.warning(f"YGG Relay rate limited — max retries exceeded: {e}")
+            return None
         except requests.exceptions.HTTPError as e:
-            logger.error(f"YGG Relay HTTP error occurred: {e}")
+            logger.error(f"YGG Relay HTTP error: {e}")
             raise
         except requests.exceptions.ConnectionError as e:
-            logger.error(f"YGG Relay connection error occurred: {e}")
+            logger.error(f"YGG Relay connection error: {e}")
             raise
         except requests.exceptions.Timeout as e:
-            logger.error(f"YGG Relay timeout error occurred: {e}")
+            logger.error(f"YGG Relay timeout: {e}")
             raise
         except requests.exceptions.RequestException as e:
             logger.error(f"YGG Relay request error: {e}")
@@ -53,11 +63,11 @@ class YggflixAPI:
         try:
             root = ET.fromstring(xml_text)
         except ET.ParseError as e:
-            logger.error(f"YGG Relay XML Parse Error: {e}")
+            logger.error(f"YGG Relay XML parse error: {e}")
             return []
 
         items = root.findall(".//item")
-        logger.info(f"YGG Relay found {len(items)} results")
+        logger.debug(f"YGG Relay found {len(items)} results")
 
         normalized = []
         for item in items:
@@ -88,6 +98,7 @@ class YggflixAPI:
 
                 final_link = magnet_url or download_link
 
+                # Fall back to extracting the hash from the magnet/link if not provided.
                 if not info_hash and final_link and "btih:" in final_link:
                     hash_match = re.search(r"btih:([a-fA-F0-9]{40})", final_link, re.IGNORECASE)
                     if hash_match:
@@ -123,6 +134,8 @@ class YggflixAPI:
             return []
 
         xml_text = self._make_request(params=params)
+        if xml_text is None:
+            return []
         return self._parse_xml(xml_text)
 
     def search_series(
@@ -146,6 +159,8 @@ class YggflixAPI:
             params["ep"] = episode
 
         xml_text = self._make_request(params=params)
+        if xml_text is None:
+            return []
         return self._parse_xml(xml_text)
 
     def __del__(self):

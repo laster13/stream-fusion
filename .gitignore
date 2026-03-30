@@ -6,7 +6,7 @@ example/
 __pycache__/
 *.py[cod]
 *$py.class
-config/
+
 
 # C extensions
 *.so
@@ -113,6 +113,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.env.dev
 env/
 venv/
 ENV/
@@ -153,4 +154,7 @@ cython_debug/
 .devcontainer/
 docker-compose-dev.yml
 # Dev materials
-.materials/
+.materials
+
+# Claude
+.claude/

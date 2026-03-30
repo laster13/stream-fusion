@@ -3,7 +3,7 @@ const qualityExclusions = ['2160p', '1080p', '720p', '480p', 'rips', 'cam', 'hev
 const languages = ['en', 'fr', 'multi', 'vfq'];
 
 
-const implementedDebrids = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'sharewood', 'yggflix'];
+const implementedDebrids = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'yggflix'];
 
 const unimplementedDebrids = ['debrid_dl', 'debrid_ed', 'debrid_oc', 'debrid_pk'];
 
@@ -13,13 +13,18 @@ document.addEventListener('DOMContentLoaded', function () {
     updateProviderFields();
     updateDebridOrderList();
     toggleStremThruFields();
-    
+
+    // Appliqué en dernier via setTimeout(0) pour garantir que tous les appels
+    // synchrones précédents (updateProviderFields, etc.) sont terminés avant
+    // de figer l'état visuel des boutons OAuth sur les tokens déjà présents.
+    setTimeout(restoreAuthStates, 0);
+
     const apiKeyInput = document.getElementById('ApiKey');
     if (apiKeyInput) {
         apiKeyInput.addEventListener('blur', function() {
             validateApiKeyWithoutAlert(this.value);
         });
-        
+
         if (apiKeyInput.value && apiKeyInput.value.trim() !== '') {
             validateApiKeyWithoutAlert(apiKeyInput.value);
         }
@@ -232,7 +237,7 @@ function resetADAuthButton() {
 }
 
 function handleUniqueAccounts() {
-    const accounts = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'sharewood', 'yggflix', 'c411', 'torr9', 'lacale'];
+    const accounts = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'yggflix', 'c411', 'torr9', 'lacale', 'generationfree', 'abn', 'g3mini', 'theoldschool'];
 
     accounts.forEach(account => {
         const checkbox = document.getElementById(account);
@@ -255,14 +260,22 @@ function updateDebridOrderList() {
     debridOrderList.innerHTML = '';
 
     let debridOrder = [];
-    const currentUrl = window.location.href;
-    let data = currentUrl.match(/\/([^\/]+)\/configure$/);
-    if (data && data[1]) {
-        try {
-            const decodedData = JSON.parse(atob(data[1]));
-            debridOrder = decodedData.service || [];
-        } catch (error) {
-            console.warn("No valid debrid order data in URL, using default order.");
+
+    // 1. Priorité : config en localStorage
+    const _stored = localStorage.getItem('streamfusion_config');
+    if (_stored) {
+        try { debridOrder = JSON.parse(_stored).service || []; } catch (e) { /* ignore */ }
+    }
+
+    // 2. Fallback : anciennes URLs base64
+    if (debridOrder.length === 0) {
+        const _data = window.location.href.match(/\/([^\/]+)\/configure$/);
+        if (_data && _data[1]) {
+            try {
+                debridOrder = JSON.parse(atob(_data[1])).service || [];
+            } catch (error) {
+                console.warn("No valid debrid order data in URL, using default order.");
+            }
         }
     }
 
@@ -396,16 +409,6 @@ function toggleStremThruFields() {
     } else {
         setElementDisplay('stremthru_url_div', 'none');
         if (authDiv) setElementDisplay('stremthru_auth_div', 'none');
-
-        // Si StremThru est désactivé, désactiver et décocher les services non implémentés
-        unimplementedDebrids.forEach(id => {
-            const checkbox = document.getElementById(id);
-            if (checkbox && checkbox.checked) {
-                checkbox.checked = false;
-                // Déclencher manuellement la mise à jour pour masquer les champs
-                updateProviderFields(); 
-            }
-        });
     }
 }
 
@@ -507,39 +510,56 @@ function addDebridDownloaderOption(serviceName) {
 function updateProviderFields() {
     console.log("--- Running updateProviderFields ---"); // Debug start
     const stremthruEnabledCheckbox = document.getElementById('stremthru_enabled');
-    let stremthruWasEnabled = stremthruEnabledCheckbox ? stremthruEnabledCheckbox.checked : false; // Track initial state
-    let stremthruForcedEnable = false;
-    let anyUnimplementedChecked = false; // Flag to track if any unimplemented service is checked
+    let stremthruWasEnabled = stremthruEnabledCheckbox ? stremthruEnabledCheckbox.checked : false;
+    let anyUnimplementedChecked = false;
 
     const serviceStates = {};
     const allDebrids = [...implementedDebrids, ...unimplementedDebrids];
 
     // Vérifier l'état des autres éléments de l'interface
-    const cacheChecked = document.getElementById('cache')?.checked;
     const yggflixChecked = document.getElementById('yggflix')?.checked || document.getElementById('yggflix')?.disabled;
-    const sharewoodChecked = document.getElementById('sharewood')?.checked || document.getElementById('sharewood')?.disabled;
     const torboxChecked = document.getElementById('debrid_tb')?.checked || document.getElementById('debrid_tb')?.disabled;
     const c411Checked = document.getElementById('c411')?.checked || document.getElementById('c411')?.disabled;
     const torr9Checked = document.getElementById('torr9')?.checked || document.getElementById('torr9')?.disabled;
     const lacaleChecked = document.getElementById('lacale')?.checked || document.getElementById('lacale')?.disabled;
+    const generationfreeChecked = document.getElementById('generationfree')?.checked || document.getElementById('generationfree')?.disabled;
+    const abnChecked = document.getElementById('abn')?.checked || document.getElementById('abn')?.disabled;
+    const g3miniChecked = document.getElementById('g3mini')?.checked || document.getElementById('g3mini')?.disabled;
+    const theoldschoolChecked = document.getElementById('theoldschool')?.checked || document.getElementById('theoldschool')?.disabled;
 
     // Afficher/masquer les champs spécifiques
-    setElementDisplay('cache-fields', cacheChecked ? 'block' : 'none');
-    setElementDisplay('sharewood-fields', sharewoodChecked ? 'block' : 'none');
     setElementDisplay('tb_debrid-fields', torboxChecked ? 'block' : 'none');
     setElementDisplay('c411-fields', c411Checked ? 'block' : 'none');
     setElementDisplay('torr9-fields', torr9Checked ? 'block' : 'none');
     setElementDisplay('lacale-fields', lacaleChecked ? 'block' : 'none');
+    setElementDisplay('generationfree-fields', generationfreeChecked ? 'block' : 'none');
+    setElementDisplay('abn-fields', abnChecked ? 'block' : 'none');
+    setElementDisplay('g3mini-fields', g3miniChecked ? 'block' : 'none');
+    setElementDisplay('theoldschool-fields', theoldschoolChecked ? 'block' : 'none');
+
+    // Afficher/masquer les sélecteurs de phase de recherche
+    setElementDisplay('c411-category-row', c411Checked ? 'block' : 'none');
+    setElementDisplay('torr9-category-row', torr9Checked ? 'block' : 'none');
+    setElementDisplay('lacale-category-row', lacaleChecked ? 'block' : 'none');
+    setElementDisplay('generationfree-category-row', generationfreeChecked ? 'block' : 'none');
+    setElementDisplay('abn-category-row', abnChecked ? 'block' : 'none');
+    setElementDisplay('g3mini-category-row', g3miniChecked ? 'block' : 'none');
+    setElementDisplay('theoldschool-category-row', theoldschoolChecked ? 'block' : 'none');
 
     // Traiter tous les débrideurs
     allDebrids.forEach(id => {
         const checkbox = document.getElementById(id);
         if (!checkbox) return;
-        const isChecked = checkbox.checked || checkbox.disabled;
-        serviceStates[id] = isChecked;
+        // isActive : service compté comme actif (compte unique serveur OU activé par l'utilisateur)
+        // → utilisé pour la liste d'ordre des débrideurs et les stats globales
+        const isActive = checkbox.checked || checkbox.disabled;
+        // needsCredentials : l'utilisateur a activé le service lui-même (pas un compte unique serveur)
+        // → si disabled, le serveur possède déjà le token, l'utilisateur n'a rien à configurer
+        const needsCredentials = checkbox.checked && !checkbox.disabled;
+        serviceStates[id] = isActive;
 
         // Déterminer l'ID du div de credentials correspondant
-        let credDivId = ''; 
+        let credDivId = '';
         switch (id) {
             case 'debrid_rd': credDivId = 'rd_token_info_div'; break;
             case 'debrid_ad': credDivId = 'ad_token_info_div'; break;
@@ -552,28 +572,27 @@ function updateProviderFields() {
         }
 
         // Afficher/masquer le div de credentials
+        // On n'affiche que si l'utilisateur a activé le service lui-même (compte non-unique)
         if (credDivId) {
-            setElementDisplay(credDivId, isChecked ? 'block' : 'none');
+            setElementDisplay(credDivId, needsCredentials ? 'block' : 'none');
         }
 
-        // Logique pour forcer l'activation de StremThru avec les débrideurs non implémentés
-        if (unimplementedDebrids.includes(id) && isChecked) {
-            if (stremthruEnabledCheckbox && !stremthruEnabledCheckbox.checked) {
-                stremthruEnabledCheckbox.checked = true;
-                stremthruForcedEnable = true; // Marquer qu'on l'a forcé
-            }
-            anyUnimplementedChecked = true; // Définir le drapeau
+        // Avertissement si un service nécessitant StremThru est coché sans que StremThru soit configuré
+        if (unimplementedDebrids.includes(id) && isActive) {
+            anyUnimplementedChecked = true;
         }
     });
 
-    // Gérer l'état de la case à cocher StremThru: désactiver si un service non implémenté est coché
+    // Afficher un avertissement si des services StremThru-only sont activés sans StremThru configuré
+    const stremthruWarningDiv = document.getElementById('stremthru_required_warning');
+    if (stremthruWarningDiv) {
+        const stremthruConfigured = stremthruEnabledCheckbox && stremthruEnabledCheckbox.checked;
+        setElementDisplay('stremthru_required_warning', (anyUnimplementedChecked && !stremthruConfigured) ? 'block' : 'none');
+    }
+
+    // Afficher/masquer les champs StremThru selon l'état de la case
     if (stremthruEnabledCheckbox) {
-        if (anyUnimplementedChecked) {
-            stremthruEnabledCheckbox.checked = true; // S'assurer qu'elle est cochée
-            stremthruEnabledCheckbox.disabled = true; // Désactiver la case à cocher
-        } else {
-            stremthruEnabledCheckbox.disabled = false; // Réactiver si aucun service non implémenté n'est coché
-        }
+        stremthruEnabledCheckbox.disabled = false; // Le checkbox reste toujours libre
 
         // Afficher/masquer les champs StremThru
         setElementDisplay('stremthru_url_div', stremthruEnabledCheckbox.checked ? 'block' : 'none');
@@ -583,8 +602,8 @@ function updateProviderFields() {
         }
     }
 
-    // Si on a forcé l'activation de StremThru OU si son état a changé, mettre à jour la visibilité de ses champs
-    if (stremthruEnabledCheckbox && (stremthruForcedEnable || stremthruEnabledCheckbox.checked !== stremthruWasEnabled || anyUnimplementedChecked)) {
+    // Mettre à jour la visibilité des champs StremThru si l'état a changé
+    if (stremthruEnabledCheckbox && stremthruEnabledCheckbox.checked !== stremthruWasEnabled) {
         toggleStremThruFields();
     }
 
@@ -647,29 +666,39 @@ function ensureDebridConsistency() {
         }
     }
 
-    // Gérer l'état de la case à cocher StremThru
+    // StremThru : le checkbox reste libre, pas de forçage
     const stremthruEnabledCheckbox = document.getElementById('stremthru_enabled');
     if (stremthruEnabledCheckbox) {
-        if (anyUnimplementedChecked) {
-            stremthruEnabledCheckbox.checked = true;
-            stremthruEnabledCheckbox.disabled = true;
-        } else {
-            stremthruEnabledCheckbox.disabled = false;
-        }
+        stremthruEnabledCheckbox.disabled = false;
     }
 
     updateDebridDownloaderOptions();
 }
 
 function loadData() {
-    const currentUrl = window.location.href;
-    let data = currentUrl.match(/\/([^\/]+)\/configure$/);
     let decodedData = {};
-    if (data && data[1]) {
+
+    // 1. Priorité : config stockée en localStorage (populée par getLink après chiffrement)
+    const stored = localStorage.getItem('streamfusion_config');
+    if (stored) {
         try {
-            decodedData = JSON.parse(atob(data[1]));
-        } catch (error) {
-            console.warn("No valid data to decode in URL, using default values.");
+            decodedData = JSON.parse(stored);
+        } catch (e) {
+            console.warn("Config localStorage invalide, suppression.");
+            localStorage.removeItem('streamfusion_config');
+        }
+    }
+
+    // 2. Fallback : anciennes URLs base64 (rétrocompatibilité avec les bookmarks existants)
+    if (Object.keys(decodedData).length === 0) {
+        const currentUrl = window.location.href;
+        const data = currentUrl.match(/\/([^\/]+)\/configure$/);
+        if (data && data[1]) {
+            try {
+                decodedData = JSON.parse(atob(data[1]));
+            } catch (error) {
+                console.warn("Pas de données base64 valides dans l'URL, valeurs par défaut utilisées.");
+            }
         }
     }
 
@@ -686,11 +715,8 @@ function loadData() {
 
     const defaultConfig = {
         jackett: false,
-        cache: true,
-        cacheUrl: 'https://stremio-jackett-cacher.elfhosted.com/',
         zilean: true,
         yggflix: true,
-        sharewood: false,
         maxSize: '150',
         resultsPerQuality: '10',
         maxResults: '30',
@@ -711,7 +737,13 @@ function loadData() {
         debrid_order: false,
         c411: true,
         torr9: true,
-        lacale: true
+        lacale: true,
+        generationfree: false,
+        abn: false,
+        g3mini: false,
+        theoldschool: false,
+        yggflixPriority: true,
+        rdMinCachedBeforeCheck: 3,
     };
 
     Object.keys(defaultConfig).forEach(key => {
@@ -750,18 +782,42 @@ function loadData() {
     setElementValue('ad_token_info', decodedData.ADToken, '');
     setElementValue('tb_token_info', decodedData.TBToken, '');
     setElementValue('pm_token_info', decodedData.PMToken, '');
-    setElementValue('sharewoodPasskey', decodedData.sharewoodPasskey, '');
     setElementValue('c411ApiKey', decodedData.c411ApiKey, '');
+    setElementValue('c411Passkey', decodedData.c411Passkey, '');
     setElementValue('torr9ApiKey', decodedData.torr9ApiKey, '');
     setElementValue('lacaleApiKey', decodedData.lacaleApiKey, '');
+    setElementValue('generationfreeApiKey', decodedData.generationfreeApiKey, '');
+    setElementValue('generationfreePasskey', decodedData.generationfreePasskey, '');
+    setElementValue('abnApiKey', decodedData.abnApiKey, '');
+    setElementValue('abnPasskey', decodedData.abnPasskey, '');
+    setElementValue('g3miniApiKey', decodedData.g3miniApiKey, '');
+    setElementValue('g3miniPasskey', decodedData.g3miniPasskey, '');
+    setElementValue('theoldschoolApiKey', decodedData.theoldschoolApiKey, '');
+    setElementValue('theoldschoolPasskey', decodedData.theoldschoolPasskey, '');
     setElementValue('ApiKey', decodedData.apiKey, '');
     setElementValue('exclusion-keywords', (decodedData.exclusionKeywords || []).join(', '), '');
     
     setElementValue('tb_usenet', decodedData.TBUsenet, defaultConfig.tb_usenet);
     setElementValue('tb_search', decodedData.TBSearch, defaultConfig.tb_search);
 
+    setElementValue('stremthru_enabled', decodedData.stremthru, false);
+    setElementValue('stremthru_url', decodedData.stremthruUrl, 'https://stremthru.13377001.xyz/');
+
     handleUniqueAccounts();
     updateProviderFields();
+
+    // Restaurer les catégories de phase de recherche par indexeur
+    const _defaultCats = {
+        c411: 'priority_private', torr9: 'priority_private',
+        lacale: 'intermediary_private', generationfree: 'intermediary_private',
+        g3mini: 'intermediary_private', theoldschool: 'intermediary_private',
+        abn: 'fallback_private',
+    };
+    const _savedCats = decodedData.indexerCategories || {};
+    for (const [key, defaultCat] of Object.entries(_defaultCats)) {
+        const select = document.getElementById(key + 'Category');
+        if (select) select.value = _savedCats[key] || defaultCat;
+    }
 
     const debridDownloader = decodedData.debridDownloader;
     if (debridDownloader) {
@@ -774,6 +830,61 @@ function loadData() {
     updateDebridDownloaderOptions();
     updateDebridOrderList();
     ensureDebridConsistency();
+    restoreAuthStates();
+}
+
+// Restaure l'état visuel "connecté" des boutons OAuth quand un token est déjà présent
+// (chargement depuis URL ou retour sur la page de config avec un lien existant).
+function restoreAuthStates() {
+    // Real-Debrid
+    const rdTokenEl = document.getElementById('rd_token_info');
+    const rdBtn     = document.getElementById('rd-auth-button');
+    if (rdTokenEl && rdBtn && rdTokenEl.value && rdTokenEl.value.trim()) {
+        applyConnectedState(
+            rdBtn,
+            rdTokenEl,
+            "S'authentifier avec Real-Debrid",
+            '✓ Déjà connecté à Real-Debrid',
+            'rd-reauth-btn'
+        );
+    }
+
+    // AllDebrid
+    const adTokenEl = document.getElementById('ad_token_info');
+    const adBtn     = document.getElementById('ad-auth-button');
+    if (adTokenEl && adBtn && adTokenEl.value && adTokenEl.value.trim()) {
+        applyConnectedState(
+            adBtn,
+            adTokenEl,
+            "S'authentifier avec AllDebrid",
+            '✓ Déjà connecté à AllDebrid',
+            'ad-reauth-btn'
+        );
+    }
+}
+
+// Applique l'état visuel "connecté" sur un bouton OAuth et ajoute un lien "Reconnecter"
+function applyConnectedState(btn, tokenEl, originalText, connectedText, reauthId) {
+    btn.disabled    = true;
+    btn.textContent = connectedText;
+    btn.classList.add('opacity-50', 'cursor-not-allowed');
+
+    if (document.getElementById(reauthId)) return; // déjà injecté
+
+    const reauthBtn = document.createElement('button');
+    reauthBtn.type      = 'button';
+    reauthBtn.id        = reauthId;
+    reauthBtn.textContent = 'Reconnecter';
+    reauthBtn.className = 'btn-oauth';
+    reauthBtn.style.cssText = 'font-size:0.8rem;padding:5px 12px;opacity:0.65;margin-left:8px;';
+    reauthBtn.onclick = function () {
+        tokenEl.value = '';
+        btn.disabled  = false;
+        btn.textContent = originalText;
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        reauthBtn.remove();
+    };
+    btn.parentNode.insertBefore(reauthBtn, btn.nextSibling);
 }
 
 // Fonction pour valider l'API key
@@ -809,7 +920,7 @@ function validateApiKey(apiKey) {
     return true;
 }
 
-function getLink(method) {
+async function getLink(method) {
     const apiKey = document.getElementById('ApiKey').value;
     
     // Vérifier l'API key en premier
@@ -827,13 +938,25 @@ function getLink(method) {
         PMToken: document.getElementById('pm_token_info')?.value,
         TBUsenet: document.getElementById('tb_usenet')?.checked,
         TBSearch: document.getElementById('tb_search')?.checked,
-        sharewoodPasskey: document.getElementById('sharewoodPasskey')?.value,
         c411: document.getElementById('c411')?.checked || document.getElementById('c411')?.disabled || false,
         torr9: document.getElementById('torr9')?.checked || document.getElementById('torr9')?.disabled || false,
         lacale: document.getElementById('lacale')?.checked || document.getElementById('lacale')?.disabled || false,
         c411ApiKey: document.getElementById('c411ApiKey')?.value || '',
+        c411Passkey: document.getElementById('c411Passkey')?.value || '',
         torr9ApiKey: document.getElementById('torr9ApiKey')?.value || '',
         lacaleApiKey: document.getElementById('lacaleApiKey')?.value || '',
+        generationfree: document.getElementById('generationfree')?.checked || document.getElementById('generationfree')?.disabled || false,
+        generationfreeApiKey: document.getElementById('generationfreeApiKey')?.value || '',
+        generationfreePasskey: document.getElementById('generationfreePasskey')?.value || '',
+        abn: document.getElementById('abn')?.checked || document.getElementById('abn')?.disabled || false,
+        abnApiKey: document.getElementById('abnApiKey')?.value || '',
+        abnPasskey: document.getElementById('abnPasskey')?.value || '',
+        g3mini: document.getElementById('g3mini')?.checked || document.getElementById('g3mini')?.disabled || false,
+        g3miniApiKey: document.getElementById('g3miniApiKey')?.value || '',
+        g3miniPasskey: document.getElementById('g3miniPasskey')?.value || '',
+        theoldschool: document.getElementById('theoldschool')?.checked || document.getElementById('theoldschool')?.disabled || false,
+        theoldschoolApiKey: document.getElementById('theoldschoolApiKey')?.value || '',
+        theoldschoolPasskey: document.getElementById('theoldschoolPasskey')?.value || '',
         maxSize: parseInt(document.getElementById('maxSize').value) || 16,
         exclusionKeywords: document.getElementById('exclusion-keywords').value.split(',').map(keyword => keyword.trim()).filter(keyword => keyword !== ''),
         languages: languages.filter(lang => document.getElementById(lang).checked),
@@ -841,13 +964,33 @@ function getLink(method) {
         resultsPerQuality: parseInt(document.getElementById('resultsPerQuality').value) || 5,
         maxResults: parseInt(document.getElementById('maxResults').value) || 5,
         minCachedResults: parseInt(document.getElementById('minCachedResults').value) || 5,
+        rdMinCachedBeforeCheck: parseInt(document.getElementById('rdMinCachedBeforeCheck').value) ?? 3,
         exclusion: qualityExclusions.filter(quality => document.getElementById(quality).checked),
-        cacheUrl: document.getElementById('cacheUrl')?.value,
         jackett: document.getElementById('jackett')?.checked,
-        cache: document.getElementById('cache')?.checked,
         zilean: document.getElementById('zilean')?.checked,
         yggflix: document.getElementById('yggflix')?.checked,
-        sharewood: document.getElementById('sharewood')?.checked,
+        yggflixPriority: document.getElementById('yggflixPriority')?.checked !== false,
+        indexerCategories: (() => {
+            const cats = {};
+            const _privCats = {
+                c411: 'priority_private', torr9: 'priority_private',
+                lacale: 'intermediary_private', generationfree: 'intermediary_private',
+                g3mini: 'intermediary_private', theoldschool: 'intermediary_private',
+                abn: 'fallback_private',
+            };
+            for (const [key, defaultCat] of Object.entries(_privCats)) {
+                const cb = document.getElementById(key);
+                const enabled = cb?.checked || cb?.disabled || false;
+                const select = document.getElementById(key + 'Category');
+                cats[key] = enabled ? (select?.value || defaultCat) : 'disabled';
+            }
+            // Indexeurs à catégorie fixe
+            const yggEl = document.getElementById('yggflix');
+            cats.yggflix = (yggEl?.checked || yggEl?.disabled) ? 'public' : 'disabled';
+            cats.zilean = document.getElementById('zilean')?.checked ? 'fallback_private' : 'disabled';
+            cats.jackett = document.getElementById('jackett')?.checked ? 'fallback_private' : 'disabled';
+            return cats;
+        })(),
         yggtorrentCtg: document.getElementById('ctg_yggtorrent')?.checked,
         yggflixCtg: document.getElementById('ctg_yggflix')?.checked,
         torrenting: false,
@@ -869,7 +1012,6 @@ function getLink(method) {
 
     const missingRequiredFields = [];
 
-    if (data.cache && !data.cacheUrl) missingRequiredFields.push("Cache URL");
     if (data.service.includes('Real-Debrid') && document.getElementById('rd_token_info') && !data.RDToken) missingRequiredFields.push("Real-Debrid Account Connection");
     if (data.service.includes('AllDebrid') && document.getElementById('ad_token_info') && !data.ADToken) missingRequiredFields.push("AllDebrid Account Connection");
     if (data.service.includes('TorBox') && document.getElementById('tb_token_info') && !data.TBToken) missingRequiredFields.push("TorBox Account Connection");
@@ -879,10 +1021,13 @@ function getLink(method) {
     if (data.service.includes('Offcloud') && document.getElementById('offcloud_credentials') && !data.offcloudCredentials) missingRequiredFields.push("Offcloud Credentials");
     if (data.service.includes('PikPak') && document.getElementById('pikpak_credentials') && !data.pikpakCredentials) missingRequiredFields.push("PikPak Credentials");
     if (data.languages.length === 0) missingRequiredFields.push("Languages");
-    if (data.sharewood && document.getElementById('sharewoodPasskey') && !data.sharewoodPasskey) missingRequiredFields.push("Sharewood Passkey");
     if (data.c411 && document.getElementById('c411ApiKey') && !data.c411ApiKey) missingRequiredFields.push("C411 API Key");
     if (data.torr9 && document.getElementById('torr9ApiKey') && !data.torr9ApiKey) missingRequiredFields.push("Torr9 API Key");
     if (data.lacale && document.getElementById('lacaleApiKey') && !data.lacaleApiKey) missingRequiredFields.push("LaCale API Key");
+    if (data.generationfree && document.getElementById('generationfreeApiKey') && !data.generationfreeApiKey) missingRequiredFields.push("Generation Free API Key");
+    if (data.abn && document.getElementById('abnApiKey') && !data.abnApiKey) missingRequiredFields.push("ABN API Key");
+    if (data.g3mini && document.getElementById('g3miniApiKey') && !data.g3miniApiKey) missingRequiredFields.push("G3MINI API Key");
+    if (data.theoldschool && document.getElementById('theoldschoolApiKey') && !data.theoldschoolApiKey) missingRequiredFields.push("TheOldSchool API Key");
     if (data.stremthru && !data.stremthruUrl) missingRequiredFields.push("StremThru URL");
 
     if (missingRequiredFields.length > 0) {
@@ -890,28 +1035,45 @@ function getLink(method) {
         return false;
     }
 
-    function validatePasskey(passkey) {
-        return /^[a-zA-Z0-9]{32}$/.test(passkey);
-    }
 
-    if (data.sharewood && data.sharewoodPasskey && !validatePasskey(data.sharewoodPasskey)) {
-        alert('Sharewood Passkey doit contenir exactement 32 caractères alphanumériques');
+
+    // Appel serveur pour chiffrement Fernet (protégé par token CSRF)
+    let token;
+    try {
+        const csrfToken = window.__CSRF_TOKEN__ || '';
+        const response = await fetch('/api/config/encode', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ config: data })
+        });
+        if (!response.ok) {
+            throw new Error(`Erreur serveur: ${response.status}`);
+        }
+        const result = await response.json();
+        token = result.token;
+        if (!result.encrypted) {
+            console.warn('CONFIG_SECRET_KEY absente sur le serveur — config encodée en Base64 seulement (non chiffrée).');
+        }
+    } catch (err) {
+        alert(`Échec de l'encodage de la configuration: ${err.message}`);
         return false;
     }
 
-    const encodedData = btoa(JSON.stringify(data));
-    const stremio_link = `${window.location.host}/${encodedData}/manifest.json`;
+    // Stocker la config brute en localStorage pour repopuler /{config}/configure
+    localStorage.setItem('streamfusion_config', JSON.stringify(data));
+
+    const manifestUrl = window.location.protocol + '//' + window.location.host + '/' + token + '/manifest.json';
 
     if (method === 'link') {
-        window.open(`stremio://${stremio_link}`, "_blank");
+        window.open('stremio://' + window.location.host + '/' + token + '/manifest.json', "_blank");
     } else if (method === 'copy') {
-        const link = window.location.protocol + '//' + stremio_link;
-        navigator.clipboard.writeText(link).then(() => {
-            alert('Link copied to clipboard');
-        }, () => {
-            alert('Error copying link to clipboard');
-        });
+        await navigator.clipboard.writeText(manifestUrl);
     }
+
+    return manifestUrl;
 }
 
 let showLanguageCheckBoxes = true;

@@ -25,7 +25,7 @@ router = APIRouter()
 
 tmdb = TMDb()
 tmdb.api_key = settings.tmdb_api_key
-tmdb.language = "fr-FR"
+tmdb.language = settings.tmdb_language
 movie = Movie()
 tv = TV()
 season = Season()
@@ -141,6 +141,16 @@ async def create_meta_object(details, item_type: str, imdb_id: str, include_epis
 
 
 async def get_tmdb_id_from_imdb(imdb_id: str) -> str:
+    # Check DB mapping first to avoid unnecessary TMDB API calls
+    try:
+        from stream_fusion.services.postgresql.dao.metadatamapping_dao import lookup_mapping_by_imdb_id
+        db_mapping = await lookup_mapping_by_imdb_id(imdb_id)
+        if db_mapping and db_mapping.tmdb_id:
+            logger.debug(f"catalog: DB mapping {imdb_id} → tmdb_id={db_mapping.tmdb_id}")
+            return db_mapping.tmdb_id
+    except Exception as e:
+        logger.warning(f"catalog: DB mapping lookup failed for {imdb_id}: {e}")
+
     results = await asyncio.to_thread(find.find_by_imdb_id, imdb_id)
     if results.movie_results:
         return results.movie_results[0]["id"]
@@ -293,32 +303,29 @@ async def get_catalog(
                 logger.error(f"Failed to fetch catalog from TMDb for {type}/{id}: {tmdb_error}", exc_info=True)
                 item_ids = []
 
-        metas = []
         pipeline = redis_client.pipeline()
-
         process_limit = 50
-        for tmdb_id in item_ids[:process_limit]:
+
+        def _apply_episode_prefix(meta: Meta, tmdb_id: int) -> None:
+            if tmdb_id not in episode_info_map:
+                return
+            ep_info = episode_info_map[tmdb_id]
+            ep_season = ep_info.get('season', '').strip('[]') or ''
+            ep_episode = ep_info.get('episode', '').strip('[]') or ''
+            if ep_season:
+                ep_prefix = f"S{ep_season.zfill(2)}E{ep_episode.zfill(2)}" if ep_episode else f"S{ep_season.zfill(2)}"
+                meta.name = f"{ep_prefix} - {meta.name}"
+
+        async def process_one(tmdb_id: int):
             item_cache_key_tmdb = f"tmdbid_item:{tmdb_id}"
             cached_item = await get_cached_item(redis_client, item_cache_key_tmdb)
-
             if cached_item:
                 try:
                     meta = Meta.model_validate(cached_item)
-                    # Ajouter l'info d'épisode au DÉBUT du titre pour les séries (sans modifier le cache)
-                    if tmdb_id in episode_info_map:
-                        ep_info = episode_info_map[tmdb_id]
-                        season = ep_info.get('season', '').strip('[]') or ''
-                        episode = ep_info.get('episode', '').strip('[]') or ''
-                        if season:
-                            if episode:
-                                ep_prefix = f"S{season.zfill(2)}E{episode.zfill(2)}"
-                            else:
-                                ep_prefix = f"S{season.zfill(2)}"
-                            meta.name = f"{ep_prefix} - {meta.name}"
-                    metas.append(meta)
+                    _apply_episode_prefix(meta, tmdb_id)
+                    return meta
                 except Exception as validation_error:
-                     logger.warning(f"Failed to validate cached meta for TMDB ID {tmdb_id}: {validation_error}")
-                continue
+                    logger.warning(f"Failed to validate cached meta for TMDB ID {tmdb_id}: {validation_error}")
 
             try:
                 if type == "movie":
@@ -326,61 +333,56 @@ async def get_catalog(
                     item_type = "movie"
                     imdb_id = getattr(details, 'imdb_id', None)
                 else:
-                    details = await get_tv_details(tmdb_id)
                     item_type = "series"
-                    # Vérifier le cache tmdbid_to_imdbid avant d'appeler external_ids
-                    cached_imdb_id = await asyncio.to_thread(redis_client.get, f"tmdbid_to_imdbid:{tmdb_id}")
+                    details, cached_imdb_id = await asyncio.gather(
+                        get_tv_details(tmdb_id),
+                        asyncio.to_thread(redis_client.get, f"tmdbid_to_imdbid:{tmdb_id}"),
+                    )
                     if cached_imdb_id:
                         imdb_id = cached_imdb_id.decode('utf-8') if isinstance(cached_imdb_id, bytes) else cached_imdb_id
                         logger.debug(f"IMDb ID found in cache for TMDB ID {tmdb_id}: {imdb_id}")
                     else:
-                        external_ids = await asyncio.to_thread(tv.external_ids, tmdb_id)
-                        imdb_id = external_ids.get("imdb_id")
+                        # Check DB mapping before hitting TMDB API
+                        try:
+                            from stream_fusion.services.postgresql.dao.metadatamapping_dao import lookup_mapping_by_tmdb_id
+                            db_mapping = await lookup_mapping_by_tmdb_id(str(tmdb_id))
+                            if db_mapping and db_mapping.imdb_id:
+                                imdb_id = db_mapping.imdb_id
+                                logger.debug(f"catalog: DB mapping tmdb_id={tmdb_id} → {imdb_id}")
+                            else:
+                                external_ids = await asyncio.to_thread(tv.external_ids, tmdb_id)
+                                imdb_id = external_ids.get("imdb_id")
+                        except Exception:
+                            external_ids = await asyncio.to_thread(tv.external_ids, tmdb_id)
+                            imdb_id = external_ids.get("imdb_id")
 
                 if not imdb_id:
                     logger.warning(f"No IMDb ID found for TMDB ID: {tmdb_id}")
-                    continue
+                    return None
 
-                # include_episodes=False pour le catalogue (pas besoin des épisodes)
                 meta = await create_meta_object(details, item_type, imdb_id, include_episodes=False)
 
-                item_cache_key_imdb = f"imdbid_item:{imdb_id}"
                 try:
-                    # Cacher la version sans l'épisode dans le titre
-                    pipeline.set(
-                        item_cache_key_tmdb, pickle.dumps(meta), ex=7 * 24 * 60 * 60
-                    )
-                    pipeline.set(
-                        item_cache_key_imdb, pickle.dumps(meta), ex=7 * 24 * 60 * 60
-                    )
-                    pipeline.set(
-                        f"tmdbid_to_imdbid:{tmdb_id}", imdb_id, ex=7 * 24 * 60 * 60
-                    )
+                    pipeline.set(item_cache_key_tmdb, pickle.dumps(meta), ex=7 * 24 * 60 * 60)
+                    pipeline.set(f"imdbid_item:{imdb_id}", pickle.dumps(meta), ex=7 * 24 * 60 * 60)
+                    pipeline.set(f"tmdbid_to_imdbid:{tmdb_id}", imdb_id, ex=7 * 24 * 60 * 60)
                 except Exception as cache_err:
                     logger.error(f"Error adding item TMDB:{tmdb_id}/IMDB:{imdb_id} to cache pipeline: {cache_err}")
 
-                # Ajouter l'info d'épisode au DÉBUT du titre pour les séries (après le cache)
-                if tmdb_id in episode_info_map:
-                    ep_info = episode_info_map[tmdb_id]
-                    season = ep_info.get('season', '').strip('[]') or ''
-                    episode = ep_info.get('episode', '').strip('[]') or ''
-                    if season:
-                        if episode:
-                            ep_prefix = f"S{season.zfill(2)}E{episode.zfill(2)}"
-                        else:
-                            ep_prefix = f"S{season.zfill(2)}"
-                        meta.name = f"{ep_prefix} - {meta.name}"
-
-                metas.append(meta)
+                _apply_episode_prefix(meta, tmdb_id)
+                return meta
 
             except Exception as e:
                 logger.error(f"Error processing item with TMDB ID {tmdb_id}: {str(e)}")
-                continue
+                return None
+
+        results = await asyncio.gather(*[process_one(tmdb_id) for tmdb_id in item_ids[:process_limit]])
+        metas = [m for m in results if m is not None]
 
         try:
             await asyncio.to_thread(pipeline.execute)
         except Exception as pipe_exec_err:
-             logger.error(f"Error executing cache pipeline: {pipe_exec_err}")
+            logger.error(f"Error executing cache pipeline: {pipe_exec_err}")
 
         catalog = Metas(metas=metas)
         try:

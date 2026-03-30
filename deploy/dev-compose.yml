@@ -3,26 +3,17 @@ version: '3.8'
 services:
   app:
     build: 
-      context: .
+      context: ..
       dockerfile: Dockerfile
       target: development
     stdin_open: true
     tty: true
     volumes:
-      - .:/app
+      - ..:/app
     ports:
       - "8080:8080"
-    environment:
-      RELOAD: True
-      SECRET_API_KEY: 'superkey_that_can_be_changed'
-      TMDB_API_KEY: <REDACTED>
-      ZILEAN_SCHEMA: 'https'
-      ZILEAN_PORT: 443
-      ZILEAN_HOST: <REDACTED>
-      PG_HOST: postgresql-dev
-      REDIS_HOST: redis-dev
-      LOG_LEVEL: DEBUG
-      LOG_REDACTED: False
+    env_file:
+      - ../.env.dev
     depends_on:
       - postgresql-dev
       - redis-dev

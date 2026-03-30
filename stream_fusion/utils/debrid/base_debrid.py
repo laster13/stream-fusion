@@ -1,8 +1,10 @@
 from collections import deque
 import asyncio
+import re
 import time
 
 import aiohttp
+import jsonpickle as _jp
 from aiohttp_socks import ProxyConnector
 
 from stream_fusion.logging_config import logger
@@ -240,3 +242,352 @@ class BaseDebrid:
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
         raise NotImplementedError
+
+    # ---------------------------------------------------------------------------
+    # Generic Redis availability cache (issue #77)
+    # Results are shared across all users of the instance. Private data (tokenized
+    # links, user-specific URLs) is stripped by _sanitize_for_cache() before storage.
+    # ---------------------------------------------------------------------------
+
+    # TTLs — Redis L1
+    _AVAIL_TTL_CACHED     = 10 * 24 * 3600  # 10 days (debrid caches are stable long-term)
+    _AVAIL_TTL_NOT_CACHED = 20 * 60          # 20 minutes (re-check frequently for not-cached)
+    # TTL — PostgreSQL L2 (persistent, survives Redis restarts)
+    _PG_TTL_CACHED        = 30 * 24 * 3600  # 30 days
+
+    @property
+    def service_name(self) -> str:
+        """Unique provider identifier used as a Redis cache key segment. Override per provider."""
+        return self.__class__.__name__.lower()
+
+    def _avail_cache_key(self, h: str) -> str:
+        return f"debrid_avail:{self.service_name}:{h}"
+
+    def _extract_hash(self, value: str):
+        """Extract a 40-char hex info-hash from a magnet URI or raw hash string."""
+        if not value:
+            return None
+        value = str(value).strip().lower()
+        if value.startswith("magnet:?"):
+            m = re.search(r"btih:([0-9a-f]{40})", value, re.IGNORECASE)
+            return m.group(1).lower() if m else None
+        if len(value) == 40 and all(c in "0123456789abcdef" for c in value):
+            return value
+        return None
+
+    def _sanitize_for_cache(self, item: dict) -> dict:
+        """
+        Strip private/user-specific fields before writing to the shared Redis cache.
+        Fields always removed: link, url, stream_link (may contain tokenized private URLs).
+        Override per provider for a stricter field whitelist.
+        """
+        return {k: v for k, v in item.items() if k not in ("link", "url", "stream_link")}
+
+    def _index_results_by_hash(self, response) -> dict:
+        """
+        Build a {hash: item} mapping from a get_availability_bulk() response.
+        Only available (cached) hashes should be included.
+        Must be overridden per provider — each has its own response format.
+        """
+        raise NotImplementedError
+
+    def _reconstruct_response(self, items: list):
+        """
+        Rebuild a get_availability_bulk()-compatible response from a list of sanitized items.
+        Must be overridden per provider to match the format expected by TorrentSmartContainer.
+        """
+        raise NotImplementedError
+
+    async def _get_peer_cache(self, hashes: list, service_name: str = None) -> dict:
+        """POST /api/peer/check on the configured peer instance — HMAC + Fernet.
+
+        Returns {info_hash: cached_data_dict}. Never raises; returns {} on any failure.
+        """
+        peer_url = settings.peer_streamfusion_url
+        key_id = settings.peer_streamfusion_key_id
+        secret = settings.peer_streamfusion_secret
+        if not peer_url or not key_id or not secret or not hashes:
+            return {}
+        svc = service_name or self.service_name
+        try:
+            import json as _json
+            from stream_fusion.utils.peer.crypto import sign_request, decrypt_payload
+            body = _json.dumps({"hashes": hashes, "service": svc}).encode()
+            ts, sig = sign_request(secret, body)
+            session = await self._get_session()
+            async with session.post(
+                f"{peer_url.rstrip('/')}/api/peer/check",
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Peer-Key-Id": key_id,
+                    "X-Peer-Timestamp": ts,
+                    "X-Peer-Signature": sig,
+                },
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                if resp.status != 200:
+                    return {}
+                data = await resp.json()
+            result = decrypt_payload(secret, data["payload"]).get("debrid_cache") or {}
+            if result:
+                logger.debug(
+                    f"{self.__class__.__name__}: peer cache — {len(result)} hits for {svc}"
+                )
+            return result
+        except Exception as e:
+            logger.debug(f"{self.__class__.__name__}: peer cache unavailable ({e})")
+            return {}
+
+    async def _enrich_before_live(
+        self, hashes: list, db_session, redis_client, hits: list
+    ) -> list:
+        """Hook called between L2 (PostgreSQL) and the live API call.
+
+        Queries the configured peer instance for cache hits and warms Redis.
+        Override in subclasses for provider-specific enrichment (e.g. StremThruDebrid).
+        Returns the list of hashes that still need a live API call.
+        """
+        peer_hits = await self._get_peer_cache(hashes)
+        if not peer_hits:
+            return hashes
+
+        if redis_client:
+            try:
+                pipe = redis_client.pipeline()
+                for h, item in peer_hits.items():
+                    pipe.set(
+                        self._avail_cache_key(h),
+                        _jp.encode(item),
+                        ex=self._AVAIL_TTL_CACHED,
+                    )
+                await pipe.execute()
+            except Exception as e:
+                logger.debug(f"{self.__class__.__name__}: peer cache Redis warm failed ({e})")
+
+        hits.extend(peer_hits.values())
+        remaining = [h for h in hashes if h not in peer_hits]
+        logger.debug(
+            f"{self.__class__.__name__}: peer enrichment — "
+            f"{len(peer_hits)} hits, {len(remaining)} remaining"
+        )
+        return remaining
+
+    async def get_availability_bulk_cached(
+        self, hashes_or_magnets, ip, redis_client, db_session=None
+    ):
+        """
+        Two-level caching wrapper around get_availability_bulk() — shared across all users.
+
+        Flow:
+          1. L1 — Batch Redis MGET for all hashes.
+          2. L2 — For Redis misses: query PostgreSQL (only confirmed-cached, non-expired rows).
+                  Warm Redis for PG hits so future requests stay fast.
+          2.5     Optional enrichment hook before live API call (e.g. other streamfusion providers).
+          3. Live API call for remaining misses.
+          4. Write results:
+               Cached     → Redis (10d) + PostgreSQL (30d)
+               Not-cached → Redis sentinel only (20 min), never written to PostgreSQL.
+          5. Reconstruct a provider-compatible response from all hits.
+
+        Security: _sanitize_for_cache() ensures no private token or link leaks into
+        the shared caches (e.g. StremThru tokenized links are stripped).
+
+        Graceful degradation: if redis_client or db_session is None the corresponding
+        layer is skipped transparently.
+        """
+        hashes = [h for h in (self._extract_hash(x) for x in hashes_or_magnets) if h]
+        if not hashes:
+            return self._reconstruct_response([])
+
+        hits = []
+        to_check = []
+
+        # --- L1: Redis batch lookup ---
+        if redis_client:
+            try:
+                raw_values = await redis_client.mget(
+                    [self._avail_cache_key(h) for h in hashes]
+                )
+                for h, raw in zip(hashes, raw_values):
+                    if raw is not None:
+                        val = _jp.decode(raw)
+                        if val.get("status") != "not_cached":
+                            hits.append(val)
+                        # not_cached sentinel → treat as unavailable, skip
+                    else:
+                        to_check.append(h)
+                redis_hit_count = len(hashes) - len(to_check)
+                if redis_hit_count:
+                    logger.info(
+                        f"{self.__class__.__name__}: Redis cache hit "
+                        f"{redis_hit_count}/{len(hashes)} hashes"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"{self.__class__.__name__}: Redis lookup failed ({e}), skipping cache"
+                )
+                to_check = list(hashes)
+        else:
+            to_check = list(hashes)
+
+        # --- L2: PostgreSQL lookup for Redis misses ---
+        if to_check and db_session:
+            try:
+                from stream_fusion.services.postgresql.dao.debridcache_dao import DebridCacheDAO
+                pg_hits = await DebridCacheDAO(db_session).get_batch(to_check, self.service_name)
+                if pg_hits:
+                    logger.debug(
+                        f"{self.__class__.__name__}: PG cache hit "
+                        f"{len(pg_hits)}/{len(to_check)} hashes — warming Redis"
+                    )
+                    # Warm Redis so next request is served from L1
+                    if redis_client:
+                        try:
+                            pipe = redis_client.pipeline()
+                            for h, data in pg_hits.items():
+                                pipe.set(
+                                    self._avail_cache_key(h),
+                                    _jp.encode(data),
+                                    ex=self._AVAIL_TTL_CACHED,
+                                )
+                            await pipe.execute()
+                        except Exception as e:
+                            logger.warning(
+                                f"{self.__class__.__name__}: Redis warm-up failed ({e})"
+                            )
+                    hits.extend(pg_hits.values())
+                    to_check = [h for h in to_check if h not in pg_hits]
+            except Exception as e:
+                logger.warning(
+                    f"{self.__class__.__name__}: PG L2 lookup failed ({e}), continuing to API"
+                )
+
+        # --- L2.5: Peer cache enrichment (before live API call) ---
+        if to_check:
+            to_check = await self._enrich_before_live(to_check, db_session, redis_client, hits)
+
+        # --- Live API call for remaining misses ---
+        if to_check:
+            api_response = await self.get_availability_bulk(to_check, ip)
+            by_hash = self._index_results_by_hash(api_response)
+
+            # Write to Redis
+            if redis_client:
+                try:
+                    pipe = redis_client.pipeline()
+                    for h in to_check:
+                        if h in by_hash:
+                            safe = self._sanitize_for_cache(by_hash[h])
+                            pipe.set(
+                                self._avail_cache_key(h),
+                                _jp.encode(safe),
+                                ex=self._AVAIL_TTL_CACHED,
+                            )
+                            hits.append(safe)
+                        else:
+                            # Not cached: write short-lived sentinel, never write to PG
+                            pipe.set(
+                                self._avail_cache_key(h),
+                                _jp.encode({"status": "not_cached"}),
+                                ex=self._AVAIL_TTL_NOT_CACHED,
+                            )
+                    await pipe.execute()
+                except Exception as e:
+                    logger.warning(
+                        f"{self.__class__.__name__}: Redis write failed ({e})"
+                    )
+                    hits.extend(by_hash.values())
+            else:
+                hits.extend(by_hash.values())
+
+            # Write confirmed-cached results to PostgreSQL (not-cached never stored in PG)
+            if db_session and by_hash:
+                try:
+                    from stream_fusion.services.postgresql.dao.debridcache_dao import DebridCacheDAO
+                    cached_entries = [self._sanitize_for_cache(v) for v in by_hash.values()]
+                    await DebridCacheDAO(db_session).upsert_batch(
+                        cached_entries, self.service_name, self._PG_TTL_CACHED
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"{self.__class__.__name__}: PG write failed ({e})"
+                    )
+
+        return self._reconstruct_response(hits)
+
+    async def invalidate_availability_cache(
+        self, info_hash: str, redis_client, db_session=None
+    ) -> None:
+        """Invalidate both Redis and PostgreSQL cache entries for a hash.
+
+        Call this when get_stream_link() returns no_cache_video_url, confirming that
+        a previously cached hash is a false positive (stale data).
+        The next search for the same hash will re-query the debrid API.
+        """
+        h = self._extract_hash(info_hash) or info_hash.lower()
+        # Remove from Redis L1
+        if redis_client:
+            try:
+                await redis_client.delete(self._avail_cache_key(h))
+            except Exception as e:
+                logger.warning(
+                    f"{self.__class__.__name__}: Redis invalidate failed for {h} ({e})"
+                )
+        # Remove from PostgreSQL L2
+        if db_session:
+            try:
+                from stream_fusion.services.postgresql.dao.debridcache_dao import DebridCacheDAO
+                await DebridCacheDAO(db_session).invalidate(h, self.service_name)
+            except Exception as e:
+                logger.warning(
+                    f"{self.__class__.__name__}: PG invalidate failed for {h} ({e})"
+                )
+        logger.debug(
+            f"{self.__class__.__name__}: Cache invalidated for {h} — false positive confirmed"
+        )
+
+    async def _get_stremthru_community_cache(
+        self,
+        hashes: list,
+        store_name: str,
+        token: str,
+        debrid_code_filter: str | None = None,
+        ip: str | None = None,
+    ) -> tuple:
+        """
+        Query StremThru as optional community cache.
+
+        No local Redis — intentional: StremThru manages its own external cache.
+        Redis caching is handled by the caller (RD/AD) via get_availability_bulk_cached().
+
+        Args:
+            hashes: list of 40-char hex hashes
+            store_name: StremThru store name (e.g. "realdebrid")
+            token: store authentication token
+            debrid_code_filter: if set, filter results by this code (e.g. "AD")
+            ip: optional client IP
+
+        Returns:
+            (cached_items: list[dict], remaining_hashes: list[str])
+            Never raises exceptions.
+        """
+        if not getattr(settings, "stremthru_url", None):
+            return [], hashes
+
+        try:
+            from stream_fusion.utils.stremthru.client import StremThruClient
+            session = await self._get_session()
+            client = StremThruClient(settings.stremthru_url, store_name, token, session)
+            results = await client.check_availability(hashes, ip)
+
+            if debrid_code_filter:
+                results = [r for r in results if r.get("debrid") == debrid_code_filter]
+
+            cached_hashes = {r["hash"] for r in results}
+            remaining = [h for h in hashes if h not in cached_hashes]
+            return results, remaining
+
+        except Exception as e:
+            logger.warning(f"{self.__class__.__name__}: StremThru community cache unavailable ({e})")
+            return [], hashes

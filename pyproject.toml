@@ -11,6 +11,7 @@ fastapi = "^0.111.0"
 uvicorn = "^0.30.1"
 starlette = "^0.37.2"
 requests = "^2.32.3"
+charset-normalizer = "^3.3"
 bencode-py = "^4.0.0"
 jinja2 = "^3.1.4"
 aiocron = "^1.8"
@@ -39,6 +40,7 @@ rank-torrent-name = "^1.9.0"
 orjson = "^3.10.7"
 alembic = "^1.13.2"
 ujson = "^5.10.0"
+cryptography = "^43.0.0"
 
 
 [tool.poetry.group.dev.dependencies]

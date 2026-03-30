@@ -22,7 +22,7 @@ class TorrentItemDAO:
                 self.session.add(new_item)
                 await self.session.flush()
                 await self.session.refresh(new_item)
-                logger.debug(f"TorrentItemDAO: Created new TorrentItem: {new_item.id}")
+                logger.trace(f"TorrentItemDAO: Created new TorrentItem: {new_item.id}")
                 return new_item
             except Exception as e:
                 if "duplicate key value violates unique constraint" not in str(e):
@@ -46,10 +46,10 @@ class TorrentItemDAO:
                 result = await self.session.execute(query)
                 db_item = result.scalar_one_or_none()
                 if db_item:
-                    logger.debug(f"TorrentItemDAO: Retrieved TorrentItem: {item_id}")
+                    logger.trace(f"TorrentItemDAO: Retrieved TorrentItem: {item_id}")
                     return db_item
                 else:
-                    logger.debug(f"TorrentItemDAO: TorrentItem not found: {item_id}")
+                    logger.trace(f"TorrentItemDAO: TorrentItem not found: {item_id}")
                     return None
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error retrieving TorrentItem {item_id}: {str(e)}")
@@ -163,6 +163,33 @@ class TorrentItemDAO:
                 logger.error(f"TorrentItemDAO: Error retrieving TorrentItems by availability {available}: {str(e)}")
                 return None
 
+    async def get_batch_by_hashes(self, hashes: list) -> dict:
+        """Return {info_hash: metadata_dict} for the given hashes. Missing hashes are omitted."""
+        if not hashes:
+            return {}
+        async with self.session.begin():
+            try:
+                query = select(TorrentItemModel).where(TorrentItemModel.info_hash.in_(hashes))
+                result = await self.session.execute(query)
+                rows = result.scalars().all()
+                logger.debug(f"TorrentItemDAO: get_batch_by_hashes — {len(rows)}/{len(hashes)} found")
+                return {
+                    row.info_hash: {
+                        "raw_title": row.raw_title,
+                        "size": row.size,
+                        "file_name": row.file_name,
+                        "files": row.files,
+                        "languages": row.languages,
+                        "seeders": row.seeders,
+                        "parsed_data": row.parsed_data,
+                        "full_index": row.full_index,
+                    }
+                    for row in rows
+                }
+            except Exception as e:
+                logger.error(f"TorrentItemDAO: Error in get_batch_by_hashes: {str(e)}")
+                return {}
+
     async def search_by_info_hash(self, info_hash: str) -> Optional[TorrentItemModel]:
         async with self.session.begin():
             try:
@@ -233,25 +260,24 @@ class TorrentItemDAO:
                 return False
 
     async def update_tmdb_id_by_raw_title(self, raw_title: str, tmdb_id: int) -> int:
-        async with self.session.begin():
-            try:
-                stmt = (
-                    update(TorrentItemModel)
-                    .where(TorrentItemModel.raw_title == raw_title)
-                    .where(TorrentItemModel.tmdb_id.is_(None))
-                    .values(
-                        tmdb_id=tmdb_id,
-                        updated_at=int(datetime.now(timezone.utc).timestamp())
-                    )
+        try:
+            stmt = (
+                update(TorrentItemModel)
+                .where(TorrentItemModel.raw_title == raw_title)
+                .where(TorrentItemModel.tmdb_id.is_(None))
+                .values(
+                    tmdb_id=tmdb_id,
+                    updated_at=int(datetime.now(timezone.utc).timestamp())
                 )
-                result = await self.session.execute(stmt)
-                await self.session.flush()
-                row_count = result.rowcount
-                logger.debug(f"TorrentItemDAO: Updated {row_count} torrents with raw_title '{raw_title}' to tmdb_id {tmdb_id}")
-                return row_count
-            except Exception as e:
-                logger.error(f"TorrentItemDAO: Error updating tmdb_id for raw_title '{raw_title}': {str(e)}")
-                return 0
+            )
+            result = await self.session.execute(stmt)
+            await self.session.flush()
+            row_count = result.rowcount
+            logger.debug(f"TorrentItemDAO: Updated {row_count} torrents with raw_title '{raw_title}' to tmdb_id {tmdb_id}")
+            return row_count
+        except Exception as e:
+            logger.error(f"TorrentItemDAO: Error updating tmdb_id for raw_title '{raw_title}': {str(e)}")
+            return 0
 
     async def get_latest_tmdb_ids(self, item_type: str, limit: int = 50) -> List[int]:
         async with self.session.begin():

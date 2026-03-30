@@ -1,6 +1,7 @@
 import enum
 import multiprocessing
 import os
+import sys
 from pydantic import Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from yarl import URL
@@ -76,6 +77,14 @@ class Settings(BaseSettings):
     )
     use_https: bool = False
     download_service: DebridService | None = None
+    # When False, download (non-cached) streams are hidden from Stremio results.
+    # Set ALLOW_DEBRID_DOWNLOAD=false on public instances to prevent users from
+    # triggering debrid downloads directly from Stremio.
+    allow_debrid_download: bool = True
+    # When True, a public self-registration page is available at /register for users to
+    # generate their own API keys. Set ALLOW_PUBLIC_KEY_REGISTRATION=true on open/public
+    # instances. Defaults to False (admin-managed keys only).
+    allow_public_key_registration: bool = False
     no_cache_video_language: NoCacheVideoLanguages = NoCacheVideoLanguages.FR
 
     # PROXY
@@ -87,6 +96,12 @@ class Settings(BaseSettings):
         None  # If set, the link will be proxied through the given proxy.
     )
     proxy_buffer_size: int = 1024 * 1024
+    playback_limit_requests: int = 60   # max requests per user per window
+    playback_limit_seconds: int = 60    # window size in seconds
+    # PEER CACHE (inter-instance sharing)
+    peer_streamfusion_url: str = ""        # URL of the peer stream-fusion instance
+    peer_streamfusion_key_id: str = ""     # key_id issued by the peer instance
+    peer_streamfusion_secret: str = ""     # secret issued by the peer instance (256-bit hex)
 
     # REALDEBRID
     rd_token: str | None = None
@@ -125,7 +140,10 @@ class Settings(BaseSettings):
     # SECURITY
     secret_api_key: str | None = None
     security_hide_docs: bool = True
-    allow_anonymous_access: bool = True  # Allow access without API key
+    # Fernet encryption key for config tokens embedded in addon URLs.
+    # Must persist across restarts — changing this key invalidates all existing config URLs.
+    # If not set, falls back to plain Base64 encoding (unencrypted).
+    config_secret_key: str | None = None
 
     # POSTGRESQL_DB
     # TODO: Change the values, but break dev environment
@@ -147,6 +165,7 @@ class Settings(BaseSettings):
 
     # TMDB
     tmdb_api_key: str | None = None
+    tmdb_language: str = "fr-FR"
 
     # JACKETT
     jackett_host: str = "jackett"
@@ -156,16 +175,24 @@ class Settings(BaseSettings):
     jackett_enable: bool = check_env_variable("JACKETT_API_KEY")
 
     # SERVER-SIDE INDEXER ENABLE FLAGS
-    # When False, the indexer is disabled for ALL users regardless of their config.
-    # Mirrors the jackett_enable pattern — set True only when server credentials exist.
-    sharewood_enable: bool = check_env_variable("SHAREWOOD_PASSKEY")
-    c411_enable: bool = check_env_variable("C411_API_KEY")
-    torr9_enable: bool = check_env_variable("TORR9_API_KEY")
-    lacale_enable: bool = check_env_variable("LACALE_API_KEY")
+    # Controls whether an indexer is available on this server instance.
+    # When False, the indexer is hidden from the config page and disabled for ALL users,
+    # regardless of their personal config (even if they have their own credentials).
+    # When True (default), users can enable the indexer and optionally provide their own
+    # credentials — unless a server-side unique account is configured, in which case
+    # the server credentials are used for everyone.
+    c411_enable: bool = True
+    torr9_enable: bool = True
+    lacale_enable: bool = True
+    generationfree_enable: bool = True
+    abn_enable: bool = True
+    g3mini_enable: bool = True
+    theoldschool_enable: bool = True
 
     # ZILEAN DMM API
-    zilean_host: str = "zilean"
-    zilean_port: int = 8181
+    zilean_schema: str = "https"
+    zilean_host: str = "zileanfortheweebs.midnightignite.me" # use direct docker container name for internal communication, but can be overridden by environment variable ZILEAN_HOST
+    zilean_port: int | None = None # default port is 8181, but can be overridden by environment variable ZILEAN_PORT
     
     # DEBRIDLINK
     dl_token: str | None = None
@@ -182,7 +209,6 @@ class Settings(BaseSettings):
     # PIKPAK
     pp_credentials: str | None = None
     pp_unique_account: bool = check_env_variable("PP_CREDENTIALS")
-    zilean_schema: str = "http"
     zilean_max_workers: int = 4
     zilean_pool_connections: int = 10
     zilean_api_pool_maxsize: int = 10
@@ -194,16 +220,10 @@ class Settings(BaseSettings):
     ygg_passkey: str | None = None
     ygg_unique_account: bool = False
 
-    # SHAREWOOD
-    sharewood_url: str = "https://www.sharewood.tv"
-    sharewood_max_workers: int = 4
-    sharewood_passkey: str | None = None
-    sharewood_unique_account: bool = check_env_variable("SHAREWOOD_PASSKEY")
-
     # C411 TORZNAB
     c411_url: str = "https://c411.org"
     c411_api_key: str | None = None  # Env: C411_API_KEY — Torznab access key
-    c411_passkey: str | None = None  # Env: C411_PASSKEY — full tracker announce URL
+    c411_passkey: str | None = None  # Env: C411_PASSKEY — passkey for announce URL
     c411_unique_account: bool = check_env_variable("C411_API_KEY")
 
     # TORR9 TORZNAB
@@ -216,8 +236,33 @@ class Settings(BaseSettings):
     lacale_api_key: str | None = None  # Env: LACALE_API_KEY
     lacale_unique_account: bool = check_env_variable("LACALE_API_KEY")
 
-    # PUBLIC_CACHE
-    public_cache_url: str = "https://stremio-jackett-cacher.elfhosted.com/"
+    # GENERATIONFREE
+    generationfree_url: str = "https://generation-free.org"
+    generationfree_api_key: str | None = None
+    generationfree_passkey: str | None = None          # Env: GENERATIONFREE_PASSKEY
+    generationfree_unique_account: bool = check_env_variable("GENERATIONFREE_API_KEY")
+
+    # ABN (Abnormal)
+    abn_url: str = "https://abn.lol"
+    abn_api_url: str = "https://api.abn.lol"
+    abn_api_key: str | None = None                     # Env: ABN_API_KEY
+    abn_passkey: str | None = None                     # Env: ABN_PASSKEY (announce URL)
+    abn_unique_account: bool = check_env_variable("ABN_API_KEY")
+
+    # G3MINI (Gemini Tracker)
+    g3mini_url: str = "https://gemini-tracker.org"
+    g3mini_api_key: str | None = None                  # Env: G3MINI_API_KEY
+    g3mini_passkey: str | None = None                  # Env: G3MINI_PASSKEY
+    g3mini_unique_account: bool = check_env_variable("G3MINI_API_KEY")
+
+    # THEOLDSCHOOL
+    theoldschool_url: str = "https://theoldschool.cc"
+    theoldschool_api_key: str | None = None            # Env: THEOLDSCHOOL_API_KEY
+    theoldschool_passkey: str | None = None            # Env: THEOLDSCHOOL_PASSKEY
+    theoldschool_unique_account: bool = check_env_variable("THEOLDSCHOOL_API_KEY")
+
+    # ADMIN
+    admin_template_dir: str = "/app/stream_fusion/static/admin"
 
     # DEVELOPMENT
     debug: bool = False
@@ -299,7 +344,9 @@ class Settings(BaseSettings):
         return url
 
     model_config = SettingsConfigDict(
-        env_file=".env", secrets_dir="/run/secrets", env_file_encoding="utf-8"
+        env_file=".env",
+        secrets_dir="/run/secrets" if os.path.isdir("/run/secrets") else None,
+        env_file_encoding="utf-8",
     )
 
     @property
@@ -324,7 +371,16 @@ class Settings(BaseSettings):
         return "https://raw.githubusercontent.com/Telkaoss/stream-fusion/refs/heads/master/stream_fusion/static/videos/slots_full.mp4"
 
 
+_DEFAULT_SESSION_KEY = "331cbfe48117fcba53d09572b10d2fc293d86131dc51be46d8aa9843c2e9f48d"
+
 try:
     settings = Settings()
 except ValidationError as e:
     raise RuntimeError(f"Configuration validation error: {e}")
+
+if settings.session_key == _DEFAULT_SESSION_KEY:
+    print(
+        "WARNING: SESSION_KEY is using the insecure default value. "
+        "Set the SESSION_KEY environment variable to a unique secret.",
+        file=sys.stderr,
+    )

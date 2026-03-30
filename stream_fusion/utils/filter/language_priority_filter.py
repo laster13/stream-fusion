@@ -36,7 +36,7 @@ class LanguagePriorityFilter(BaseFilter):
                 3: ["VOSTFR"],
 
             }
-            logger.info("VFQ sélectionné dans les préférences, VFQ et VF2 placés en priorité maximale")
+            logger.info("Language preference set: VFQ/VF2 prioritized as group 1")
         else:
             # Configuration standard si VFQ n'est pas explicitement sélectionné
             self.language_priority_groups = {
@@ -69,7 +69,7 @@ class LanguagePriorityFilter(BaseFilter):
 
         sorted_data = sorted(data, key=lambda x: x.language_priority)
         
-        logger.info(f"Tri par langue terminé. Ordre des langues: VFF/VOF/VFI > VF2/VFQ > VOST > autres")
+        logger.debug(f"Language sort complete. Priority order: VFF/VOF/VFI > VF2/VFQ > VOST > others")
         
         return sorted_data
 

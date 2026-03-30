@@ -1,20 +1,33 @@
 {% extends "base.html" %}
+{% block title %}Nouvelle clé API — StreamFusion Admin{% endblock %}
+{% block page_title %}Nouvelle clé API{% endblock %}
 
 {% block content %}
-<h1 class="mb-4">Create a new API Key</h1>
-<form action="{{ url_for('create_api_key')(request) }}" method="post">
-    <div class="mb-3">
-        <label for="name" class="form-label">Key Name</label>
-        <input type="text" class="form-control" id="name" name="name">
-    </div>
-    <div class="mb-3 form-check">
-        <input type="checkbox" class="form-check-input" id="never_expires" name="never_expires">
-        <label class="form-check-label" for="never_expires">Never expires</label>
-    </div>
-    <div class="mb-3 form-check">
-        <input type="checkbox" class="form-check-input" id="proxied_links" name="proxied_links">
-        <label class="form-check-label" for="proxied_links">Activer la proxification des liens vidéos</label>
-    </div>
-    <button type="submit" class="btn btn-primary">Create</button>
-</form>
+<div style="max-width:480px;">
+    <form action="{{ url_for('create_api_key')(request) }}" method="post">
+        <div class="mb-3">
+            <label for="name" class="form-label">Nom <span class="text-secondary" style="font-size:0.8rem;">(optionnel)</span></label>
+            <input type="text" class="form-control" id="name" name="name" placeholder="ex: utilisateur-prod">
+        </div>
+        <div class="mb-3">
+            <div class="form-check">
+                <input type="checkbox" class="form-check-input" id="never_expires" name="never_expires">
+                <label class="form-check-label" for="never_expires">N'expire jamais</label>
+            </div>
+            <div class="form-text">Par défaut, la clé expire après 15 jours.</div>
+        </div>
+        <div class="mb-4">
+            <div class="form-check">
+                <input type="checkbox" class="form-check-input" id="proxied_links" name="proxied_links">
+                <label class="form-check-label" for="proxied_links">Activer la proxification des liens vidéo</label>
+            </div>
+        </div>
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary px-4">
+                <i class="bi bi-plus-lg me-1"></i>Créer
+            </button>
+            <a href="{{ url_for('list_api_keys')(request) }}" class="btn btn-outline-secondary px-4">Annuler</a>
+        </div>
+    </form>
+</div>
 {% endblock %}

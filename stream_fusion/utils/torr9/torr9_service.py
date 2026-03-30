@@ -1,4 +1,5 @@
 from typing import List, Optional, Union
+import asyncio
 import re
 
 import aiohttp
@@ -48,7 +49,7 @@ class Torr9Service:
         return self._build_results(raw, media)
 
     async def _search_series(self, media: Series) -> List[Torr9Result]:
-        logger.info(f"Torr9: Searching series: {media.titles[0]}")
+        logger.debug(f"Torr9: Searching series: {media.titles[0]}")
         raw_id = media.id.split(":")[0] if media.id else None
         imdb_id = raw_id if raw_id and raw_id.startswith("tt") else None
 
@@ -65,14 +66,14 @@ class Torr9Service:
             episode=episode_num,
         )
 
-        logger.info(
+        logger.debug(
             f"Torr9: {len(raw)} raw results for '{media.titles[0]}' "
             f"(S{season_num:02d}E{episode_num:02d})"
         )
 
-        raw = self._filter_series_results_for_torr9_only(raw, media)
+        raw = await asyncio.to_thread(self._filter_series_results_for_torr9_only, raw, media)
 
-        logger.info(
+        logger.debug(
             f"Torr9: {len(raw)} raw results after Torr9 local filtering for '{media.titles[0]}'"
         )
 
@@ -85,11 +86,11 @@ class Torr9Service:
                 result = Torr9Result().from_api_item(item, media)
                 results.append(result)
             except ValueError as e:
-                logger.debug(f"Torr9: Skipping item - {e}")
+                logger.trace(f"Torr9: Skipping item - {e}")
             except Exception as e:
                 logger.error(f"Torr9: Unexpected error while building item: {e}")
 
-        logger.info(f"Torr9: Built {len(results)} final Torr9Result objects")
+        logger.debug(f"Torr9: Built {len(results)} final Torr9Result objects")
         return results
 
     def _filter_series_results_for_torr9_only(self, raw_results, media: Series):
@@ -118,7 +119,7 @@ class Torr9Service:
             is_complete_pack = self._is_complete_pack(title)
 
             if allowed_years is not None and found_year is not None and found_year not in allowed_years:
-                logger.debug(f"Torr9: Reject wrong year: {title}")
+                logger.trace(f"Torr9: Reject wrong year: {title}")
                 continue
 
             if is_complete_pack:
@@ -126,7 +127,7 @@ class Torr9Service:
                 continue
 
             if has_episode_marker and not exact_match:
-                logger.debug(
+                logger.trace(
                     f"Torr9: Reject wrong episode for S{season_num:02d}E{episode_num:02d}: {title}"
                 )
                 continue
@@ -135,7 +136,7 @@ class Torr9Service:
 
         combined = exact_episode_items + complete_pack_items
 
-        logger.info(
+        logger.debug(
             f"Torr9: Filtered results for '{media.titles[0]}' "
             f"(exact={len(exact_episode_items)}, packs={len(complete_pack_items)}, total={len(combined)})"
         )
@@ -206,7 +207,7 @@ class Torr9Service:
             url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
             response = requests.get(
                 url,
-                params={"api_key": settings.tmdb_api_key, "language": "fr-FR"},
+                params={"api_key": settings.tmdb_api_key, "language": settings.tmdb_language},
                 timeout=10,
             )
             response.raise_for_status()

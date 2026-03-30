@@ -176,6 +176,28 @@ class Premiumize(BaseDebrid):
             "transcoded": response.get("transcoded", [False])
         }
 
+    # --- Provider overrides for the generic BaseDebrid cache (issue #77) ---
+
+    @property
+    def service_name(self) -> str:
+        return "premiumize"
+
+    def _index_results_by_hash(self, response) -> dict:
+        # Premiumize response is {hash: {"transcoded": bool, "filename": ..., "filesize": ...}}
+        if not isinstance(response, dict):
+            return {}
+        return {
+            h: {**v, "hash": h}
+            for h, v in response.items()
+            if isinstance(v, dict) and v.get("transcoded")
+        }
+
+    def _reconstruct_response(self, items: list):
+        return {item["hash"]: {k: v for k, v in item.items() if k != "hash"} for item in items}
+
+    def _sanitize_for_cache(self, item: dict) -> dict:
+        return {k: item.get(k) for k in ("hash", "transcoded", "filename", "filesize")}
+
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
         """Get availability for multiple hashes or magnets"""
         await self._ensure_token_checked()

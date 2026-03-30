@@ -2,22 +2,27 @@ from fastapi import APIRouter, Request, Depends, HTTPException, Form
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import APIKeyHeader
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import HTTP_303_SEE_OTHER
 import secrets
 import uuid
 from datetime import timedelta
 
+from stream_fusion.services.postgresql.dependencies import get_db_session
+
 from stream_fusion.services.postgresql.schemas.apikey_schemas import APIKeyCreate, APIKeyUpdate
 from stream_fusion.utils.security.security_secret import SecretManager
 from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
+from stream_fusion.services.postgresql.dao.peerkey_dao import PeerKeyDAO
 from stream_fusion.web.api.auth.schemas import UsageLogs, UsageLog
 from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
 from stream_fusion.services.redis.redis_config import get_redis_dependency
+from stream_fusion.web.api.utils import ensure_uuid
 
 router = APIRouter()
 
-templates = Jinja2Templates(directory="/app/stream_fusion/static/admin")
+templates = Jinja2Templates(directory=settings.admin_template_dir)
 
 SECRET_KEY_NAME = "secret-key"
 secret_header = APIKeyHeader(name=SECRET_KEY_NAME, auto_error=False)
@@ -166,21 +171,11 @@ async def create_api_key(
     logger.info(f"Creating new API key. Name: {name}, Never expires: {never_expires}, Proxied links: {proxied_links}")
     key = APIKeyCreate(name=name, never_expire=never_expires, proxied_links=proxied_links)
     new_key = await apikey_dao.create_key(key)
-    logger.info(f"New API key created: {new_key.api_key}")
+    logger.info("New API key created successfully.")
     return RedirectResponse(
         url=custom_url_for("list_api_keys")(request), status_code=HTTP_303_SEE_OTHER
     )
 
-
-def ensure_uuid(api_key: str) -> uuid.UUID:
-    """Convert a string to UUID if it's not already a UUID object."""
-    if isinstance(api_key, uuid.UUID):
-        return api_key
-    try:
-        return uuid.UUID(api_key)
-    except ValueError:
-        logger.error(f"Invalid API key format: {api_key}")
-        raise HTTPException(status_code=400, detail="Invalid API key format")
 
 @router.post("/revoke-api-key")
 async def revoke_api_key(
@@ -293,4 +288,105 @@ async def logout(request: Request, redis_client=get_redis_dependency()):
     request.session.clear()
     return RedirectResponse(
         url=custom_url_for("login_page")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+# ── Peer Key Management ────────────────────────────────────────────────────────
+
+@router.get("/peer-keys", response_class=HTMLResponse)
+async def list_peer_keys(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    dao = PeerKeyDAO(db)
+    keys = await dao.list_keys()
+
+    # Pop one-time new key credentials from session (shown once after creation)
+    new_key = request.session.pop("new_peer_key", None)
+
+    return templates.TemplateResponse(
+        "peer_keys.html", {"request": request, "keys": keys, "new_key": new_key}
+    )
+
+
+@router.get("/create-peer-key", response_class=HTMLResponse)
+async def create_peer_key_page(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    return templates.TemplateResponse("create_peer_key.html", {"request": request})
+
+
+@router.post("/create-peer-key")
+async def create_peer_key(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    name: str = Form(...),
+    rate_limit: int = Form(60),
+    rate_window: int = Form(60),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    dao = PeerKeyDAO(db)
+    result = await dao.create_key(name=name, rate_limit=rate_limit, rate_window=rate_window)
+    logger.success(f"Admin: peer key created for '{name}' ({result['key_id'][:8]}…)")
+
+    # Store credentials in session — shown once on the list page
+    request.session["new_peer_key"] = result
+
+    return RedirectResponse(
+        url=custom_url_for("list_peer_keys")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+@router.post("/revoke-peer-key")
+async def revoke_peer_key(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    key_id: str = Form(...),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    dao = PeerKeyDAO(db)
+    result = await dao.revoke_key(key_id)
+    if result:
+        logger.info(f"Admin: peer key revoked: {key_id[:8]}…")
+    else:
+        logger.warning(f"Admin: peer key not found for revoke: {key_id[:8]}…")
+
+    return RedirectResponse(
+        url=custom_url_for("list_peer_keys")(request), status_code=HTTP_303_SEE_OTHER
+    )
+
+
+@router.post("/delete-peer-key")
+async def delete_peer_key(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    key_id: str = Form(...),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    dao = PeerKeyDAO(db)
+    result = await dao.delete_key(key_id)
+    if result:
+        logger.info(f"Admin: peer key deleted: {key_id[:8]}…")
+    else:
+        logger.warning(f"Admin: peer key not found for deletion: {key_id[:8]}…")
+
+    return RedirectResponse(
+        url=custom_url_for("list_peer_keys")(request), status_code=HTTP_303_SEE_OTHER
     )

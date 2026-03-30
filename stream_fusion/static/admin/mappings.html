@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% block title %}Mappings méta — StreamFusion Admin{% endblock %}
+{% block page_title %}Mappings de métadonnées{% endblock %}
+
+{% block extra_head %}
+<style>
+    .badge-series { background: rgba(13,202,240,0.15); color: #0dcaf0; border: 1px solid rgba(13,202,240,0.3); }
+    .badge-movie  { background: rgba(13,110,253,0.15); color: #6ea8fe; border: 1px solid rgba(13,110,253,0.3); }
+    .search-input { max-width: 280px; }
+    code.imdb-id  { color: #f0b27a; font-size: 0.85rem; }
+    code.tmdb-id  { color: #82e0aa; font-size: 0.85rem; }
+    .search-title-tag {
+        display: inline-block;
+        background: rgba(255,255,255,0.07);
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 0.72rem;
+        margin: 1px 2px 0 0;
+        color: var(--bs-secondary-color);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Header -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <input type="text" class="form-control form-control-sm search-input"
+           id="searchInput" placeholder="Rechercher (IMDb, TMDB, titre…)">
+    <button class="btn btn-primary btn-sm" id="createBtn">
+        <i class="bi bi-plus-lg me-1"></i>Nouveau mapping
+    </button>
+</div>
+
+<!-- Table -->
+<div class="table-responsive">
+    <table class="table table-hover align-middle" id="mappingsTable">
+        <thead>
+            <tr style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--bs-secondary-color);">
+                <th>IMDb ID</th>
+                <th>TMDB ID</th>
+                <th>Titre override / Titres recherche</th>
+                <th>Année</th>
+                <th>Type</th>
+                <th>Notes</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="mappingsBody">
+            {% for m in mappings %}
+            <tr data-search="{{ m.imdb_id }} {{ m.tmdb_id or '' }} {{ m.title_override or '' }} {{ m.notes or '' }} {{ (m.search_titles | join(' ')) if m.search_titles else '' }}">
+                <td><code class="imdb-id">{{ m.imdb_id }}</code></td>
+                <td>
+                    {% if m.tmdb_id %}<code class="tmdb-id">{{ m.tmdb_id }}</code>
+                    {% else %}<span class="text-secondary">—</span>{% endif %}
+                </td>
+                <td style="font-size:0.875rem;">
+                    {{ m.title_override or '—' }}
+                    {% if m.search_titles %}
+                    <div class="mt-1">
+                        {% for t in m.search_titles %}
+                        <span class="search-title-tag">{{ t }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </td>
+                <td style="font-size:0.875rem;">{{ m.year_override or '—' }}</td>
+                <td>
+                    {% if m.media_type == 'series' %}
+                    <span class="badge badge-series">Série</span>
+                    {% else %}
+                    <span class="badge badge-movie">Film</span>
+                    {% endif %}
+                </td>
+                <td style="font-size:0.78rem;color:var(--bs-secondary-color);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ m.notes or '' }}">
+                    {{ m.notes or '—' }}
+                </td>
+                <td>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-sm btn-outline-secondary edit-btn" title="Modifier"
+                                data-mapping-id="{{ m.id }}"
+                                data-imdb-id="{{ m.imdb_id }}"
+                                data-tmdb-id="{{ m.tmdb_id or '' }}"
+                                data-title="{{ m.title_override or '' }}"
+                                data-media-type="{{ m.media_type }}"
+                                data-notes="{{ m.notes or '' }}"
+                                data-search-titles="{{ (m.search_titles | join(',')) if m.search_titles else '' }}"
+                                data-year-override="{{ m.year_override or '' }}">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger delete-btn" title="Supprimer"
+                                data-mapping-id="{{ m.id }}"
+                                data-imdb-id="{{ m.imdb_id }}">
+                            <i class="bi bi-trash3"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr id="emptyRow">
+                <td colspan="7" class="text-center text-secondary py-4">
+                    <i class="bi bi-inbox fs-4 d-block mb-2"></i>
+                    Aucun mapping. Cliquez sur « Nouveau mapping » pour en ajouter un.
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- ── Modal create / edit ── -->
+<div class="modal fade" id="mappingModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h6 class="modal-title fw-semibold" id="modalTitle">Nouveau mapping</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="mappingId">
+                <div class="mb-3">
+                    <label class="form-label">IMDb ID <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="fImdbId" placeholder="tt38776705" required>
+                    <div class="form-text">Format : <code>tt</code> suivi de chiffres.</div>
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-8">
+                        <label class="form-label">TMDB ID <span class="text-secondary" style="font-size:0.8rem;">(optionnel)</span></label>
+                        <input type="text" class="form-control" id="fTmdbId" placeholder="272565">
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label">Année <span class="text-secondary" style="font-size:0.8rem;">(optionnel)</span></label>
+                        <input type="number" class="form-control" id="fYearOverride" placeholder="2024" min="1900" max="2100">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Titre override <span class="text-secondary" style="font-size:0.8rem;">(optionnel)</span></label>
+                    <input type="text" class="form-control" id="fTitle" placeholder="Nom exact de la série / du film">
+                    <div class="form-text">Utilisé quand Cinemeta ne retourne pas de titre.</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Titres de recherche <span class="text-secondary" style="font-size:0.8rem;">(optionnel, séparés par des virgules)</span></label>
+                    <input type="text" class="form-control" id="fSearchTitles" placeholder="Titre alternatif 1, Titre 2">
+                    <div class="form-text">Titres alternatifs utilisés pour trouver des torrents mal nommés.</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Type</label>
+                    <select class="form-select" id="fMediaType">
+                        <option value="series">Série</option>
+                        <option value="movie">Film</option>
+                    </select>
+                </div>
+                <div class="mb-1">
+                    <label class="form-label">Notes <span class="text-secondary" style="font-size:0.8rem;">(optionnel)</span></label>
+                    <textarea class="form-control" id="fNotes" rows="2" placeholder="Commentaire interne…"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-primary btn-sm" id="modalSaveBtn">
+                    <i class="bi bi-check-lg me-1"></i>Enregistrer
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Modal delete ── -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h6 class="modal-title fw-semibold">Supprimer le mapping</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                Supprimer définitivement le mapping pour <code id="deleteImdbId" class="imdb-id"></code> ?
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-danger btn-sm" id="deleteConfirmBtn">
+                    <i class="bi bi-trash3 me-1"></i>Supprimer
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Toast ── -->
+<div style="position:fixed;bottom:24px;right:24px;z-index:9999;" id="toastWrap" class="d-none">
+    <div class="toast show align-items-center border-0" id="toastEl">
+        <div class="d-flex">
+            <div class="toast-body" id="toastMsg"></div>
+            <button type="button" class="btn-close me-2 m-auto" id="toastClose"></button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const mappingModal = new bootstrap.Modal(document.getElementById('mappingModal'));
+const deleteModal  = new bootstrap.Modal(document.getElementById('deleteModal'));
+let deleteId = null;
+
+// ── Search ──
+document.getElementById('searchInput').addEventListener('input', function () {
+    const q = this.value.toLowerCase();
+    document.querySelectorAll('#mappingsBody tr[data-search]').forEach(row => {
+        row.style.display = row.dataset.search.toLowerCase().includes(q) ? '' : 'none';
+    });
+});
+
+// ── Create button ──
+document.getElementById('createBtn').addEventListener('click', () => {
+    document.getElementById('modalTitle').textContent = 'Nouveau mapping';
+    document.getElementById('mappingId').value = '';
+    document.getElementById('fImdbId').value = '';
+    document.getElementById('fImdbId').removeAttribute('readonly');
+    document.getElementById('fTmdbId').value = '';
+    document.getElementById('fTitle').value = '';
+    document.getElementById('fSearchTitles').value = '';
+    document.getElementById('fYearOverride').value = '';
+    document.getElementById('fMediaType').value = 'series';
+    document.getElementById('fNotes').value = '';
+    mappingModal.show();
+});
+
+// ── Edit buttons ──
+document.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.getElementById('modalTitle').textContent = 'Modifier le mapping';
+        document.getElementById('mappingId').value = btn.dataset.mappingId;
+        document.getElementById('fImdbId').value = btn.dataset.imdbId;
+        document.getElementById('fImdbId').setAttribute('readonly', true);
+        document.getElementById('fTmdbId').value = btn.dataset.tmdbId || '';
+        document.getElementById('fTitle').value = btn.dataset.title || '';
+        document.getElementById('fSearchTitles').value = btn.dataset.searchTitles || '';
+        document.getElementById('fYearOverride').value = btn.dataset.yearOverride || '';
+        document.getElementById('fMediaType').value = btn.dataset.mediaType;
+        document.getElementById('fNotes').value = btn.dataset.notes || '';
+        mappingModal.show();
+    });
+});
+
+// ── Delete buttons ──
+document.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        deleteId = btn.dataset.mappingId;
+        document.getElementById('deleteImdbId').textContent = btn.dataset.imdbId;
+        deleteModal.show();
+    });
+});
+
+document.getElementById('deleteConfirmBtn').addEventListener('click', async () => {
+    deleteModal.hide();
+    const fd = new FormData();
+    fd.append('mapping_id', deleteId);
+    const res = await fetch('/admin/mappings/delete', { method: 'POST', body: fd });
+    const data = await res.json();
+    showToast(data.success, data.success ? 'Mapping supprimé' : (data.message || 'Erreur'));
+    if (data.success) setTimeout(() => location.reload(), 800);
+});
+
+// ── Save (create or edit) ──
+document.getElementById('modalSaveBtn').addEventListener('click', async () => {
+    const id = document.getElementById('mappingId').value;
+    const fd = new FormData();
+    if (id) fd.append('mapping_id', id);
+    fd.append('imdb_id',        document.getElementById('fImdbId').value.trim());
+    fd.append('tmdb_id',        document.getElementById('fTmdbId').value.trim());
+    fd.append('title_override', document.getElementById('fTitle').value.trim());
+    fd.append('search_titles',  document.getElementById('fSearchTitles').value.trim());
+    const yearVal = document.getElementById('fYearOverride').value.trim();
+    if (yearVal) fd.append('year_override', yearVal);
+    fd.append('media_type',     document.getElementById('fMediaType').value);
+    fd.append('notes',          document.getElementById('fNotes').value.trim());
+
+    if (!fd.get('imdb_id')) { showToast(false, "L'IMDb ID est requis"); return; }
+
+    const url = id ? '/admin/mappings/edit' : '/admin/mappings/create';
+    const res = await fetch(url, { method: 'POST', body: fd });
+    const data = await res.json();
+
+    mappingModal.hide();
+    showToast(data.success, data.success ? (id ? 'Mapping mis à jour' : 'Mapping créé') : (data.message || 'Erreur'));
+    if (data.success) setTimeout(() => location.reload(), 800);
+});
+
+// ── Toast ──
+document.getElementById('toastClose').addEventListener('click', () => {
+    document.getElementById('toastWrap').classList.add('d-none');
+});
+
+function showToast(success, message) {
+    const el = document.getElementById('toastEl');
+    el.className = `toast show align-items-center border-0 text-bg-${success ? 'success' : 'danger'}`;
+    document.getElementById('toastMsg').textContent = message;
+    document.getElementById('toastWrap').classList.remove('d-none');
+    setTimeout(() => document.getElementById('toastWrap').classList.add('d-none'), 4000);
+}
+</script>
+{% endblock %}

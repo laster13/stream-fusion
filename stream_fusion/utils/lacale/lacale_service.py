@@ -82,5 +82,5 @@ class LaCaleService:
                 result = LaCaleResult().from_api_item(item, media)
                 results.append(result)
             except ValueError as e:
-                logger.debug(f"LaCale: Skipping item - {e}")
+                logger.trace(f"LaCale: Skipping item - {e}")
         return results

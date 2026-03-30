@@ -8,6 +8,7 @@ from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
 from stream_fusion.settings import settings
 from stream_fusion.utils.parse_config import parse_config
 from stream_fusion.utils.security.security_api_key import check_api_key
+from stream_fusion.utils.string_encoding import generate_csrf_token
 from stream_fusion.version import get_version
 from stream_fusion.web.root.config.schemas import ManifestResponse
 
@@ -31,13 +32,26 @@ async def configure(request: Request):
         "request": request,
         "rd_unique_account": settings.rd_unique_account,
         "ad_unique_account": settings.ad_unique_account,
-        "sharewood_unique_account": settings.sharewood_unique_account,
         "ygg_unique_account": settings.ygg_unique_account,
         "jackett_enable": settings.jackett_enable,
         "tb_unique_account": settings.tb_unique_account,
+        "c411_enable": settings.c411_enable,
+        "torr9_enable": settings.torr9_enable,
+        "lacale_enable": settings.lacale_enable,
         "c411_unique_account": settings.c411_unique_account,
         "torr9_unique_account": settings.torr9_unique_account,
         "lacale_unique_account": settings.lacale_unique_account,
+        "generationfree_enable": settings.generationfree_enable,
+        "generationfree_unique_account": settings.generationfree_unique_account,
+        "abn_enable": settings.abn_enable,
+        "abn_unique_account": settings.abn_unique_account,
+        "g3mini_enable": settings.g3mini_enable,
+        "g3mini_unique_account": settings.g3mini_unique_account,
+        "theoldschool_enable": settings.theoldschool_enable,
+        "theoldschool_unique_account": settings.theoldschool_unique_account,
+        "pm_unique_account": settings.pm_unique_account,
+        "allow_public_key_registration": settings.allow_public_key_registration,
+        "csrf_token": generate_csrf_token(),
     })
 
 
@@ -111,13 +125,8 @@ async def get_manifest(config: str, apikey_dao: APIKeyDAO = Depends()):
     if api_key:
         await check_api_key(api_key, apikey_dao)
     else:
-        # Check if anonymous access is allowed
-        if not settings.allow_anonymous_access: # If NOT allowed
-            logger.warning("Anonymous access denied and API key not found in config.")
-            raise HTTPException(status_code=401, detail="API key required or anonymous access disabled.")
-        else: # If anonymous access IS allowed, just log and continue
-            logger.info("Proceeding without API key (anonymous access allowed).")
-            # No exception is raised, execution continues
+        logger.warning("Manifest: API key not found in config.")
+        raise HTTPException(status_code=401, detail="API key not found in config.")
 
     yggflix_ctg = config.get("yggflixCtg", True)
     yggtorrent_ctg = config.get("yggtorrentCtg", True)
