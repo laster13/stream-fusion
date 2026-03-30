@@ -172,17 +172,17 @@ speedups = ["Brotli (>=1.2)", "aiodns (>=3.3.0)", "backports.zstd", "brotlicffi 
 
 [[package]]
 name = "aiohttp-socks"
-version = "0.8.4"
+version = "0.11.0"
 description = "Proxy connector for aiohttp"
 optional = false
-python-versions = "*"
+python-versions = ">=3.8.0"
 files = [
-    {file = "aiohttp_socks-0.8.4-py3-none-any.whl", hash = "sha256:74b21105634ed31d56ed6fee43701ca16218b53475e606d56950a4d17e8290ea"},
-    {file = "aiohttp_socks-0.8.4.tar.gz", hash = "sha256:6b611d4ce838e9cf2c2fed5e0dba447cc84824a6cba95dc5747606201da46cb4"},
+    {file = "aiohttp_socks-0.11.0-py3-none-any.whl", hash = "sha256:9aacce57c931b8fbf8f6d333cf3cafe4c35b971b35430309e167a35a8aab9ec1"},
+    {file = "aiohttp_socks-0.11.0.tar.gz", hash = "sha256:0afe51638527c79077e4bd6e57052c87c4824233d6e20bb061c53766421b10f0"},
 ]
 
 [package.dependencies]
-aiohttp = ">=2.3.2"
+aiohttp = ">=3.10.0"
 python-socks = {version = ">=2.4.3,<3.0.0", extras = ["asyncio"]}
 
 [[package]]
@@ -3834,4 +3834,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11"
-content-hash = "0f118869abde7a1ab225387f14ed8a0187cef404b3ae8aaaa77875d7a3d9665e"
+content-hash = "a877ba1fb28772f2e87aebc25b9257ace5d5ab8b3085c2754a0277f583a80e0a"
