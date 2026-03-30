@@ -108,6 +108,8 @@ class TorrentItemModel(Base):
                         model_dict[attr] = None
                 elif attr == "availability":
                     model_dict[attr] = False
+                elif attr == "tmdb_id":
+                    model_dict[attr] = int(value) if value is not None else None
                 elif attr == "seeders":
                     model_dict[attr] = int(value) if value else 0
                 elif attr in ["torrent_file", "torrent_file_path"]:
