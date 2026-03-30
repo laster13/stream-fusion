@@ -904,6 +904,14 @@ class TorrentSmartContainer:
                     file_index += 1
                     continue
 
+                if not hasattr(media, "season") or not hasattr(media, "episode"):
+                    self.logger.warning(
+                        f"TorrentSmartContainer: series torrent '{file_name}' ignored "
+                        f"- non-series media context ({media.__class__.__name__})"
+                    )
+                    file_index += 1
+                    continue
+
                 clean_season = media.season.replace("S", "")
                 clean_episode = media.episode.replace("E", "")
                 numeric_season = int(clean_season)
