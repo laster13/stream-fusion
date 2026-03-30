@@ -1577,7 +1577,6 @@
                     
                     <div style="display:none;">
                         <input id="cache" name="cache" type="checkbox" checked onchange="updateProviderFields()">
-                        <input id="sharewood" name="sharewood" type="checkbox" data-unique-account="{{ sharewood_unique_account|lower }}" onchange="updateProviderFields()">
                     </div>
 
                     
@@ -1655,6 +1654,7 @@
                     {% if not c411_unique_account %}
                     <div id="c411-fields" style="display:none;">
                         <div style="margin-left:60px;" class="fi-group"><label for="c411ApiKey">Clé API C411</label><input type="text" name="c411ApiKey" id="c411ApiKey" class="fi mono"><p class="fi-hint"><a href="https://c411.org/user/integrations" target="_blank">Obtenez une clé ici</a></p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="c411Passkey">Passkey C411</label><input type="text" name="c411Passkey" id="c411Passkey" class="fi mono"><p class="fi-hint">Votre passkey pour l'URL d'annonce du tracker.</p></div>
                     </div>
                     {% endif %}
                     <div class="sep"></div>
@@ -1722,7 +1722,81 @@
                     {% if not generationfree_unique_account %}
                     <div id="generationfree-fields" style="display:none;">
                         <div style="margin-left:60px;" class="fi-group"><label for="generationfreeApiKey">Clé API Generation Free</label><input type="text" name="generationfreeApiKey" id="generationfreeApiKey" class="fi mono"><p class="fi-hint"><a href="https://generation-free.org/login" target="_blank">Obtenez une clé ici</a></p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="generationfreePasskey">Passkey Generation Free</label><input type="text" name="generationfreePasskey" id="generationfreePasskey" class="fi mono"><p class="fi-hint">Votre passkey pour l'URL d'annonce du tracker.</p></div>
                     </div>
+                    {% endif %}
+
+                    <div class="sep"></div>
+
+                    {% if abn_enable %}
+                    <!-- ABN -->
+                    <div class="tog-row">
+                        <label class="tog"><input id="abn" name="abn" type="checkbox" data-unique-account="{{ abn_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
+                        <div>
+                            <div class="tog-name" style="flex-wrap:wrap;">
+                                Utiliser ABN API
+                                <span class="api-tag">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                                    Clé API requise
+                                </span>
+                            </div>
+                            <div class="tog-sub">Utilisez l'API ABN (Abnormal) pour trouver plus de résultats.</div>
+                        </div>
+                    </div>
+                    {% if not abn_unique_account %}
+                    <div id="abn-fields" style="display:none;">
+                        <div style="margin-left:60px;" class="fi-group"><label for="abnApiKey">Clé API ABN</label><input type="text" name="abnApiKey" id="abnApiKey" class="fi mono"><p class="fi-hint"><a href="https://abn.lol" target="_blank">Obtenez une clé ici</a></p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="abnPasskey">Passkey ABN</label><input type="text" name="abnPasskey" id="abnPasskey" class="fi mono"><p class="fi-hint">Votre passkey pour l'URL d'annonce du tracker.</p></div>
+                    </div>
+                    {% endif %}
+                    <div class="sep"></div>
+                    {% endif %}
+
+                    {% if g3mini_enable %}
+                    <!-- G3MINI -->
+                    <div class="tog-row">
+                        <label class="tog"><input id="g3mini" name="g3mini" type="checkbox" data-unique-account="{{ g3mini_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
+                        <div>
+                            <div class="tog-name" style="flex-wrap:wrap;">
+                                Utiliser G3MINI API
+                                <span class="api-tag">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                                    Clé API requise
+                                </span>
+                            </div>
+                            <div class="tog-sub">Utilisez l'API Gemini Tracker (UNIT3D) pour trouver plus de résultats.</div>
+                        </div>
+                    </div>
+                    {% if not g3mini_unique_account %}
+                    <div id="g3mini-fields" style="display:none;">
+                        <div style="margin-left:60px;" class="fi-group"><label for="g3miniApiKey">Clé API G3MINI</label><input type="text" name="g3miniApiKey" id="g3miniApiKey" class="fi mono"><p class="fi-hint"><a href="https://gemini-tracker.org" target="_blank">Obtenez une clé ici</a></p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="g3miniPasskey">Passkey G3MINI</label><input type="text" name="g3miniPasskey" id="g3miniPasskey" class="fi mono"><p class="fi-hint">Votre passkey pour l'URL d'annonce du tracker.</p></div>
+                    </div>
+                    {% endif %}
+                    <div class="sep"></div>
+                    {% endif %}
+
+                    {% if theoldschool_enable %}
+                    <!-- THEOLDSCHOOL -->
+                    <div class="tog-row">
+                        <label class="tog"><input id="theoldschool" name="theoldschool" type="checkbox" data-unique-account="{{ theoldschool_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
+                        <div>
+                            <div class="tog-name" style="flex-wrap:wrap;">
+                                Utiliser TheOldSchool API
+                                <span class="api-tag">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                                    Clé API requise
+                                </span>
+                            </div>
+                            <div class="tog-sub">Utilisez l'API TheOldSchool (UNIT3D) pour trouver plus de résultats.</div>
+                        </div>
+                    </div>
+                    {% if not theoldschool_unique_account %}
+                    <div id="theoldschool-fields" style="display:none;">
+                        <div style="margin-left:60px;" class="fi-group"><label for="theoldschoolApiKey">Clé API TheOldSchool</label><input type="text" name="theoldschoolApiKey" id="theoldschoolApiKey" class="fi mono"><p class="fi-hint"><a href="https://theoldschool.cc" target="_blank">Obtenez une clé ici</a></p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="theoldschoolPasskey">Passkey TheOldSchool</label><input type="text" name="theoldschoolPasskey" id="theoldschoolPasskey" class="fi mono"><p class="fi-hint">Votre passkey pour l'URL d'annonce du tracker.</p></div>
+                    </div>
+                    {% endif %}
                     {% endif %}
 
                 </div>
@@ -1826,7 +1900,6 @@
 
             
             <div style="display:none;">
-                {% if not sharewood_unique_account %}<div id="sharewood-fields"><input type="text" name="sharewoodPasskey" id="sharewoodPasskey"></div>{% endif %}
                 <div id="cache-fields"><input type="text" name="cacheUrl" id="cacheUrl" value="https://stremio-jackett-cacher.elfhosted.com/"></div>
             </div>
 

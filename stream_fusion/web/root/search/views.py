@@ -21,7 +21,6 @@ from stream_fusion.logging_config import logger
 from stream_fusion.utils.jackett.jackett_result import JackettResult
 from stream_fusion.utils.jackett.jackett_service import JackettService
 from stream_fusion.utils.parser.parser_service import StreamParser
-from stream_fusion.utils.sharewood.sharewood_service import SharewoodService
 from stream_fusion.utils.yggfilx.yggflix_service import YggflixService
 from stream_fusion.utils.metdata.cinemeta import Cinemeta
 from stream_fusion.utils.metdata.tmdb import TMDB
@@ -41,6 +40,9 @@ from stream_fusion.utils.torr9.torr9_service import Torr9Service
 from stream_fusion.utils.torr9.torr9_result import Torr9Result as Torr9SearchResult
 from stream_fusion.utils.lacale.lacale_service import LaCaleService
 from stream_fusion.utils.generationfree.generationfree_service import GenerationFreeService
+from stream_fusion.utils.abn.abn_service import AbnService
+from stream_fusion.utils.g3mini.g3mini_service import G3MiniService
+from stream_fusion.utils.theoldschool.theoldschool_service import TheOldSchoolService
 from stream_fusion.settings import settings
 from stream_fusion.web.utils import get_client_ip
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,13 +73,16 @@ def has_stremthru_enabled(debrid_services):
     return any(type(debrid).__name__ == "StremThru" for debrid in debrid_services)
 
 
-# Indexers stored in Postgres (sourced from direct APIs, not Jackett/Sharewood/Zilean)
+# Indexers stored in Postgres (sourced from direct APIs, not Jackett/Zilean)
 _POSTGRES_INDEXERS = frozenset({
     "Yggtorrent - API",
     "C411 - API",
     "Torr9 - API",
     "LaCale - API",
     "GenerationFree - API",
+    "ABN - API",
+    "G3MINI - API",
+    "TheOldSchool - API",
 })
 
 
@@ -573,13 +578,52 @@ async def get_results(
                 logger.warning(f"Search: Yggflix search failed, skipping: {str(e)}")
             return []
 
-        c411_raw, torr9_raw, lacale_raw, yggflix_raw, generationfree_raw = (
+        async def _fetch_abn_raw():
+            if not config.get("abn") or not settings.abn_enable:
+                return []
+            try:
+                abn_service = AbnService(config, session=http_session)
+                raw = await abn_service.search(media)
+                return raw if raw else []
+            except Exception as e:
+                logger.warning(f"Search: ABN search failed, skipping: {str(e)}")
+            return []
+
+        async def _fetch_g3mini_raw():
+            if not config.get("g3mini") or not settings.g3mini_enable:
+                return []
+            try:
+                g3mini_service = G3MiniService(config, session=http_session)
+                raw = await g3mini_service.search(media)
+                return raw if raw else []
+            except Exception as e:
+                logger.warning(f"Search: G3MINI search failed, skipping: {str(e)}")
+            return []
+
+        async def _fetch_theoldschool_raw():
+            if not config.get("theoldschool") or not settings.theoldschool_enable:
+                return []
+            try:
+                theoldschool_service = TheOldSchoolService(config, session=http_session)
+                raw = await theoldschool_service.search(media)
+                return raw if raw else []
+            except Exception as e:
+                logger.warning(f"Search: TheOldSchool search failed, skipping: {str(e)}")
+            return []
+
+        (
+            c411_raw, torr9_raw, lacale_raw, yggflix_raw, generationfree_raw,
+            abn_raw, g3mini_raw, theoldschool_raw
+        ) = (
             await asyncio.gather(
                 _fetch_c411_raw(),
                 _fetch_torr9_raw(),
                 _fetch_lacale_raw(),
                 _fetch_yggflix_raw(),
                 _fetch_generationfree_raw(),
+                _fetch_abn_raw(),
+                _fetch_g3mini_raw(),
+                _fetch_theoldschool_raw(),
             )
         )
 
@@ -590,6 +634,9 @@ async def get_results(
             (lacale_raw, "LaCale"),
             (generationfree_raw, "GenerationFree"),
             (yggflix_raw, "Yggflix"),
+            (abn_raw, "ABN"),
+            (g3mini_raw, "G3MINI"),
+            (theoldschool_raw, "TheOldSchool"),
         ]:
             if raw:
                 processed = await torrent_service.convert_and_process(raw)
@@ -618,22 +665,6 @@ async def get_results(
                 )
                 logger.info(f"Search: Zilean final search results: {len(zilean_search_results)}")
                 search_results = merge_items(search_results, zilean_search_results)
-
-        # Sharewood (private tracker, requires credentials)
-        if config["sharewood"] and settings.sharewood_enable and len(search_results) < min_cached:
-            try:
-                sharewood_service = SharewoodService(config, session=http_session)
-                sharewood_search_results = await sharewood_service.search(media)
-                if sharewood_search_results:
-                    logger.success(
-                        f"Search: Found {len(sharewood_search_results)} results from Sharewood"
-                    )
-                    sharewood_search_results = await torrent_service.convert_and_process(
-                        sharewood_search_results
-                    )
-                    search_results = merge_items(search_results, sharewood_search_results)
-            except Exception as e:
-                logger.warning(f"Search: Sharewood search failed, skipping: {str(e)}")
 
         # Jackett (last resort: slow, broad search)
         if config["jackett"] and len(search_results) < min_cached:
@@ -685,7 +716,7 @@ async def get_results(
                 expiration=settings.redis_expiration,
             )
             logger.success(
-                f"Search: Cached {len(external_results)} external results in Redis (Sharewood/Zilean/Jackett)"
+                f"Search: Cached {len(external_results)} external results in Redis (Zilean/Jackett)"
             )
         else:
             logger.success(
@@ -729,6 +760,21 @@ async def get_results(
                 )
 
         logger.success(f"Search: Final number of filtered results: {len(filtered_results)}")
+
+        # --- Retroactive TMDB ID assignment for keyword-based trackers ---
+        # Keyword-only trackers (ABN, YGGFlix) cache items without tmdb_id to avoid
+        # mismatch. Now that filter_items() has confirmed these results match the media
+        # via title matching, we can safely assign the tmdb_id retroactively.
+        if hasattr(media, "tmdb_id") and media.tmdb_id:
+            tmdb_id_int = int(media.tmdb_id)
+            updates = []
+            for item in filtered_results:
+                if item.tmdb_id is None and item.indexer in _POSTGRES_INDEXERS:
+                    updates.append(torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int))
+                    item.tmdb_id = tmdb_id_int
+            if updates:
+                await asyncio.gather(*updates)
+
         return filtered_results
 
     # --- Search: aggregate results from Postgres + external sources, apply quality filter ---

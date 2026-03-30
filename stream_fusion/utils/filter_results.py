@@ -77,10 +77,12 @@ def get_indexer_priority_for_sort(indexer, config=None) -> int:
             "Torr9": 2,
             "LaCale": 1,
             "GenerationFree": 3,
+            "ABN": 3,
+            "G3MINI": 3,
+            "TheOldSchool": 3,
             "Yggtorrent": 1,
             "DMM": 3,
             "Public": 4,
-            "Sharewood": 5,
             "Jackett": 6,
         }
     else:
@@ -89,10 +91,12 @@ def get_indexer_priority_for_sort(indexer, config=None) -> int:
             "Torr9": 2,
             "LaCale": 4,
             "GenerationFree": 4,
+            "ABN": 4,
+            "G3MINI": 4,
+            "TheOldSchool": 4,
             "Yggtorrent": 1,
             "DMM": 3,
             "Public": 4,
-            "Sharewood": 5,
             "Jackett": 6,
         }
     indexer_name = indexer.split(" ")[0] if indexer and " " in indexer else indexer

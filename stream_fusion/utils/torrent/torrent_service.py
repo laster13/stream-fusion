@@ -13,17 +13,27 @@ from RTN.models import ParsedData
 
 from stream_fusion.services.postgresql.dao.torrentitem_dao import TorrentItemDAO
 from stream_fusion.utils.jackett.jackett_result import JackettResult
-from stream_fusion.utils.sharewood.sharewood_result import SharewoodResult
 from stream_fusion.utils.zilean.zilean_result import ZileanResult
 from stream_fusion.utils.yggfilx.yggflix_result import YggflixResult
 from stream_fusion.utils.generationfree.generationfree_result import GenerationFreeResult
 from stream_fusion.utils.c411.c411_result import C411Result
 from stream_fusion.utils.torr9.torr9_result import Torr9Result
 from stream_fusion.utils.lacale.lacale_result import LaCaleResult
+from stream_fusion.utils.abn.abn_result import AbnResult
+from stream_fusion.utils.g3mini.g3mini_result import G3MiniResult
+from stream_fusion.utils.theoldschool.theoldschool_result import TheOldSchoolResult
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
 from stream_fusion.utils.general import get_info_hash_from_magnet
 from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
+
+# UNIT3D-based indexers whose download_link may contain an api_token to strip before caching
+_UNIT3D_CREDENTIAL_INDEXERS = frozenset({
+    "GenerationFree - API",
+    "G3MINI - API",
+    "TheOldSchool - API",
+    "ABN - API",
+})
 
 
 class TorrentService:
@@ -61,31 +71,34 @@ class TorrentService:
         TorrentItem.to_debrid_stream_query() using the current user/server config.
         This prevents passkeys and API keys from leaking into shared Redis/PostgreSQL.
         """
-        if item.indexer == "Sharewood - API":
-            # torrent_download is the passkey-bearing download URL
-            item.torrent_download = None
-            # Rebuild a clean magnet (no private announce URL) from info_hash
-            if item.info_hash:
-                raw_name = item.file_name or item.raw_title or ""
-                item.magnet = f"magnet:?xt=urn:btih:{item.info_hash}&dn={urllib.parse.quote(raw_name)}"
-            # Strip the Sharewood announce URL from the trackers list
-            item.trackers = [
-                t for t in (item.trackers or [])
-                if settings.sharewood_url not in str(t)
-            ]
-            # link is no longer useful after processing; point to clean magnet
-            item.link = item.magnet or ""
+        if item.indexer in _UNIT3D_CREDENTIAL_INDEXERS and item.torrent_download:
+            # Strip api_token / apikey query params from the download URL
+            try:
+                parsed = urllib.parse.urlparse(item.torrent_download)
+                params = dict(urllib.parse.parse_qsl(parsed.query))
+                params.pop("api_token", None)
+                params.pop("apikey", None)
+                params.pop("api_key", None)
+                clean_query = urllib.parse.urlencode(params)
+                item.torrent_download = parsed._replace(query=clean_query).geturl()
+            except Exception as e:
+                logger.warning(f"TorrentService: Failed to strip credentials from download URL: {e}")
         return item
 
     async def cache_torrent(self, torrent_item: TorrentItem, id: str = None):
         unique_id = self.__generate_unique_id(torrent_item.raw_title, torrent_item.indexer)
 
-        # Indexeurs privés où le tmdb_id est important pour retrouver les entrées ensuite
+        # Indexeurs privés où le tmdb_id est important pour retrouver les entrées ensuite.
+        # Ces trackers sont interrogés par TMDB/IMDB ID, donc tous leurs résultats
+        # doivent avoir un tmdb_id valide. Sans lui, on ne peut pas retrouver l'entrée
+        # par la suite. Les trackers keyword-only (ABN, YGGFlix) n'ont pas ce check.
         if torrent_item.indexer in [
             "C411 - API",
             "Torr9 - API",
             "LaCale - API",
             "GenerationFree - API",
+            "G3MINI - API",
+            "TheOldSchool - API",
         ] and not torrent_item.tmdb_id:
             self.logger.trace(
                 f"TorrentService: Skipping {torrent_item.indexer} torrent without tmdb_id: {torrent_item.raw_title}"
@@ -132,11 +145,13 @@ class TorrentService:
             JackettResult
             | ZileanResult
             | YggflixResult
-            | SharewoodResult
             | GenerationFreeResult
             | C411Result
             | Torr9Result
             | LaCaleResult
+            | AbnResult
+            | G3MiniResult
+            | TheOldSchoolResult
         ],
         skip_yggflix_download: bool = False,
     ):
@@ -164,8 +179,6 @@ class TorrentService:
 
             if torrent_item.link and torrent_item.link.startswith("magnet:"):
                 processed_torrent_item = self.__process_magnet(torrent_item)
-            elif settings.sharewood_url and torrent_item.link and torrent_item.link.startswith(settings.sharewood_url):
-                processed_torrent_item = await asyncio.to_thread(self.__process_sharewood_web_url, torrent_item)
             else:
                 processed_torrent_item = await asyncio.to_thread(self.__process_web_url, torrent_item)
 
@@ -174,31 +187,6 @@ class TorrentService:
             torrent_items_result.append(processed_torrent_item)
 
         return torrent_items_result
-
-    def __process_sharewood_web_url(self, result: TorrentItem):
-        if not self.config.get("sharewood"):
-            self.logger.error("Sharewood is not enabled in the config. Skipping processing of Sharewood URL.")
-            return result
-
-        if not result.link:
-            self.logger.error("Sharewood result has no link.")
-            return result
-
-        try:
-            time.sleep(1)  # API limit 1 request per second
-            response = self.__session.get(result.link, allow_redirects=True, timeout=5)
-        except requests.exceptions.ReadTimeout:
-            self.logger.error(f"Timeout while processing Sharewood URL: {result.link}")
-            return result
-        except requests.exceptions.RequestException:
-            self.logger.error(f"Error while processing Sharewood URL: {result.link}")
-            return result
-
-        if response.status_code == 200:
-            return self.__process_torrent(result, response.content)
-
-        self.logger.error(f"Error code {response.status_code} while processing Sharewood URL: {result.link}")
-        return result
 
     def __process_web_url(self, result: TorrentItem):
         if not result.link:

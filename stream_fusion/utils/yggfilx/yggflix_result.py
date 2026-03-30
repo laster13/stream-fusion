@@ -55,7 +55,7 @@ class YggflixResult:
         self.indexer = "YGG Relay"
         self.languages = detect_languages(self.raw_title, default_language="fr")
         self.type = media.type
-        self.tmdb_id = getattr(media, "tmdb_id", None)
+        self.tmdb_id = None  # keyword-only tracker: assigned retroactively after title-match filtering
         self.parsed_data = parse(self.raw_title)
         self.torrent_download = self.link if self.link and not self.link.startswith("magnet:") else None
         return self
