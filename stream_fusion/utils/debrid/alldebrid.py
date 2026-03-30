@@ -674,3 +674,25 @@ class AllDebrid(BaseDebrid):
             logger.error(f"AllDebrid: Exception extracting magnet ID: {str(e)}")
 
         return "Error: Could not extract torrent ID."
+
+    async def start_background_caching(self, magnet, query=None):
+        """Start caching a magnet/torrent in the background via AllDebrid."""
+        logger.info("AllDebrid: Starting background caching for magnet")
+        torrent_download = None
+        if query and isinstance(query, dict):
+            raw = query.get("torrent_download")
+            if raw:
+                from urllib.parse import unquote
+                torrent_download = unquote(raw)
+        try:
+            torrent_id = await self.add_magnet_or_torrent(
+                magnet, torrent_download=torrent_download
+            )
+            if torrent_id and not torrent_id.startswith("Error"):
+                logger.info(f"AllDebrid: Background caching started, ID: {torrent_id}")
+                return True
+            logger.error(f"AllDebrid: Failed to start background caching: {torrent_id}")
+            return False
+        except Exception as e:
+            logger.error(f"AllDebrid: start_background_caching error: {e}")
+            return False
