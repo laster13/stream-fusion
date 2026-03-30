@@ -537,6 +537,15 @@ function updateProviderFields() {
     setElementDisplay('g3mini-fields', g3miniChecked ? 'block' : 'none');
     setElementDisplay('theoldschool-fields', theoldschoolChecked ? 'block' : 'none');
 
+    // Afficher/masquer les sélecteurs de phase de recherche
+    setElementDisplay('c411-category-row', c411Checked ? 'block' : 'none');
+    setElementDisplay('torr9-category-row', torr9Checked ? 'block' : 'none');
+    setElementDisplay('lacale-category-row', lacaleChecked ? 'block' : 'none');
+    setElementDisplay('generationfree-category-row', generationfreeChecked ? 'block' : 'none');
+    setElementDisplay('abn-category-row', abnChecked ? 'block' : 'none');
+    setElementDisplay('g3mini-category-row', g3miniChecked ? 'block' : 'none');
+    setElementDisplay('theoldschool-category-row', theoldschoolChecked ? 'block' : 'none');
+
     // Traiter tous les débrideurs
     allDebrids.forEach(id => {
         const checkbox = document.getElementById(id);
@@ -733,6 +742,8 @@ function loadData() {
         abn: false,
         g3mini: false,
         theoldschool: false,
+        yggflixPriority: true,
+        rdMinCachedBeforeCheck: 3,
     };
 
     Object.keys(defaultConfig).forEach(key => {
@@ -794,6 +805,19 @@ function loadData() {
 
     handleUniqueAccounts();
     updateProviderFields();
+
+    // Restaurer les catégories de phase de recherche par indexeur
+    const _defaultCats = {
+        c411: 'priority_private', torr9: 'priority_private',
+        lacale: 'intermediary_private', generationfree: 'intermediary_private',
+        g3mini: 'intermediary_private', theoldschool: 'intermediary_private',
+        abn: 'fallback_private',
+    };
+    const _savedCats = decodedData.indexerCategories || {};
+    for (const [key, defaultCat] of Object.entries(_defaultCats)) {
+        const select = document.getElementById(key + 'Category');
+        if (select) select.value = _savedCats[key] || defaultCat;
+    }
 
     const debridDownloader = decodedData.debridDownloader;
     if (debridDownloader) {
@@ -940,10 +964,33 @@ async function getLink(method) {
         resultsPerQuality: parseInt(document.getElementById('resultsPerQuality').value) || 5,
         maxResults: parseInt(document.getElementById('maxResults').value) || 5,
         minCachedResults: parseInt(document.getElementById('minCachedResults').value) || 5,
+        rdMinCachedBeforeCheck: parseInt(document.getElementById('rdMinCachedBeforeCheck').value) ?? 3,
         exclusion: qualityExclusions.filter(quality => document.getElementById(quality).checked),
         jackett: document.getElementById('jackett')?.checked,
         zilean: document.getElementById('zilean')?.checked,
         yggflix: document.getElementById('yggflix')?.checked,
+        yggflixPriority: document.getElementById('yggflixPriority')?.checked !== false,
+        indexerCategories: (() => {
+            const cats = {};
+            const _privCats = {
+                c411: 'priority_private', torr9: 'priority_private',
+                lacale: 'intermediary_private', generationfree: 'intermediary_private',
+                g3mini: 'intermediary_private', theoldschool: 'intermediary_private',
+                abn: 'fallback_private',
+            };
+            for (const [key, defaultCat] of Object.entries(_privCats)) {
+                const cb = document.getElementById(key);
+                const enabled = cb?.checked || cb?.disabled || false;
+                const select = document.getElementById(key + 'Category');
+                cats[key] = enabled ? (select?.value || defaultCat) : 'disabled';
+            }
+            // Indexeurs à catégorie fixe
+            const yggEl = document.getElementById('yggflix');
+            cats.yggflix = (yggEl?.checked || yggEl?.disabled) ? 'public' : 'disabled';
+            cats.zilean = document.getElementById('zilean')?.checked ? 'fallback_private' : 'disabled';
+            cats.jackett = document.getElementById('jackett')?.checked ? 'fallback_private' : 'disabled';
+            return cats;
+        })(),
         yggtorrentCtg: document.getElementById('ctg_yggtorrent')?.checked,
         yggflixCtg: document.getElementById('ctg_yggflix')?.checked,
         torrenting: false,

@@ -130,6 +130,11 @@
         .tog-name img { width: 22px; height: 22px; object-fit: contain; border-radius: 4px; }
         .tog-sub { font-size: 0.8rem; color: var(--text-dim); margin-top: 3px; line-height: 1.4; }
 
+        /* Indexer search phase selector */
+        .indexer-category-row { margin-top: 8px; }
+        .category-label { display: block; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 4px; font-weight: 500; letter-spacing: 0.02em; }
+        .category-select { max-width: 280px; padding: 5px 10px; font-size: 0.8rem; }
+
         /* "Requires API Key" badge */
         .api-tag {
             display: inline-flex; align-items: center; gap: 5px;
@@ -1606,6 +1611,13 @@
                             <div class="tog-sub" style="margin-top:6px;">Relais public YGG Torznab — source principale de recherche francophone.</div>
                         </div>
                     </div>
+                    <div class="tog-row" style="margin-top:8px;padding-left:54px;">
+                        <label class="tog"><input id="yggflixPriority" name="yggflixPriority" type="checkbox" checked><span class="tog-track"></span></label>
+                        <div>
+                            <div class="tog-name" style="font-size:0.85rem;">Recherche prioritaire</div>
+                            <div class="tog-sub">Coché : YGG Relay est interrogé en Phase 1 (en même temps que les indexeurs prioritaires). Décoché : interrogé en dernier, après tous les indexeurs privés.</div>
+                        </div>
+                    </div>
                     <div class="sep"></div>
 
                     <!-- ZILEAN -->
@@ -1639,7 +1651,7 @@
                     <!-- C411 -->
                     <div class="tog-row">
                         <label class="tog"><input id="c411" name="c411" type="checkbox" checked data-unique-account="{{ c411_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
-                        <div>
+                        <div style="flex:1;">
                             <div class="tog-name" style="flex-wrap:wrap;">
                                 <img src="https://i.ibb.co/W4DygFGm/c411.png" alt="" style="width:34px;height:18px;">
                                 Utiliser C411 API
@@ -1649,6 +1661,14 @@
                                 </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API C411 Torznab pour trouver plus de résultats.</div>
+                            <div id="c411-category-row" class="indexer-category-row" style="display:none;">
+                                <label class="category-label">Phase de recherche</label>
+                                <select id="c411Category" class="fi category-select">
+                                    <option value="priority_private" selected>Prioritaire — toujours interrogé</option>
+                                    <option value="intermediary_private">Intermédiaire — si résultats insuffisants</option>
+                                    <option value="fallback_private">Fallback — dernier recours</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     {% if not c411_unique_account %}
@@ -1662,7 +1682,7 @@
                     
                     <div class="tog-row">
                         <label class="tog"><input id="torr9" name="torr9" type="checkbox" checked data-unique-account="{{ torr9_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
-                        <div>
+                        <div style="flex:1;">
                             <div class="tog-name" style="flex-wrap:wrap;">
                                 <img src="https://i.ibb.co/7Nxg9xz7/torr9logo.png" alt="" style="width:26px;height:26px;">
                                 Utiliser Torr9 API
@@ -1672,6 +1692,14 @@
                                 </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API Torr9 Torznab pour trouver plus de résultats.</div>
+                            <div id="torr9-category-row" class="indexer-category-row" style="display:none;">
+                                <label class="category-label">Phase de recherche</label>
+                                <select id="torr9Category" class="fi category-select">
+                                    <option value="priority_private" selected>Prioritaire — toujours interrogé</option>
+                                    <option value="intermediary_private">Intermédiaire — si résultats insuffisants</option>
+                                    <option value="fallback_private">Fallback — dernier recours</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     {% if not torr9_unique_account %}
@@ -1684,7 +1712,7 @@
                     
                     <div class="tog-row">
                         <label class="tog"><input id="lacale" name="lacale" type="checkbox" data-unique-account="{{ lacale_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
-                        <div>
+                        <div style="flex:1;">
                             <div class="tog-name" style="flex-wrap:wrap;">
                                 <img src="https://i.ibb.co/ksw8TZw6/lacale.png" alt="" style="width:30px;height:30px;">
                                 Utiliser La-Cale API
@@ -1694,6 +1722,14 @@
                                 </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API LaCale Torznab pour trouver plus de résultats.</div>
+                            <div id="lacale-category-row" class="indexer-category-row" style="display:none;">
+                                <label class="category-label">Phase de recherche</label>
+                                <select id="lacaleCategory" class="fi category-select">
+                                    <option value="priority_private">Prioritaire — toujours interrogé</option>
+                                    <option value="intermediary_private" selected>Intermédiaire — si résultats insuffisants</option>
+                                    <option value="fallback_private">Fallback — dernier recours</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     {% if not lacale_unique_account %}
@@ -1707,7 +1743,7 @@
                     
                     <div class="tog-row">
                         <label class="tog"><input id="generationfree" name="generationfree" type="checkbox" data-unique-account="{{ generationfree_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
-                        <div>
+                        <div style="flex:1;">
                             <div class="tog-name" style="flex-wrap:wrap;">
 								<img src="https://i.ibb.co/7tTSCgPc/generationfree.png" alt="" style="width:30px;height:30px;">
                                 Utiliser Generation Free API
@@ -1717,6 +1753,14 @@
                                 </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API Generation Free UNIT3D pour trouver plus de résultats.</div>
+                            <div id="generationfree-category-row" class="indexer-category-row" style="display:none;">
+                                <label class="category-label">Phase de recherche</label>
+                                <select id="generationfreeCategory" class="fi category-select">
+                                    <option value="priority_private">Prioritaire — toujours interrogé</option>
+                                    <option value="intermediary_private" selected>Intermédiaire — si résultats insuffisants</option>
+                                    <option value="fallback_private">Fallback — dernier recours</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     {% if not generationfree_unique_account %}
@@ -1732,7 +1776,7 @@
                     <!-- ABN -->
                     <div class="tog-row">
                         <label class="tog"><input id="abn" name="abn" type="checkbox" data-unique-account="{{ abn_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
-                        <div>
+                        <div style="flex:1;">
                             <div class="tog-name" style="flex-wrap:wrap;">
                                 Utiliser ABN API
                                 <span class="api-tag">
@@ -1741,6 +1785,14 @@
                                 </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API ABN (Abnormal) pour trouver plus de résultats.</div>
+                            <div id="abn-category-row" class="indexer-category-row" style="display:none;">
+                                <label class="category-label">Phase de recherche</label>
+                                <select id="abnCategory" class="fi category-select">
+                                    <option value="priority_private">Prioritaire — toujours interrogé</option>
+                                    <option value="intermediary_private">Intermédiaire — si résultats insuffisants</option>
+                                    <option value="fallback_private" selected>Fallback — dernier recours</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     {% if not abn_unique_account %}
@@ -1756,7 +1808,7 @@
                     <!-- G3MINI -->
                     <div class="tog-row">
                         <label class="tog"><input id="g3mini" name="g3mini" type="checkbox" data-unique-account="{{ g3mini_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
-                        <div>
+                        <div style="flex:1;">
                             <div class="tog-name" style="flex-wrap:wrap;">
                                 Utiliser G3MINI API
                                 <span class="api-tag">
@@ -1765,6 +1817,14 @@
                                 </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API Gemini Tracker (UNIT3D) pour trouver plus de résultats.</div>
+                            <div id="g3mini-category-row" class="indexer-category-row" style="display:none;">
+                                <label class="category-label">Phase de recherche</label>
+                                <select id="g3miniCategory" class="fi category-select">
+                                    <option value="priority_private">Prioritaire — toujours interrogé</option>
+                                    <option value="intermediary_private" selected>Intermédiaire — si résultats insuffisants</option>
+                                    <option value="fallback_private">Fallback — dernier recours</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     {% if not g3mini_unique_account %}
@@ -1780,7 +1840,7 @@
                     <!-- THEOLDSCHOOL -->
                     <div class="tog-row">
                         <label class="tog"><input id="theoldschool" name="theoldschool" type="checkbox" data-unique-account="{{ theoldschool_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
-                        <div>
+                        <div style="flex:1;">
                             <div class="tog-name" style="flex-wrap:wrap;">
                                 Utiliser TheOldSchool API
                                 <span class="api-tag">
@@ -1789,6 +1849,14 @@
                                 </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API TheOldSchool (UNIT3D) pour trouver plus de résultats.</div>
+                            <div id="theoldschool-category-row" class="indexer-category-row" style="display:none;">
+                                <label class="category-label">Phase de recherche</label>
+                                <select id="theoldschoolCategory" class="fi category-select">
+                                    <option value="priority_private">Prioritaire — toujours interrogé</option>
+                                    <option value="intermediary_private" selected>Intermédiaire — si résultats insuffisants</option>
+                                    <option value="fallback_private">Fallback — dernier recours</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     {% if not theoldschool_unique_account %}
@@ -2035,6 +2103,18 @@
                                 <div class="slider-val"><input type="number" name="minCachedResults" id="minCachedResults" min="0" value="10"></div>
                             </div>
                             <p class="fi-hint">Avant de lancer une nouvelle recherche.</p>
+                        </div>
+
+                        <div class="slider-control">
+                            <label>RealDebrid — seuil avant skip</label>
+                            <div class="slider-row">
+                                <div class="slider-track-wrap">
+                                    <div class="slider-fill" id="fill_rdMinCachedBeforeCheck"></div>
+                                    <input type="range" class="slider-range" id="range_rdMinCachedBeforeCheck" min="0" max="10" step="1" value="3">
+                                </div>
+                                <div class="slider-val"><input type="number" name="rdMinCachedBeforeCheck" id="rdMinCachedBeforeCheck" min="0" max="10" value="3"></div>
+                            </div>
+                            <p class="fi-hint">Sauter RD si déjà N résultats cachés par d'autres services. API RD lente et restrictive — recommandé : 1–3. (0 = toujours vérifier)</p>
                         </div>
 
                     </div>

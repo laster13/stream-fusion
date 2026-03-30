@@ -109,6 +109,10 @@ class TorrentSmartContainer:
         )
         return hashes
 
+    def get_cached_count(self):
+        """Return the number of items already marked as available by any debrid service."""
+        return sum(1 for item in self.__itemsDict.values() if item.availability is not False)
+
     def get_items(self):
         items = list(self.__itemsDict.values())
         self.logger.debug(f"TorrentSmartContainer: Retrieved {len(items)} items")

@@ -220,6 +220,20 @@ class AllDebrid(BaseDebrid):
             f"AllDebrid: Deleted {success}/{len(magnet_ids)} uploaded magnets after availability check"
         )
 
+    async def _delete_magnets_background(self, magnet_ids, ip=None):
+        """Progressively delete temp magnets added during availability check. Non-blocking."""
+        logger.debug(f"AllDebrid: background cleanup of {len(magnet_ids)} temp magnet(s)")
+        success = 0
+        for magnet_id in magnet_ids:
+            try:
+                response = await self.delete_magnet(magnet_id, ip)
+                if response and response.get("status") == "success":
+                    success += 1
+                    logger.debug(f"AllDebrid: Deleted temp magnet {magnet_id}")
+            except Exception as e:
+                logger.debug(f"AllDebrid: Could not delete temp magnet {magnet_id}: {e}")
+        logger.debug(f"AllDebrid: background cleanup done — {success}/{len(magnet_ids)} deleted")
+
     async def add_magnet(self, magnet, ip=None):
         url = f"{self.base_url}magnet/upload?agent={self.agent}"
         data = {"magnets[]": magnet}
@@ -508,12 +522,8 @@ class AllDebrid(BaseDebrid):
             return result_magnets
 
         finally:
-            try:
-                await self.delete_magnets(uploaded_ids, ip)
-            except Exception as e:
-                logger.debug(
-                    f"AllDebrid: Cleanup failed after availability check: {str(e)}"
-                )
+            if uploaded_ids:
+                asyncio.create_task(self._delete_magnets_background(uploaded_ids, ip))
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
         """

@@ -1,7 +1,10 @@
+import asyncio
+import hashlib
 from typing import Optional, List, Dict, Any
 from urllib.parse import urlencode
 
 import aiohttp
+import bencodepy
 
 from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
@@ -75,7 +78,6 @@ class G3MiniAPI:
         session: aiohttp.ClientSession,
         params_list: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        import asyncio
         tasks = [self._search_tracker(session, params) for params in params_list]
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -85,6 +87,17 @@ class G3MiniAPI:
                 logger.warning(f"G3MINI: Ignored failed search task: {resp}")
                 continue
             all_results.extend(resp)
+
+        # For items without a hash in the API response, fetch the .torrent file to compute it
+        items_needing_hash = [item for item in all_results if not self._extract_hash(item)]
+        if items_needing_hash:
+            logger.debug(f"G3MINI: API returned no hash — fetching {len(items_needing_hash)} torrent file(s) to compute hash")
+            fetch_tasks = [self._fetch_hash_from_torrent(session, item) for item in items_needing_hash]
+            computed_hashes = await asyncio.gather(*fetch_tasks)
+            for item, h in zip(items_needing_hash, computed_hashes):
+                if h:
+                    item["_computed_hash"] = h
+                    logger.trace(f"G3MINI: Computed hash {h} for torrent id={item.get('id')}")
 
         unique_results: Dict[str, Dict[str, Any]] = {}
         for item in all_results:
@@ -125,12 +138,52 @@ class G3MiniAPI:
             logger.warning(f"G3MINI: Request failed: {e}")
             return []
 
+    async def _fetch_hash_from_torrent(
+        self,
+        session: aiohttp.ClientSession,
+        item: Dict[str, Any],
+    ) -> Optional[str]:
+        """Download the .torrent file for an item and compute its info_hash."""
+        attrs = item.get("attributes", {}) if isinstance(item, dict) else {}
+        download_link = attrs.get("download_link")
+        if not download_link:
+            logger.debug(f"G3MINI: No download_link for torrent id={item.get('id')}")
+            return None
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        try:
+            async with session.get(download_link, headers=headers, timeout=10) as resp:
+                if resp.status != 200:
+                    logger.debug(f"G3MINI: download_link returned HTTP {resp.status} for id={item.get('id')}")
+                    return None
+                torrent_bytes = await resp.read()
+                return self._compute_info_hash(torrent_bytes)
+        except Exception as e:
+            logger.debug(f"G3MINI: Could not fetch torrent for id={item.get('id')}: {e}")
+            return None
+
+    @staticmethod
+    def _compute_info_hash(torrent_bytes: bytes) -> Optional[str]:
+        """Extract info_hash from raw .torrent file content via bencode + SHA1."""
+        try:
+            metadata = bencodepy.decode(torrent_bytes)
+            info = metadata.get(b"info") or metadata.get("info")
+            if not info:
+                logger.debug("G3MINI: No 'info' dict in torrent metadata")
+                return None
+            return hashlib.sha1(bencodepy.encode(info)).hexdigest().lower()
+        except Exception as e:
+            logger.debug(f"G3MINI: Failed to compute info_hash from torrent bytes: {e}")
+            return None
+
     @staticmethod
     def _extract_hash(item: Dict[str, Any]) -> Optional[str]:
         attrs = item.get("attributes", {}) if isinstance(item, dict) else {}
         raw = (
-            item.get("info_hash")
+            item.get("_computed_hash")
+            or item.get("infoHash")
+            or item.get("info_hash")
             or item.get("hash")
+            or attrs.get("infoHash")
             or attrs.get("info_hash")
             or attrs.get("hash")
         )

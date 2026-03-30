@@ -61,8 +61,11 @@ class G3MiniResult:
         attrs = api_item.get("attributes", {}) if isinstance(api_item, dict) else {}
 
         raw_hash = (
-            api_item.get("info_hash")
+            api_item.get("_computed_hash")
+            or api_item.get("infoHash")
+            or api_item.get("info_hash")
             or api_item.get("hash")
+            or attrs.get("infoHash")
             or attrs.get("info_hash")
             or attrs.get("hash")
         )
