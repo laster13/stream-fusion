@@ -929,7 +929,11 @@ async def get_results(
 
                     checked_count = len(hashes)
                     if isinstance(result, dict):
-                        returned_count = len(result.get("data", {}).get("magnets", []))
+                        data = result.get("data", [])
+                        if isinstance(data, list):
+                            returned_count = len(data)
+                        else:
+                            returned_count = len(data.get("magnets", []))
                     else:
                         returned_count = len(result)
 
