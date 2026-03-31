@@ -177,7 +177,7 @@ class TorrentItem:
                     torrent_download = self._inject_api_token(torrent_download, api_key)
 
         query = {
-            "magnet": magnet,
+            "magnet": self._strip_magnet_extras(magnet),
             "type": self.type,
             "file_index": self.file_index,
             "season": media.season if isinstance(media, Series) else None,
@@ -198,6 +198,15 @@ class TorrentItem:
             query["preferred_service"] = "TorBox"
 
         return query
+
+    @staticmethod
+    def _strip_magnet_extras(magnet: str) -> str:
+        """Keep only the xt= parameter — strips dn= and all tr= to minimise URL length."""
+        if not magnet or '?' not in magnet:
+            return magnet
+        scheme, params_str = magnet.split('?', 1)
+        kept = [p for p in params_str.split('&') if p.startswith('xt=')]
+        return f"{scheme}?{'&'.join(kept)}" if kept else magnet
 
     @staticmethod
     def _inject_api_token(download_url: str, api_key: str) -> str:

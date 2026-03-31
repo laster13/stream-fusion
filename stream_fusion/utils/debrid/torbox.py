@@ -1,7 +1,8 @@
-from itertools import islice
+import re
 import uuid
 import asyncio
 import aiohttp
+from urllib.parse import unquote
 
 from fastapi import HTTPException
 from stream_fusion.utils.debrid.base_debrid import BaseDebrid
@@ -31,13 +32,32 @@ class Torbox(BaseDebrid):
         else:
             return {"Authorization": f"Bearer {self.config['TBToken']}"}
 
+    def _normalize_hash_value(self, value):
+        if not value:
+            return None
+        value = str(value).strip().lower()
+        if value.startswith("magnet:?"):
+            match = re.search(r"btih:([a-f0-9]{40})", value, re.IGNORECASE)
+            if match:
+                return match.group(1).lower()
+        if len(value) == 40 and all(c in "0123456789abcdef" for c in value):
+            return value
+        return None
+
+    def _build_result_item(self, hash_value, instant=False, files=None, source="torbox"):
+        return {
+            "hash": hash_value,
+            "instant": bool(instant),
+            "files": files if isinstance(files, list) else [],
+            "source": source,
+        }
+
     async def add_magnet(self, magnet, ip=None, privacy="private"):
         logger.info(f"Torbox: Adding magnet: {magnet[:50]}...")
         url = f"{self.base_url}/torrents/createtorrent"
-        seed = 3
         data = {
             "magnet": magnet,
-            "seed": seed,
+            "seed": 3,
             "allow_zip": "false"
         }
         response = await self.json_response(url, method='post', headers=self.get_headers(), data=data, retry_on_429=False)
@@ -47,9 +67,8 @@ class Torbox(BaseDebrid):
     async def add_torrent(self, torrent_file, privacy="private"):
         logger.info("Torbox: Adding torrent file")
         url = f"{self.base_url}/torrents/createtorrent"
-        seed = 3
         data = {
-            "seed": seed,
+            "seed": 3,
             "allow_zip": "false"
         }
         files = {
@@ -67,20 +86,40 @@ class Torbox(BaseDebrid):
         return response
 
     async def control_torrent(self, torrent_id, operation):
+        """Control a torrent (delete, pause, resume, reannounce). Uses JSON body per API spec."""
         logger.info(f"Torbox: Controlling torrent ID: {torrent_id}, operation: {operation}")
         url = f"{self.base_url}/torrents/controltorrent"
-        data = {
+        json_data = {
             "torrent_id": torrent_id,
             "operation": operation
         }
-        response = await self.json_response(url, method='post', headers=self.get_headers(), data=data)
+        response = await self.json_response(url, method='post', headers=self.get_headers(), json_data=json_data)
         logger.info(f"Torbox: Control torrent response: {response}")
         return response
 
-    async def request_download_link(self, torrent_id, file_id=None, zip_link=False):
-        """Request download link with retry logic"""
+    async def delete_torrent(self, torrent_id):
+        logger.info(f"Torbox: Deleting torrent ID: {torrent_id}")
+        return await self.control_torrent(torrent_id, "delete")
+
+    async def _delete_torrents_background(self, torrent_ids):
+        """Non-blocking background cleanup of temporary torrents."""
+        logger.debug(f"Torbox: Background cleanup of {len(torrent_ids)} torrent(s)")
+        success = 0
+        for torrent_id in torrent_ids:
+            try:
+                await self.delete_torrent(torrent_id)
+                success += 1
+                await asyncio.sleep(1)
+            except Exception as e:
+                logger.debug(f"Torbox: Could not delete torrent {torrent_id}: {e}")
+        logger.debug(f"Torbox: Background cleanup done — {success}/{len(torrent_ids)} deleted")
+
+    async def request_download_link(self, torrent_id, file_id=None, zip_link=False, ip=None):
+        """Request download link with retry logic. Passes user_ip for CDN region selection."""
         logger.info(f"Torbox: Requesting download link for torrent ID: {torrent_id}, file ID: {file_id}, zip link: {zip_link}")
         url = f"{self.base_url}/torrents/requestdl?token={self.token}&torrent_id={torrent_id}&file_id={file_id}&zip_link={str(zip_link).lower()}"
+        if ip:
+            url += f"&user_ip={ip}"
         logger.info(f"Torbox: Requesting URL: {url}")
 
         max_attempts = 3
@@ -104,8 +143,8 @@ class Torbox(BaseDebrid):
         season = query['season']
         episode = query['episode']
         torrent_download = query["torrent_download"]
+        torrent_file_content = query.get("torrent_file_content", None)
         if torrent_download:
-            from urllib.parse import unquote
             torrent_download = unquote(torrent_download)
 
         info_hash = get_info_hash_from_magnet(magnet)
@@ -117,20 +156,17 @@ class Torbox(BaseDebrid):
         if existing_torrent:
             logger.info(f"Torbox: Found existing torrent with ID: {existing_torrent['id']}")
             torrent_id = existing_torrent["id"]
-            # Get full torrent info with files
             torrent_response = await self.get_torrent_info(torrent_id)
             if not torrent_response or "data" not in torrent_response:
                 logger.error("Torbox: Failed to get torrent info.")
                 return None
             torrent_info = torrent_response["data"]
         else:
-            # Add the magnet or torrent file
-            add_response = await self.add_magnet_or_torrent(magnet, torrent_download)
+            add_response = await self.add_magnet_or_torrent(magnet, torrent_download, torrent_file_content)
             if not add_response or "torrent_id" not in add_response:
                 logger.error("Torbox: Failed to add or find torrent.")
                 return None
             torrent_id = add_response["torrent_id"]
-            # Get full torrent info with files
             torrent_response = await self.get_torrent_info(torrent_id)
             if not torrent_response or "data" not in torrent_response:
                 logger.error("Torbox: Failed to get torrent info.")
@@ -152,7 +188,7 @@ class Torbox(BaseDebrid):
             return settings.no_cache_video_url
 
         # Request the download link
-        download_link_response = await self.request_download_link(torrent_id, file_id)
+        download_link_response = await self.request_download_link(torrent_id, file_id, ip=ip)
 
         if not download_link_response or "data" not in download_link_response:
             logger.error("Torbox: Failed to get download link.")
@@ -188,28 +224,89 @@ class Torbox(BaseDebrid):
             ],
         }
 
+    async def _lookup_stremthru(self, hashes, ip=None):
+        """Query StremThru as community cache for TorBox (debrid code 'TB')."""
+        if not hashes:
+            return {}, []
+        try:
+            token = self.config.get("TBToken", "")
+            st_results, still_remaining = await self._get_stremthru_community_cache(
+                hashes, "torbox", token, debrid_code_filter="TB", ip=ip
+            )
+            cached = {}
+            for item in st_results:
+                hash_value = self._normalize_hash_value(item.get("hash"))
+                if not hash_value:
+                    continue
+                cached[hash_value] = self._build_result_item(
+                    hash_value,
+                    instant=True,
+                    files=item.get("files", []),
+                    source="stremthru",
+                )
+            if cached:
+                logger.debug(
+                    f"Torbox: StremThru found {len(cached)} cached, {len(still_remaining)} remaining for bulk check"
+                )
+            return cached, still_remaining
+        except Exception as e:
+            logger.debug(f"Torbox: StremThru lookup failed: {str(e)}")
+            return {}, hashes
+
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
         logger.info(f"Torbox: Checking availability for {len(hashes_or_magnets)} hashes/magnets")
 
-        all_results = []
+        # Normalize and deduplicate inputs while preserving order
+        cleaned_hashes = list(
+            dict.fromkeys(
+                h for h in (self._normalize_hash_value(v) for v in hashes_or_magnets) if h
+            )
+        )
 
-        for i in range(0, len(hashes_or_magnets), 50):
-            batch = list(islice(hashes_or_magnets, i, i + 50))
-            logger.info(f"Torbox: Checking batch of {len(batch)} hashes/magnets (batch {i//50 + 1})")
-            url = f"{self.base_url}/torrents/checkcached?hash={','.join(batch)}&format=list&list_files=true"
-            response = await self.json_response(url, headers=self.get_headers())
+        if not cleaned_hashes:
+            return {"success": True, "detail": "No hashes to check.", "data": []}
 
-            if response and response.get("success") and response["data"]:
-                all_results.extend(response["data"])
+        result_by_hash = {}
+
+        # Step 1: StremThru community cache (positive results only)
+        if settings.stremthru_url:
+            stremthru_cached, remaining_hashes = await self._lookup_stremthru(cleaned_hashes, ip)
+            result_by_hash.update(stremthru_cached)
+        else:
+            remaining_hashes = cleaned_hashes
+
+        # Step 2: TorBox native checkcached endpoint — POST JSON body, batches of 100
+        batch_size = 100
+        for i in range(0, len(remaining_hashes), batch_size):
+            batch = remaining_hashes[i: i + batch_size]
+            logger.debug(f"Torbox: Checking batch of {len(batch)} hashes (batch {i // batch_size + 1})")
+            url = f"{self.base_url}/torrents/checkcached?format=list&list_files=true"
+            response = await self.json_response(
+                url,
+                method='post',
+                headers=self.get_headers(),
+                json_data={"hashes": batch},
+            )
+            if response and response.get("success") and response.get("data"):
+                for item in response["data"]:
+                    h = self._normalize_hash_value(item.get("hash"))
+                    if h:
+                        result_by_hash[h] = self._build_result_item(
+                            h,
+                            instant=True,
+                            files=item.get("files", []),
+                            source="torbox_direct",
+                        )
             else:
-                logger.debug(f"Torbox: No cached availability for batch {i//50 + 1}")
-                return None
+                logger.debug(f"Torbox: No cached results for batch {i // batch_size + 1}")
 
-        logger.info(f"Torbox: Availability check completed for all {len(hashes_or_magnets)} hashes/magnets")
+        cached_count = len(result_by_hash)
+        logger.info(f"Torbox: Availability check done — {cached_count}/{len(cleaned_hashes)} cached")
+
         return {
             "success": True,
             "detail": "Torrent cache status retrieved successfully.",
-            "data": all_results
+            "data": [result_by_hash[h] for h in cleaned_hashes if h in result_by_hash],
         }
 
     async def _find_existing_torrent(self, info_hash):
@@ -223,12 +320,34 @@ class Torbox(BaseDebrid):
         logger.info("Torbox: No existing torrent found")
         return None
 
-    async def add_magnet_or_torrent(self, magnet, torrent_download=None, ip=None, privacy="private"):
-        # Always use magnet: TorBox ignores seed=3 with .torrent file uploads
-        logger.info("Torbox: Adding magnet (ignoring .torrent to preserve seed settings)")
-        response = await self.add_magnet(magnet, ip, privacy)
+    async def add_magnet_or_torrent(self, magnet, torrent_download=None, torrent_file_content=None, ip=None, privacy="private"):
+        logger.debug("Torbox: Adding magnet or torrent")
 
-        logger.info(f"Torbox: Add torrent response: {response}")
+        if torrent_file_content is not None:
+            logger.info("Torbox: Attempting to add cached .torrent file")
+            try:
+                upload_response = await self.add_torrent(torrent_file_content, privacy)
+                if upload_response and upload_response.get("success") and upload_response.get("data"):
+                    logger.info("Torbox: Successfully added cached .torrent")
+                    return upload_response["data"]
+                logger.warning("Torbox: Failed to add cached .torrent")
+            except Exception as e:
+                logger.warning(f"Torbox: Exception with cached .torrent: {str(e)}")
+
+        if torrent_download is not None:
+            logger.info("Torbox: Downloading and adding .torrent file")
+            try:
+                torrent_file = await self.download_torrent_file(torrent_download)
+                upload_response = await self.add_torrent(torrent_file, privacy)
+                if upload_response and upload_response.get("success") and upload_response.get("data"):
+                    logger.info("Torbox: Successfully added downloaded .torrent")
+                    return upload_response["data"]
+                logger.warning("Torbox: Failed to add downloaded .torrent, falling back to magnet")
+            except Exception as e:
+                logger.warning(f"Torbox: Exception downloading .torrent: {str(e)}")
+
+        logger.info("Torbox: Adding magnet link")
+        response = await self.add_magnet(magnet, ip, privacy)
 
         if not response or "data" not in response or response["data"] is None:
             logger.error("Torbox: Failed to add magnet/torrent")
@@ -236,15 +355,57 @@ class Torbox(BaseDebrid):
 
         return response["data"]
 
+    async def start_background_caching(self, magnet, query=None):
+        """Start caching a magnet/torrent in the background via TorBox asynccreatetorrent."""
+        logger.info("Torbox: Starting background caching for magnet")
+        url = f"{self.base_url}/torrents/asynccreatetorrent"
+
+        if query and isinstance(query, dict):
+            raw = query.get("torrent_download")
+            if raw:
+                torrent_download = unquote(raw)
+                try:
+                    torrent_file = await self.download_torrent_file(torrent_download)
+                    files = {
+                        "file": (str(uuid.uuid4()) + ".torrent", torrent_file, 'application/x-bittorrent')
+                    }
+                    file_data = {"seed": 1, "allow_zip": "false"}
+                    response = await self.json_response(
+                        url, method='post', headers=self.get_headers(), data=file_data, files=files
+                    )
+                    if response and response.get("success"):
+                        logger.info("Torbox: Background caching started via .torrent file")
+                        return True
+                except Exception as e:
+                    logger.warning(f"Torbox: .torrent download failed for background caching: {e}")
+
+        try:
+            data = {"magnet": magnet, "seed": 1, "allow_zip": "false"}
+            response = await self.json_response(
+                url, method='post', headers=self.get_headers(), data=data, retry_on_429=False
+            )
+            if response and response.get("success"):
+                logger.info("Torbox: Background caching started via magnet")
+                return True
+            logger.error(f"Torbox: Failed to start background caching: {response}")
+            return False
+        except Exception as e:
+            logger.error(f"Torbox: start_background_caching error: {e}")
+            return False
+
     async def _wait_for_torrent_completion(self, torrent_id, timeout=60, interval=10):
         logger.info(f"Torbox: Waiting for torrent completion, ID: {torrent_id}")
+
+        READY_STATES = {"cached", "completed", "uploading"}
 
         async def check_status():
             torrent_info = await self.get_torrent_info(torrent_id)
             if torrent_info and "data" in torrent_info:
-                files = torrent_info["data"].get("files", [])
-                logger.info(f"Torbox: Current torrent status: {torrent_info['data']['download_state']}")
-                return True if len(files) > 0 else False
+                data = torrent_info["data"]
+                state = data.get("download_state", "")
+                files = data.get("files", [])
+                logger.info(f"Torbox: Current torrent state: {state}, files: {len(files)}")
+                return state in READY_STATES and len(files) > 0
             return False
 
         result = await self.wait_for_ready_status(check_status, timeout, interval)
