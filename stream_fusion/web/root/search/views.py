@@ -172,121 +172,188 @@ async def full_prefetch_from_cache(
                             f"Pre-fetch: Postgres search failed: {str(pg_error)}"
                         )
 
-                if config["zilean"]:
-                    zilean_service = ZileanService(config, session=http_session)
-                    zilean_search_results = await zilean_service.search(next_media)
-                    if zilean_search_results:
-                        zilean_search_results = [
-                            ZileanResult().from_api_cached_item(torrent, next_media)
-                            for torrent in zilean_search_results
-                            if len(getattr(torrent, "info_hash", "")) == 40
-                        ]
-                        zilean_search_results = await asyncio.to_thread(
-                            filter_items, zilean_search_results, next_media, config=config
-                        )
-                        zilean_search_results = await torrent_service.convert_and_process(
-                            zilean_search_results
-                        )
-                        search_results = merge_items(
-                            search_results, zilean_search_results
-                        )
+                # Phase-based indexer search (mirrors get_search_results logic)
+                categories = config.get("indexerCategories", {})
 
-                if config.get("c411") and settings.c411_enable:
+                def _get_cat(key):
+                    return categories.get(key, "fallback_private")
+
+                def _count_private(results):
+                    return sum(
+                        1 for r in results
+                        if _get_cat((r.indexer.split()[0] if r.indexer else "").lower()) != "public"
+                    )
+
+                async def _fetch_c411():
+                    if not config.get("c411") or not settings.c411_enable:
+                        return []
                     try:
                         c411_service = C411Service(config, session=http_session)
-                        c411_results = await c411_service.search(next_media)
-                        if c411_results:
-                            c411_results = [
-                                C411SearchResult().from_api_item(item, next_media)
-                                for item in c411_results
-                                if getattr(item, "info_hash", None)
-                                and len(item.info_hash) == 40
-                            ]
-                            c411_results = await torrent_service.convert_and_process(
-                                c411_results
-                            )
-                            search_results = merge_items(search_results, c411_results)
-                            logger.debug(
-                                f"Pre-fetch: C411 API: {len(c411_results)} results"
-                            )
+                        raw = await c411_service.search(next_media)
+                        return [
+                            C411SearchResult().from_api_item(item, next_media)
+                            for item in raw
+                            if getattr(item, "info_hash", None) and len(item.info_hash) == 40
+                        ] if raw else []
                     except Exception as e:
                         logger.debug(f"Pre-fetch: C411 search failed: {e}")
+                    return []
 
-                if config.get("torr9") and settings.torr9_enable:
+                async def _fetch_torr9():
+                    if not config.get("torr9") or not settings.torr9_enable:
+                        return []
                     try:
                         torr9_service = Torr9Service(config, session=http_session)
-                        torr9_results = await torr9_service.search(next_media)
-                        if torr9_results:
-                            torr9_results = [
-                                Torr9SearchResult().from_api_item(item, next_media)
-                                for item in torr9_results
-                                if getattr(item, "info_hash", None)
-                                and len(item.info_hash) == 40
-                            ]
-                            torr9_results = await torrent_service.convert_and_process(
-                                torr9_results
-                            )
-                            search_results = merge_items(search_results, torr9_results)
-                            logger.debug(
-                                f"Pre-fetch: Torr9 API: {len(torr9_results)} results"
-                            )
+                        raw = await torr9_service.search(next_media)
+                        return [
+                            Torr9SearchResult().from_api_item(item, next_media)
+                            for item in raw
+                            if getattr(item, "info_hash", None) and len(item.info_hash) == 40
+                        ] if raw else []
                     except Exception as e:
                         logger.debug(f"Pre-fetch: Torr9 search failed: {e}")
+                    return []
 
-                if config.get("lacale") and settings.lacale_enable:
+                async def _fetch_lacale():
+                    if not config.get("lacale") or not settings.lacale_enable:
+                        return []
                     try:
                         lacale_service = LaCaleService(config, session=http_session)
-                        lacale_results = await lacale_service.search(next_media)
-                        if lacale_results:
-                            lacale_results = await torrent_service.convert_and_process(
-                                lacale_results
-                            )
-                            search_results = merge_items(search_results, lacale_results)
-                            logger.debug(
-                                f"Pre-fetch: LaCale API: {len(lacale_results)} results"
-                            )
+                        raw = await lacale_service.search(next_media)
+                        return raw if raw else []
                     except Exception as e:
                         logger.debug(f"Pre-fetch: LaCale search failed: {e}")
+                    return []
 
-                if config.get("generationfree"):
+                async def _fetch_generationfree():
+                    if not config.get("generationfree"):
+                        return []
                     try:
-                        generationfree_service = GenerationFreeService(
-                            config, session=http_session
-                        )
-                        generationfree_results = await generationfree_service.search(
-                            next_media
-                        )
-                        if generationfree_results:
-                            generationfree_results = (
-                                await torrent_service.convert_and_process(
-                                    generationfree_results
-                                )
-                            )
-                            search_results = merge_items(
-                                search_results, generationfree_results
-                            )
-                            logger.debug(
-                                f"Pre-fetch: GenerationFree API: {len(generationfree_results)} results"
-                            )
+                        generationfree_service = GenerationFreeService(config, session=http_session)
+                        raw = await generationfree_service.search(next_media)
+                        return raw if raw else []
                     except Exception as e:
                         logger.debug(f"Pre-fetch: GenerationFree search failed: {e}")
+                    return []
 
-                if config.get("yggflix"):
+                async def _fetch_abn():
+                    if not config.get("abn") or not settings.abn_enable:
+                        return []
+                    try:
+                        abn_service = AbnService(config, session=http_session)
+                        raw = await abn_service.search(next_media)
+                        return raw if raw else []
+                    except Exception as e:
+                        logger.debug(f"Pre-fetch: ABN search failed: {e}")
+                    return []
+
+                async def _fetch_g3mini():
+                    if not config.get("g3mini") or not settings.g3mini_enable:
+                        return []
+                    try:
+                        g3mini_service = G3MiniService(config, session=http_session)
+                        raw = await g3mini_service.search(next_media)
+                        return raw if raw else []
+                    except Exception as e:
+                        logger.debug(f"Pre-fetch: G3MINI search failed: {e}")
+                    return []
+
+                async def _fetch_theoldschool():
+                    if not config.get("theoldschool") or not settings.theoldschool_enable:
+                        return []
+                    try:
+                        theoldschool_service = TheOldSchoolService(config, session=http_session)
+                        raw = await theoldschool_service.search(next_media)
+                        return raw if raw else []
+                    except Exception as e:
+                        logger.debug(f"Pre-fetch: TheOldSchool search failed: {e}")
+                    return []
+
+                async def _fetch_zilean():
+                    if not config.get("zilean"):
+                        return []
+                    try:
+                        zilean_service = ZileanService(config, session=http_session)
+                        raw = await zilean_service.search(next_media)
+                        if not raw:
+                            return []
+                        return [
+                            ZileanResult().from_api_cached_item(torrent, next_media)
+                            for torrent in raw
+                            if len(getattr(torrent, "info_hash", "")) == 40
+                        ]
+                    except Exception as e:
+                        logger.debug(f"Pre-fetch: Zilean search failed: {e}")
+                    return []
+
+                async def _fetch_jackett():
+                    if not config.get("jackett"):
+                        return []
+                    try:
+                        jackett_service = JackettService(config, session=http_session)
+                        raw = await jackett_service.search(next_media)
+                        return raw if raw else []
+                    except Exception as e:
+                        logger.debug(f"Pre-fetch: Jackett search failed: {e}")
+                    return []
+
+                async def _fetch_yggflix():
+                    if not config.get("yggflix"):
+                        return []
                     try:
                         yggflix_service = YggflixService(config)
-                        yggflix_results = await asyncio.to_thread(
-                            yggflix_service.search, next_media
-                        )
-                        if yggflix_results:
-                            yggflix_results = await torrent_service.convert_and_process(
-                                yggflix_results
-                            )
-                            search_results = merge_items(search_results, yggflix_results)
-                            logger.debug(
-                                f"Pre-fetch: Yggflix: {len(yggflix_results)} results"
-                            )
+                        raw = await asyncio.to_thread(yggflix_service.search, next_media)
+                        return raw if raw else []
                     except Exception as e:
                         logger.debug(f"Pre-fetch: Yggflix search failed: {e}")
+                    return []
+
+                ALL_FETCHERS = [
+                    ("c411",           _fetch_c411,           "C411"),
+                    ("torr9",          _fetch_torr9,          "Torr9"),
+                    ("lacale",         _fetch_lacale,         "LaCale"),
+                    ("generationfree", _fetch_generationfree, "GenerationFree"),
+                    ("abn",            _fetch_abn,            "ABN"),
+                    ("g3mini",         _fetch_g3mini,         "G3MINI"),
+                    ("theoldschool",   _fetch_theoldschool,   "TheOldSchool"),
+                    ("zilean",         _fetch_zilean,         "Zilean"),
+                    ("jackett",        _fetch_jackett,        "Jackett"),
+                    ("yggflix",        _fetch_yggflix,        "Yggflix"),
+                ]
+
+                async def _run_phase(target_categories):
+                    fetchers = [(k, fn, name) for k, fn, name in ALL_FETCHERS if _get_cat(k) in target_categories]
+                    if not fetchers:
+                        return []
+                    raw_list = await asyncio.gather(*[fn() for _, fn, _ in fetchers])
+                    phase_results = []
+                    for (_, _, name), raw in zip(fetchers, raw_list):
+                        if not raw:
+                            continue
+                        processed = await torrent_service.convert_and_process(raw)
+                        if processed:
+                            logger.debug(f"Pre-fetch: {name}: {len(processed)} results")
+                            phase_results = merge_items(phase_results, processed)
+                    return phase_results
+
+                min_cached = int(config.get("minCachedResults", 8))
+                yggflix_priority = config.get("yggflixPriority", True)
+
+                phase1_cats = {"priority_private", "public"} if yggflix_priority else {"priority_private"}
+                phase1 = await _run_phase(phase1_cats)
+                search_results = merge_items(search_results, phase1)
+
+                if _count_private(search_results) < min_cached:
+                    phase2 = await _run_phase({"intermediary_private"})
+                    search_results = merge_items(search_results, phase2)
+
+                if _count_private(search_results) < min_cached:
+                    phase3 = await _run_phase({"fallback_private"})
+                    search_results = merge_items(search_results, phase3)
+
+                if not yggflix_priority:
+                    phase4 = await _run_phase({"public"})
+                    search_results = merge_items(search_results, phase4)
 
                 if postgres_results:
                     search_results = merge_items(postgres_results, search_results)
