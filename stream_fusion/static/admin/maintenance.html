@@ -260,6 +260,20 @@
 
             <div class="maint-action">
                 <div class="maint-action-info">
+                    <div class="maint-action-title">Flush cache recherche</div>
+                    <div class="maint-action-desc">Supprime <code>stream:*</code> et <code>media:*</code> — résultats de recherche et torrents mis en cache.</div>
+                </div>
+                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
+                        data-action="flush-redis-pattern"
+                        data-pattern="searchcache"
+                        data-confirm-title="Vider le cache de recherche ?"
+                        data-confirm-body="Les résultats de recherche et les torrents en cache seront supprimés. Les prochaines recherches seront plus lentes.">
+                    <i class="bi bi-trash3 me-1"></i>Vider
+                </button>
+            </div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
                     <div class="maint-action-title">Flush cache peer</div>
                     <div class="maint-action-desc">Supprime les clés <code>peer:*</code> — cache de partage inter-instances.</div>
                 </div>

@@ -67,7 +67,7 @@ class BaseDebrid:
     async def _torrent_rate_limit(self):
         await self._rate_limit(self.torrent_requests, self.torrent_limit, self.torrent_period)
 
-    async def json_response(self, url, method="get", data=None, headers=None, files=None, timeout=30, retry_on_429=True):
+    async def json_response(self, url, method="get", data=None, headers=None, files=None, json_data=None, timeout=30, retry_on_429=True):
         """Make an async HTTP request and return JSON response."""
         await self._global_rate_limit()
         if "torrents" in url:
@@ -104,6 +104,10 @@ class BaseDebrid:
                             else:
                                 form_data.add_field(key, file_tuple)
                         async with session.post(url, data=form_data, **kwargs) as response:
+                            await self._log_and_raise(response)
+                            return await self._parse_json_response(response, attempt, max_attempts)
+                    elif json_data is not None:
+                        async with session.post(url, json=json_data, **kwargs) as response:
                             await self._log_and_raise(response)
                             return await self._parse_json_response(response, attempt, max_attempts)
                     else:
