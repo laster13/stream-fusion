@@ -727,11 +727,12 @@ async def flush_redis_pattern(
 
     # Whitelist des patterns autorisés pour éviter toute suppression accidentelle de session
     allowed_patterns = {
-        "stream":   ["stream_link:*", "direct_link:*", "ready:*", "download:*"],
-        "catalog":  ["catalog:*", "tmdbid_item:*"],
-        "ratelimit":["ratelimit:*"],
-        "metadata": ["imdbid_item:*", "tmdbid_item:*", "tmdbid_to_imdbid:*"],
-        "peer":     ["peer:*"],
+        "stream":      ["stream_link:*", "direct_link:*", "ready:*", "download:*"],
+        "catalog":     ["catalog:*", "tmdbid_item:*"],
+        "ratelimit":   ["ratelimit:*"],
+        "metadata":    ["imdbid_item:*", "tmdbid_item:*", "tmdbid_to_imdbid:*"],
+        "peer":        ["peer:*"],
+        "searchcache": ["stream:*", "media:*"],
     }
 
     if pattern not in allowed_patterns:
