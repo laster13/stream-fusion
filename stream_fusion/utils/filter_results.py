@@ -122,6 +122,9 @@ def items_sort(items, config):
 def filter_out_non_matching_movies(items, year):
     """Filter out movie torrents whose title does not contain a year within ±1 of the target year."""
     logger.debug(f"Filters: Filtering non-matching movies for year: {year}")
+    if not year:
+        logger.debug("Filters: No year provided, skipping year filtering")
+        return items
     year_min = str(int(year) - 1)
     year_max = str(int(year) + 1)
     year_pattern = re.compile(rf"\b(?:{year_max}|{year}|{year_min})\b")
