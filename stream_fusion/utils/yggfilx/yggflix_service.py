@@ -5,6 +5,7 @@ from RTN import parse
 
 from stream_fusion.logging_config import logger
 from stream_fusion.utils.detection import detect_languages
+from stream_fusion.utils.filter_results import normalize_text
 from stream_fusion.utils.yggfilx.yggflix_result import YggflixResult
 from stream_fusion.utils.models.movie import Movie
 from stream_fusion.utils.models.series import Series
@@ -14,6 +15,8 @@ from stream_fusion.utils.yggfilx.yggflix_api import YggflixAPI
 class YggflixService:
     # Minimum delay between consecutive API calls to avoid triggering 429 rate limits.
     _REQUEST_DELAY = 0.3  # seconds
+    # If the title pre-filter keeps >= this ratio of results, a page 2 fetch is worthwhile.
+    _PAGE2_TITLE_KEEP_THRESHOLD = 0.8
 
     def __init__(self, config: dict):
         self.yggflix = YggflixAPI()
@@ -64,9 +67,21 @@ class YggflixService:
                 seen_hashes.add(info_hash)
             merged.append(item)
 
+    def __pre_filter_by_title(self, results: List[dict], normalized_titles: List[str]) -> List[dict]:
+        """Keep results whose torrent name contains at least one normalized media title."""
+        if not normalized_titles:
+            return results
+        filtered = []
+        for result in results:
+            name = normalize_text(result.get("name", ""))
+            if any(t in name for t in normalized_titles):
+                filtered.append(result)
+        return filtered
+
     def __search_movie(self, media: Movie) -> List[dict]:
         titles = self.__unique_titles(getattr(media, "titles", []) or [])
         year = getattr(media, "year", None)
+        normalized_titles = [normalize_text(t) for t in titles]
 
         logger.info(f"Searching YGG Relay for movie: {media.titles[0] if media.titles else 'unknown'}")
 
@@ -88,7 +103,28 @@ class YggflixService:
             except Exception as e:
                 logger.warning(f"YGG Relay movie query failed '{query}': {e}")
                 continue
+
+            if not raw_results:
+                continue
+
             self.__merge_results(raw_results, merged_results, seen_hashes)
+
+            # Decide whether a page 2 fetch is worthwhile based on title pre-filter ratio.
+            pre_filtered = self.__pre_filter_by_title(raw_results, normalized_titles)
+            keep_ratio = len(pre_filtered) / len(raw_results)
+            logger.debug(
+                f"YGG Relay: pre-filter '{query}' kept {len(pre_filtered)}/{len(raw_results)} "
+                f"(ratio={keep_ratio:.2f})"
+            )
+
+            if keep_ratio >= self._PAGE2_TITLE_KEEP_THRESHOLD and len(raw_results) >= 20:
+                time.sleep(self._REQUEST_DELAY)
+                try:
+                    raw_p2 = self.yggflix.search_movie(title=query, offset=100)
+                    logger.debug(f"YGG Relay movie page2 '{query}' -> {len(raw_p2)} results")
+                    self.__merge_results(raw_p2, merged_results, seen_hashes)
+                except Exception as e:
+                    logger.warning(f"YGG Relay movie page2 failed '{query}': {e}")
 
         return merged_results
 
