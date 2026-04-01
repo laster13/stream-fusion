@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}Règles de langue — StreamFusion Admin{% endblock %}
+{% block page_title %}Règles de langue{% endblock %}
+
+{% block extra_head %}
+<style>
+    .inactive-row { opacity: 0.45; }
+    code.key   { color: #f0b27a; font-size: 0.85rem; }
+    code.value { color: #82e0aa; font-size: 0.85rem; word-break: break-all; }
+    .search-input { max-width: 300px; }
+    .type-label {
+        font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
+        letter-spacing: .08em; color: var(--bs-secondary-color);
+    }
+    .badge-french_pattern  { background: rgba(13,202,240,0.15); color: #0dcaf0; border: 1px solid rgba(13,202,240,0.3); }
+    .badge-release_group   { background: rgba(255,193,7,0.15);  color: #ffc107; border: 1px solid rgba(255,193,7,0.3); }
+    .badge-code_mapping    { background: rgba(25,135,84,0.15);  color: #20c997; border: 1px solid rgba(25,135,84,0.3); }
+    .badge-priority_group  { background: rgba(111,66,193,0.15); color: #a98eda; border: 1px solid rgba(111,66,193,0.3); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <input type="text" class="form-control form-control-sm search-input" id="searchInput" placeholder="Filtrer (clé, valeur, description…)">
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-warning btn-sm" id="reloadBtn" title="Invalider Redis et recharger en mémoire">
+            <i class="bi bi-arrow-clockwise me-1"></i>Recharger le cache
+        </button>
+        <button class="btn btn-primary btn-sm" id="createBtn">
+            <i class="bi bi-plus-lg me-1"></i>Nouvelle règle
+        </button>
+    </div>
+</div>
+
+{% for rt in rule_types %}
+{% set rules = grouped.get(rt, []) %}
+<div class="mb-4">
+    <h6 class="type-label">{{ rt }} <span class="ms-1 text-muted">({{ rules|length }})</span></h6>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.05em;color:var(--bs-secondary-color);">
+                    <th>Clé</th>
+                    <th>Valeur / Pattern</th>
+                    {% if rt == 'priority_group' %}<th>Extra (mode)</th>{% endif %}
+                    <th>Description</th>
+                    <th>Actif</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rules %}
+                <tr data-search="{{ r.key }} {{ r.value }} {{ r.description or '' }}" class="{% if not r.is_active %}inactive-row{% endif %}">
+                    <td><code class="key">{{ r.key }}</code></td>
+                    <td style="max-width:340px;"><code class="value">{{ r.value }}</code></td>
+                    {% if rt == 'priority_group' %}
+                    <td style="font-size:0.78rem;">
+                        {% if r.extra %}
+                            {% if r.extra.vfq_mode %}<span class="badge text-bg-info" style="font-size:.68rem;">VFQ</span>{% else %}<span class="badge text-bg-secondary" style="font-size:.68rem;">Défaut</span>{% endif %}
+                        {% else %}—{% endif %}
+                    </td>
+                    {% endif %}
+                    <td style="font-size:0.82rem;color:var(--bs-secondary-color);">{{ r.description or '—' }}</td>
+                    <td>
+                        {% if r.is_active %}
+                        <span class="badge text-bg-success" style="font-size:.7rem;">Oui</span>
+                        {% else %}
+                        <span class="badge text-bg-secondary" style="font-size:.7rem;">Non</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="d-flex gap-1">
+                            <button class="btn btn-sm btn-outline-secondary edit-btn"
+                                data-id="{{ r.id }}" data-rule-type="{{ r.rule_type }}"
+                                data-key="{{ r.key }}" data-value="{{ r.value }}"
+                                data-description="{{ r.description or '' }}"
+                                data-is-active="{{ r.is_active | lower }}"
+                                title="Modifier"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-sm btn-outline-danger delete-btn" data-id="{{ r.id }}" title="Supprimer">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-secondary text-center" style="font-size:.82rem;">Aucune règle</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endfor %}
+
+<!-- Modal create/edit -->
+<div class="modal fade" id="ruleModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">Nouvelle règle</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="ruleForm">
+                    <input type="hidden" id="ruleId" name="rule_id" value="">
+                    <div class="mb-3">
+                        <label class="form-label">Type</label>
+                        <select class="form-select form-select-sm" id="ruleType" name="rule_type" required>
+                            <option value="french_pattern">french_pattern</option>
+                            <option value="release_group">release_group</option>
+                            <option value="code_mapping">code_mapping</option>
+                            <option value="priority_group">priority_group</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Clé</label>
+                        <input type="text" class="form-control form-control-sm" id="ruleKey" name="key" required placeholder="ex: VFF, BlackAngel, fr, VFF">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Valeur / Pattern</label>
+                        <textarea class="form-control form-control-sm" id="ruleValue" name="value" rows="2" required placeholder="ex: \b(?:VFF|TRUEFRENCH)\b, FRENCH, 1"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <input type="text" class="form-control form-control-sm" id="ruleDescription" name="description" placeholder="Optionnel">
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="ruleActive" name="is_active" checked>
+                        <label class="form-check-label" for="ruleActive">Actif</label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-primary btn-sm" id="saveBtn">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const csrf = window.__ADMIN_CSRF__;
+const modal = new bootstrap.Modal(document.getElementById('ruleModal'));
+
+document.getElementById('searchInput').addEventListener('input', function() {
+    const q = this.value.toLowerCase();
+    document.querySelectorAll('tbody tr[data-search]').forEach(r => {
+        r.style.display = r.dataset.search.toLowerCase().includes(q) ? '' : 'none';
+    });
+});
+
+document.getElementById('createBtn').addEventListener('click', () => {
+    document.getElementById('modalTitle').textContent = 'Nouvelle règle';
+    document.getElementById('ruleId').value = '';
+    document.getElementById('ruleForm').reset();
+    document.getElementById('ruleActive').checked = true;
+    modal.show();
+});
+
+document.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.getElementById('modalTitle').textContent = 'Modifier la règle';
+        document.getElementById('ruleId').value = btn.dataset.id;
+        document.getElementById('ruleType').value = btn.dataset.ruleType;
+        document.getElementById('ruleKey').value = btn.dataset.key;
+        document.getElementById('ruleValue').value = btn.dataset.value;
+        document.getElementById('ruleDescription').value = btn.dataset.description;
+        document.getElementById('ruleActive').checked = btn.dataset.isActive === 'true';
+        modal.show();
+    });
+});
+
+document.getElementById('saveBtn').addEventListener('click', async () => {
+    const id = document.getElementById('ruleId').value;
+    const url = id ? '/admin/matching/language-rules/update' : '/admin/matching/language-rules/create';
+    const formData = new FormData(document.getElementById('ruleForm'));
+    formData.append('csrf_token', csrf);
+    if (!id) formData.delete('rule_id');
+    if (!document.getElementById('ruleActive').checked) formData.delete('is_active');
+    const r = await fetch(url, {method:'POST', body: formData});
+    const data = await r.json();
+    if (data.success) { modal.hide(); location.reload(); }
+    else alert('Erreur : ' + (data.message || 'Inconnue'));
+});
+
+document.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        if (!confirm('Supprimer cette règle ?')) return;
+        const fd = new FormData();
+        fd.append('rule_id', btn.dataset.id);
+        fd.append('csrf_token', csrf);
+        const r = await fetch('/admin/matching/language-rules/delete', {method:'POST', body: fd});
+        const data = await r.json();
+        if (data.success) location.reload();
+        else alert('Erreur : ' + (data.message || 'Inconnue'));
+    });
+});
+
+document.getElementById('reloadBtn').addEventListener('click', async () => {
+    const fd = new FormData();
+    fd.append('csrf_token', csrf);
+    const btn = document.getElementById('reloadBtn');
+    btn.disabled = true;
+    const r = await fetch('/admin/matching/language-rules/reload', {method:'POST', body: fd});
+    const data = await r.json();
+    btn.disabled = false;
+    if (data.success) {
+        btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Rechargé';
+        setTimeout(() => { btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Recharger le cache'; }, 2000);
+    } else {
+        alert('Erreur : ' + (data.message || 'Inconnue'));
+    }
+});
+</script>
+{% endblock %}

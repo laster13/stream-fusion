@@ -1,6 +1,5 @@
 import re
 from typing import Dict
-from stream_fusion.constants import FR_RELEASE_GROUPS, FRENCH_PATTERNS
 
 INSTANTLY_AVAILABLE = "⚡"
 DOWNLOAD_REQUIRED = "⬇️​​"
@@ -22,12 +21,24 @@ def filter_by_direct_torrent(item: Dict) -> int:
     return 1 if item["name"].startswith(DIRECT_TORRENT) else 0
 
 def extract_release_group(title: str) -> str:
-    combined_pattern = "|".join(FR_RELEASE_GROUPS)
-    match = re.search(combined_pattern, title)
-    return match.group(0) if match else None
+    try:
+        from stream_fusion.utils.filter.title_matching import get_lang_manager
+        patterns = get_lang_manager().get_release_group_patterns()
+        for pattern in patterns:
+            match = pattern.search(title)
+            if match:
+                return match.group(0)
+        return None
+    except RuntimeError:
+        return None
 
 def detect_french_language(title: str) -> str:
-    for language, pattern in FRENCH_PATTERNS.items():
-        if re.search(pattern, title, re.IGNORECASE):
-            return language
-    return None
+    try:
+        from stream_fusion.utils.filter.title_matching import get_lang_manager
+        french_patterns = get_lang_manager().get_french_patterns()
+        for language, pattern in french_patterns.items():
+            if pattern.search(title):
+                return language
+        return None
+    except RuntimeError:
+        return None

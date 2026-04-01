@@ -26,6 +26,14 @@ class JackettService:
         self._session = session
         self._timeout = aiohttp.ClientTimeout(total=30)
 
+    def __normalize_for_search(self, title: str) -> str:
+        """Light normalization for search queries (substitutions, ligatures, apostrophes)."""
+        try:
+            from stream_fusion.utils.filter.title_matching import get_normalizer
+            return get_normalizer().normalize_for_search(title)
+        except RuntimeError:
+            return " ".join((title or "").split()).strip()
+
     async def _get_session(self) -> aiohttp.ClientSession:
         """Retourne la session aiohttp, en crée une si nécessaire."""
         if self._session is None or self._session.closed:
@@ -111,24 +119,22 @@ class JackettService:
 
         results = []
         session = await self._get_session()
+        base_url = f"{self.__base_url}/indexers/{indexer.id}/results/torznab/api"
 
         for index, lang in enumerate(languages):
             params = {
                 'apikey': self.__api_key,
                 't': 'movie',
                 'cat': '2000',
-                'q': titles[index],
+                'q': self.__normalize_for_search(titles[index]),
                 'year': movie.year,
             }
 
             if has_imdb_search_capability:
                 params['imdbid'] = movie.id
 
-            url = f"{self.__base_url}/indexers/{indexer.id}/results/torznab/api"
-            url += '?' + '&'.join([f'{k}={v}' for k, v in params.items()])
-
             try:
-                async with session.get(url) as response:
+                async with session.get(base_url, params=params) as response:
                     response.raise_for_status()
                     text = await response.text()
                     results.append(self.__get_torrent_links_from_xml(text))
@@ -167,37 +173,29 @@ class JackettService:
 
         results = []
         session = await self._get_session()
+        base_url = f"{self.__base_url}/indexers/{indexer.id}/results/torznab/api"
 
         for index, lang in enumerate(languages):
             params = {
                 'apikey': self.__api_key,
                 't': 'tvsearch',
                 'cat': '5000',
-                'q': titles[index],
+                'q': self.__normalize_for_search(titles[index]),
             }
 
             if has_imdb_search_capability:
                 params['imdbid'] = series.id
 
-            url_title = f"{self.__base_url}/indexers/{indexer.id}/results/torznab/api"
-            url_title += '?' + '&'.join([f'{k}={v}' for k, v in params.items()])
-
-            url_season = f"{self.__base_url}/indexers/{indexer.id}/results/torznab/api"
             params_season = {**params, 'season': season}
-            url_season += '?' + '&'.join([f'{k}={v}' for k, v in params_season.items()])
-
-            url_ep = f"{self.__base_url}/indexers/{indexer.id}/results/torznab/api"
             params_ep = {**params_season, 'ep': episode}
-            url_ep += '?' + '&'.join([f'{k}={v}' for k, v in params_ep.items()])
 
             try:
-                # Lancer les 3 requêtes en parallèle
-                async with session.get(url_ep) as response_ep:
+                async with session.get(base_url, params=params_ep) as response_ep:
                     response_ep.raise_for_status()
                     text_ep = await response_ep.text()
                     data_ep = self.__get_torrent_links_from_xml(text_ep)
 
-                async with session.get(url_season) as response_season:
+                async with session.get(base_url, params=params_season) as response_season:
                     response_season.raise_for_status()
                     text_season = await response_season.text()
                     data_season = self.__get_torrent_links_from_xml(text_season)
@@ -208,7 +206,7 @@ class JackettService:
                     results.append(data_season)
 
                 if not data_ep and not data_season:
-                    async with session.get(url_title) as response_title:
+                    async with session.get(base_url, params=params) as response_title:
                         response_title.raise_for_status()
                         text_title = await response_title.text()
                         data_title = self.__get_torrent_links_from_xml(text_title)

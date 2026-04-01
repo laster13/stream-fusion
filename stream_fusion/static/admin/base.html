@@ -246,6 +246,20 @@
             <i class="bi bi-sliders"></i> Configuration
         </a>
 
+        <div class="sidebar-section">Matching</div>
+        <a class="sidebar-link {% if '/matching/title-rules' in request.url.path %}active{% endif %}"
+           href="{{ url_for('matching_title_rules')(request) }}">
+            <i class="bi bi-type"></i> Règles titres
+        </a>
+        <a class="sidebar-link {% if '/matching/language-rules' in request.url.path %}active{% endif %}"
+           href="{{ url_for('matching_language_rules')(request) }}">
+            <i class="bi bi-translate"></i> Règles langue
+        </a>
+        <a class="sidebar-link {% if '/matching/test' in request.url.path %}active{% endif %}"
+           href="{{ url_for('matching_test_page')(request) }}">
+            <i class="bi bi-flask"></i> Test matching
+        </a>
+
         <div class="sidebar-section">Recherche</div>
         <a class="sidebar-link {% if '/search/hash' in request.url.path %}active{% endif %}"
            href="{{ url_for('search_hash_page')(request) }}">
@@ -306,7 +320,6 @@
         applyTheme(html.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark');
     });
 </script>
-{% block extra_scripts %}{% endblock %}
 <script>
 // Server-generated CSRF token — automatically injected into all POST forms
 window.__ADMIN_CSRF__ = "{{ csrf_token }}";
@@ -323,5 +336,6 @@ document.addEventListener('submit', function(e) {
     }
 });
 </script>
+{% block extra_scripts %}{% endblock %}
 </body>
 </html>

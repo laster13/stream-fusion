@@ -1,15 +1,12 @@
 import re
-import unicodedata
-from functools import lru_cache
 from typing import List
-
-from RTN import title_match
 
 from stream_fusion.utils.filter.language_filter import LanguageFilter
 from stream_fusion.utils.filter.language_priority_filter import LanguagePriorityFilter
 from stream_fusion.utils.filter.max_size_filter import MaxSizeFilter
 from stream_fusion.utils.filter.quality_exclusion_filter import QualityExclusionFilter
 from stream_fusion.utils.filter.title_exclusion_filter import TitleExclusionFilter
+from stream_fusion.utils.filter.title_matching import get_matcher
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
 from stream_fusion.logging_config import logger
 
@@ -17,27 +14,8 @@ from stream_fusion.logging_config import logger
 quality_order = {"2160p": 0, "1080p": 1, "720p": 2, "480p": 3}
 hdr_order = {"DV": 0, "HDR10+": 1, "HDR10": 2, "HDR": 3}
 
-# Pre-compiled regex patterns (compiled once at import time)
-_INTEGRALE_PATTERN = re.compile(
-    r"\b(INTEGRALE|COMPLET|COMPLETE|INTEGRAL)\b", re.IGNORECASE
-)
-_RELEASE_TAGS_PATTERN = re.compile(
-    r"\b("
-    r"DIRFIX|PROPER|REPACK|RERIP|REAL|INTERNAL|LIMITED|UNRATED|EXTENDED|"
-    r"REMUX|COMPLETE|COMPLET|INTEGRALE|INTEGRAL|READNFO|SUBFORCED|DUBBED|"
-    r"MULTI|VOSTFR|TRUEFRENCH|FRENCH|VFQ|VFF|VF2|VOF|VFI"
-    r")\b",
-    re.IGNORECASE,
-)
 _YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
-_SPACES_PATTERN = re.compile(r"\s+")
-_TMDB_FILTER_PATTERN = re.compile(
-    r'[<>"/\\|?*\x00-\x1F'
-    r'\u2122\u00AE\u00A9\u2120\u00A1\u00BF\u2013\u2014'
-    r'\u2018\u2019\u201C\u201D\u2022\u2026\s]+'
-)
-_COLON_BEFORE_WORD_PATTERN = re.compile(r":(\S)")
-_COLON_SPACES_PATTERN = re.compile(r"\s*:\s*")
+_INTEGRALE_PATTERN = re.compile(r"\b(INTEGRALE|COMPLET|COMPLETE|INTEGRAL)\b", re.IGNORECASE)
 
 
 def get_hdr_priority(hdr_list) -> int:
@@ -182,133 +160,15 @@ def filter_out_non_matching_series(items, season, episode):
     return filtered_items
 
 
-@lru_cache(maxsize=512)
-def normalize_text(text: str) -> str:
-    """Normalize text for title comparison: strip accents, lowercase, collapse whitespace."""
-    if not text:
-        return ""
-    text = unicodedata.normalize("NFD", text)
-    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
-    text = text.lower()
-    return _SPACES_PATTERN.sub(" ", text).strip()
-
-
-@lru_cache(maxsize=512)
-def clean_release_title_for_matching(title: str) -> str:
-    """Strip release tags and years from a torrent title to isolate the media name."""
-    if not title:
-        return ""
-    cleaned = _RELEASE_TAGS_PATTERN.sub(" ", title)
-    cleaned = _YEAR_PATTERN.sub(" ", cleaned)
-    return _SPACES_PATTERN.sub(" ", cleaned).strip()
-
-
-@lru_cache(maxsize=512)
-def clean_tmdb_title(title: str) -> str:
-    """Sanitize a TMDB title by removing special characters and normalizing colons."""
-    cleaned = _COLON_BEFORE_WORD_PATTERN.sub(r" \1", title)
-    cleaned = _COLON_SPACES_PATTERN.sub(" ", cleaned)
-    return _TMDB_FILTER_PATTERN.sub(" ", cleaned).strip()
-
-
 def remove_non_matching_title(items, titles):
     """Remove items whose parsed title does not match any of the provided media titles."""
-    cleaned_titles = [
-        _INTEGRALE_PATTERN.sub("", clean_tmdb_title(t)).strip() for t in titles
-    ]
-    logger.trace(f"Filters: Removing items not matching titles: {cleaned_titles}")
-
-    def normalize_words(text):
-        return normalize_text(text).split()
-
-    def is_ordered_subset(subset: str, full_set: str) -> bool:
-        subset_words = normalize_words(subset)
-        it = iter(normalize_words(full_set))
-        return all(w in it for w in subset_words)
-
-    # Pre-compute normalized forms of TMDB titles once (not N×M times)
-    precomputed_titles = [
-        {
-            "title": t,
-            "words": normalize_words(t),
-            "normalized": normalize_text(t),
-        }
-        for t in cleaned_titles
-    ]
-
-    # Local cache for RTN title_match to avoid redundant Levenshtein computations
-    _title_match_cache: dict[tuple[str, str], bool] = {}
-
-    filtered_items = []
-    for item in items:
-        if hasattr(item, "_ensure_parsed_data_valid"):
-            item._ensure_parsed_data_valid()
-
-        raw = item.parsed_data.parsed_title if (item.parsed_data and hasattr(item.parsed_data, "parsed_title")) else item.raw_title
-        cleaned_item_title = _INTEGRALE_PATTERN.sub("", raw).strip()
-        cleaned_item_title_for_match = clean_release_title_for_matching(cleaned_item_title)
-        item_words = normalize_words(cleaned_item_title_for_match)
-        normalized_item_title = normalize_text(cleaned_item_title_for_match)
-
-        matched = False
-        match_reason = None
-        matched_title = None
-
-        for td in precomputed_titles:
-            title = td["title"]
-            title_words = td["words"]
-            normalized_title = td["normalized"]
-
-            logger.trace(f"Filters: Comparing item title: {cleaned_item_title_for_match} with title: {title}")
-
-            # Case 1: exact match after normalization
-            if normalized_item_title == normalized_title:
-                matched, match_reason, matched_title = True, "exact_normalized", title
-                break
-
-            # Case 2: item title is an ordered subset of the TMDB title
-            if is_ordered_subset(cleaned_item_title_for_match, title):
-                matched, match_reason, matched_title = True, "ordered_subset", title
-                break
-
-            # Case 3: TMDB title is an ordered subset of the item title (reverse)
-            if is_ordered_subset(title, cleaned_item_title_for_match):
-                matched, match_reason, matched_title = True, "reverse_ordered_subset", title
-                break
-
-            # Case 4: fuzzy RTN match — guarded against single-word false positives
-            if len(title_words) >= 2 or len(item_words) >= 2:
-                _tm_key = (normalized_title, normalized_item_title)
-                if _tm_key not in _title_match_cache:
-                    _title_match_cache[_tm_key] = title_match(normalized_title, normalized_item_title)
-                if _title_match_cache[_tm_key]:
-                    matched, match_reason, matched_title = True, "title_match", title
-                    break
-
-        if matched:
-            logger.trace(
-                f"KEEP TITLE | raw_title={getattr(item, 'raw_title', None)} | "
-                f"parsed_title={cleaned_item_title} | "
-                f"match_title={cleaned_item_title_for_match} | "
-                f"matched_with={matched_title} | "
-                f"reason={match_reason}"
-            )
-            filtered_items.append(item)
-        else:
-            logger.trace(
-                f"REJECT TITLE | raw_title={getattr(item, 'raw_title', None)} | "
-                f"parsed_title={cleaned_item_title} | "
-                f"match_title={cleaned_item_title_for_match} | "
-                f"candidate_titles={cleaned_titles}"
-            )
-
-    logger.debug(
-        f"Filters: Title filtering summary -> kept={len(filtered_items)} rejected={len(items) - len(filtered_items)}"
-    )
-    logger.trace(
-        f"Filters: Title filtering complete. {len(filtered_items)} items kept out of {len(items)} total"
-    )
-    return filtered_items
+    try:
+        matcher = get_matcher()
+        return matcher.filter_items(items, tuple(titles))
+    except RuntimeError:
+        # Module not yet initialized (e.g. during tests) — fall back to no-op
+        logger.warning("Filters: title_matching module not initialized, skipping title filter")
+        return items
 
 
 def filter_items(items, media, config, skip_resolution=False):

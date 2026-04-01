@@ -5,7 +5,6 @@ from RTN import parse
 
 from stream_fusion.logging_config import logger
 from stream_fusion.utils.detection import detect_languages
-from stream_fusion.utils.filter_results import normalize_text
 from stream_fusion.utils.yggfilx.yggflix_result import YggflixResult
 from stream_fusion.utils.models.movie import Movie
 from stream_fusion.utils.models.series import Series
@@ -67,13 +66,32 @@ class YggflixService:
                 seen_hashes.add(info_hash)
             merged.append(item)
 
+    def __normalize_text(self, text: str) -> str:
+        """Normalize text for pre-filtering (uses title_matching module if available)."""
+        try:
+            from stream_fusion.utils.filter.title_matching import get_normalizer
+            return get_normalizer().normalize(text)
+        except RuntimeError:
+            import unicodedata, re
+            text = unicodedata.normalize("NFD", text)
+            text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+            return re.sub(r"\s+", " ", text.lower()).strip()
+
+    def __normalize_for_search(self, title: str) -> str:
+        """Light normalization for indexer search queries (uses title_matching module if available)."""
+        try:
+            from stream_fusion.utils.filter.title_matching import get_normalizer
+            return get_normalizer().normalize_for_search(title)
+        except RuntimeError:
+            return " ".join((title or "").split()).strip()
+
     def __pre_filter_by_title(self, results: List[dict], normalized_titles: List[str]) -> List[dict]:
         """Keep results whose torrent name contains at least one normalized media title."""
         if not normalized_titles:
             return results
         filtered = []
         for result in results:
-            name = normalize_text(result.get("name", ""))
+            name = self.__normalize_text(result.get("name", ""))
             if any(t in name for t in normalized_titles):
                 filtered.append(result)
         return filtered
@@ -81,13 +99,14 @@ class YggflixService:
     def __search_movie(self, media: Movie) -> List[dict]:
         titles = self.__unique_titles(getattr(media, "titles", []) or [])
         year = getattr(media, "year", None)
-        normalized_titles = [normalize_text(t) for t in titles]
+        normalized_titles = [self.__normalize_text(t) for t in titles]
 
         logger.info(f"Searching YGG Relay for movie: {media.titles[0] if media.titles else 'unknown'}")
 
         queries = []
         for title in titles:
-            q = f"{title} {year}".strip() if year else title
+            normalized = self.__normalize_for_search(title)
+            q = f"{normalized} {year}".strip() if year else normalized
             if q:
                 queries.append(q)
 
