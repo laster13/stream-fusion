@@ -21,6 +21,27 @@ _TMDB_FILTER_RE = re.compile(
     r'\u2018\u2019\u201C\u201D\u2022\u2026\s]+'
 )
 _INTEGRALE_RE = re.compile(r"\b(INTEGRALE|COMPLET|COMPLETE|INTEGRAL)\b", re.IGNORECASE)
+_DOT_SEP_RE = re.compile(r"[._]")
+
+# Strong boundary: tags that signal the START of the technical section.
+# Format: TITRE.YEAR.LANG.RES.SOURCE.CODEC-TEAM
+# These always come AFTER the release year → they let us find the last year
+# that precedes them, which is the true release year boundary.
+_STRONG_BOUNDARY_RE = re.compile(
+    r"\b(?:"
+    # Language — very unlikely to appear inside a film title
+    r"MULTi|MULTI|FRENCH|TRUEFRENCH|VFF|VF2|VFQ|VFI|VOF|VQ|VOQ|VOSTFR|SUBFRENCH"
+    r"|(?:480|576|720|1080|2160|4320)[ip]"   # Resolution: 1080p, 720p, 2160p…
+    r"|4K|UHD"                               # Alternative resolution markers
+    r"|BluRay|BLU-RAY|BLURAY|HDDVD"         # Disc sources
+    r"|WEB-DL|WEBDL|WEBRIP|WEB\.RIP"        # Web sources (compound only — bare WEB too risky)
+    r"|HDTV|UHDTV|DVDRIP|DVDSCR|REMUX"      # Broadcast / other sources
+    r")\b",
+    re.IGNORECASE
+)
+
+# Season/episode — series-specific boundary (no year needed)
+_SEASON_RE = re.compile(r"\bS\d{2}(?:E\d{2}(?:-E?\d{2})?)?\b", re.IGNORECASE)
 
 
 class TitleNormalizer:
@@ -223,19 +244,118 @@ class TitleNormalizer:
         """Strip INTEGRALE/COMPLET/COMPLETE/INTEGRAL from a title."""
         return _INTEGRALE_RE.sub("", text).strip()
 
+    def extract_clean_title(self, raw: str) -> str:
+        """
+        Extract a clean title from a raw torrent name.
+
+        Strategy (TITRE.YEAR.LANG.RES.SOURCE.CODEC-TEAM tracker convention):
+        1. Dots/underscores → spaces
+        2. Find first strong boundary (language/resolution/source).
+           Find last year BEFORE that boundary (pos > 0) → that is the release year.
+           Use the release year as the cut point so title-years are preserved
+           (e.g. "Blade Runner 2049 2017 FRENCH" → boundary at 2017, not 2049).
+        3. Series fallback: if a season marker (S01E05) is found before any strong
+           boundary, split there directly (no year needed).
+        4. Last-resort fallback: first year at pos > 0 if no other marker found.
+        5. Secondary cleanup: remove any remaining DB release tags.
+        """
+        if not raw:
+            return ""
+
+        # Step 1 — separators to spaces
+        result = _DOT_SEP_RE.sub(" ", raw)
+        result = _SPACES_RE.sub(" ", result).strip()
+
+        title = self._find_title_boundary(result)
+
+        # Step 5 — secondary cleanup of any remaining known tags
+        if self._release_tags_re:
+            title = self._release_tags_re.sub(" ", title)
+        title = _SPACES_RE.sub(" ", title).strip()
+
+        return title
+
+    def _find_title_boundary(self, text: str) -> str:
+        """
+        Return the text slice that corresponds to the title portion only.
+        Uses the boundary detection strategy described in extract_clean_title.
+        """
+        # Season marker is the most unambiguous boundary for series
+        season_m = _SEASON_RE.search(text)
+
+        # First strong technical marker (lang / resolution / source)
+        strong_m = _STRONG_BOUNDARY_RE.search(text)
+
+        # Determine the earliest reliable anchor position
+        anchors = [m.start() for m in (season_m, strong_m) if m and m.start() > 0]
+        anchor_pos = min(anchors) if anchors else None
+
+        if anchor_pos is not None:
+            if season_m and season_m.start() == anchor_pos:
+                # Series: split directly at season marker — no year needed
+                return text[:anchor_pos].strip()
+
+            # Movie: find the last year BEFORE the anchor (pos > 0)
+            # This preserves title-years like "2049" in "Blade Runner 2049 2017 FRENCH"
+            last_year = None
+            for ym in _YEAR_RE.finditer(text[:anchor_pos]):
+                if ym.start() > 0:
+                    last_year = ym
+
+            if last_year:
+                return text[:last_year.start()].strip()
+            else:
+                # No year before the anchor → split at the anchor directly
+                return text[:anchor_pos].strip()
+
+        # Last-resort: first year at pos > 0
+        for m in _YEAR_RE.finditer(text):
+            if m.start() > 0:
+                return text[:m.start()].strip()
+
+        # Nothing found — return as-is
+        return text
+
     # ── Introspection for admin test page ────────────────────────────────────
 
-    def analyze_steps(self, raw_title: str, parsed_title: Optional[str] = None) -> dict:
+    def analyze_steps(self, raw_title: str) -> dict:
         """Return a dict describing each normalization step (for the test page)."""
-        src = parsed_title if parsed_title else raw_title
-        after_integrale = self.remove_integrale(src)
-        after_clean_release = self.clean_release_title(after_integrale)
+        after_integrale = self.remove_integrale(raw_title)
+        after_dot_to_space = _SPACES_RE.sub(" ", _DOT_SEP_RE.sub(" ", after_integrale)).strip()
+
+        # Detect boundary details for display
+        text = after_dot_to_space
+        season_m = _SEASON_RE.search(text)
+        strong_m = _STRONG_BOUNDARY_RE.search(text)
+        anchors = [m for m in (season_m, strong_m) if m and m.start() > 0]
+        anchor = min(anchors, key=lambda m: m.start()) if anchors else None
+
+        boundary_info = "aucune"
+        if anchor:
+            if season_m and anchor.start() == season_m.start():
+                boundary_info = f"saison « {anchor.group()} » à pos {anchor.start()}"
+            else:
+                last_year = None
+                for ym in _YEAR_RE.finditer(text[:anchor.start()]):
+                    if ym.start() > 0:
+                        last_year = ym
+                if last_year:
+                    boundary_info = (
+                        f"année « {last_year.group()} » à pos {last_year.start()} "
+                        f"(fort: « {anchor.group()} »)"
+                    )
+                else:
+                    boundary_info = f"fort « {anchor.group()} » à pos {anchor.start()}"
+
+        after_boundary = self._find_title_boundary(after_dot_to_space)
+        after_clean_release = self.clean_release_title(after_boundary)
         after_normalize = self.normalize(after_clean_release)
         after_strip_article = self.strip_leading_article(after_normalize)
         return {
             "raw_title": raw_title,
-            "parsed_title": parsed_title or "(RTN non disponible)",
             "after_integrale": after_integrale,
+            "after_dot_to_space": after_dot_to_space,
+            "boundary_detected": boundary_info,
             "after_clean_release": after_clean_release,
             "after_normalize": after_normalize,
             "after_strip_article": after_strip_article,

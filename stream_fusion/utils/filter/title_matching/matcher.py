@@ -1,4 +1,4 @@
-from RTN import title_match
+from RTN import title_match  # used for level 4 fuzzy matching only
 
 from stream_fusion.logging_config import logger
 from stream_fusion.utils.filter.title_matching.normalizer import TitleNormalizer
@@ -35,7 +35,7 @@ class TitleMatcher:
 
         # Prepare item side
         raw = self._n.remove_integrale(item_raw)
-        cleaned_item = n.clean_release_title(raw)
+        cleaned_item = n.extract_clean_title(raw)
         normalized_item = n.normalize(cleaned_item)
         item_words = normalized_item.split()
         stripped_item = n.strip_leading_article(normalized_item)
@@ -97,29 +97,18 @@ class TitleMatcher:
         tmdb_titles = list(titles)
         filtered = []
         for item in items:
-            if hasattr(item, "_ensure_parsed_data_valid"):
-                item._ensure_parsed_data_valid()
-
-            parsed_title = (
-                item.parsed_data.parsed_title
-                if (item.parsed_data and hasattr(item.parsed_data, "parsed_title"))
-                else None
-            )
-            item_raw = parsed_title or getattr(item, "raw_title", "")
-
+            item_raw = getattr(item, "raw_title", "")
             matched, reason, matched_with = self.match(item_raw, tmdb_titles)
 
             if matched:
                 logger.trace(
-                    f"KEEP TITLE | raw_title={getattr(item, 'raw_title', None)} | "
-                    f"parsed_title={parsed_title} | "
+                    f"KEEP TITLE | raw_title={item_raw} | "
                     f"matched_with={matched_with} | reason={reason}"
                 )
                 filtered.append(item)
             else:
                 logger.trace(
-                    f"REJECT TITLE | raw_title={getattr(item, 'raw_title', None)} | "
-                    f"parsed_title={parsed_title} | candidate_titles={tmdb_titles}"
+                    f"REJECT TITLE | raw_title={item_raw} | candidate_titles={tmdb_titles}"
                 )
 
         logger.debug(
@@ -134,15 +123,7 @@ class TitleMatcher:
         """
         n = self._n
 
-        # Normalization steps
-        try:
-            from RTN import parse
-            parsed = parse(raw_title)
-            parsed_title = getattr(parsed, "parsed_title", None)
-        except Exception:
-            parsed_title = None
-
-        steps = n.analyze_steps(raw_title, parsed_title)
+        steps = n.analyze_steps(raw_title)
 
         # Per-title match analysis
         title_results = []
@@ -150,9 +131,8 @@ class TitleMatcher:
         matched_reason = None
         matched_with = None
 
-        raw_for_match = parsed_title or raw_title
-        item_raw = n.remove_integrale(raw_for_match)
-        cleaned_item = n.clean_release_title(item_raw)
+        item_raw = n.remove_integrale(raw_title)
+        cleaned_item = n.extract_clean_title(item_raw)
         normalized_item = n.normalize(cleaned_item)
         item_words = normalized_item.split()
         stripped_item = n.strip_leading_article(normalized_item)

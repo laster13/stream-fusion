@@ -127,8 +127,9 @@ function renderResults(data) {
     const steps = data.steps || {};
     const stepDefs = [
         ['Titre brut',              steps.raw_title],
-        ['parsed_title (RTN)',      steps.parsed_title],
         ['Après remove_integrale',  steps.after_integrale],
+        ['Après dot → espace',      steps.after_dot_to_space],
+        ['Frontière détectée',      steps.boundary_detected],
         ['Après clean_release',     steps.after_clean_release],
         ['Après normalize()',       steps.after_normalize],
         ['Après strip_article()',   steps.after_strip_article],
