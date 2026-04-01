@@ -259,11 +259,16 @@ class TorrentItemDAO:
                 logger.error(f"TorrentItemDAO: Error updating torrent_file_path and tmdb_id for {torrent_id}: {str(e)}")
                 return False
 
-    async def update_tmdb_id_by_raw_title(self, raw_title: str, tmdb_id: int) -> int:
+    async def update_tmdb_id_by_info_hash(self, info_hash: str, tmdb_id: int) -> int:
+        """Update tmdb_id for a specific torrent identified by its info_hash.
+
+        Preferred over update_tmdb_id_by_raw_title when info_hash is available,
+        as info_hash is unique per torrent and avoids title-collision risks.
+        """
         try:
             stmt = (
                 update(TorrentItemModel)
-                .where(TorrentItemModel.raw_title == raw_title)
+                .where(TorrentItemModel.info_hash == info_hash)
                 .where(TorrentItemModel.tmdb_id.is_(None))
                 .values(
                     tmdb_id=tmdb_id,
@@ -273,7 +278,34 @@ class TorrentItemDAO:
             result = await self.session.execute(stmt)
             await self.session.flush()
             row_count = result.rowcount
-            logger.debug(f"TorrentItemDAO: Updated {row_count} torrents with raw_title '{raw_title}' to tmdb_id {tmdb_id}")
+            logger.debug(f"TorrentItemDAO: Updated {row_count} torrents with info_hash '{info_hash}' to tmdb_id {tmdb_id}")
+            return row_count
+        except Exception as e:
+            logger.error(f"TorrentItemDAO: Error updating tmdb_id for info_hash '{info_hash}': {str(e)}")
+            return 0
+
+    async def update_tmdb_id_by_raw_title(self, raw_title: str, tmdb_id: int, indexer: str = None) -> int:
+        """Update tmdb_id for torrents matching raw_title (and optionally indexer).
+
+        Fallback for when info_hash is not available. The indexer filter reduces
+        the risk of updating unrelated items that happen to share the same title.
+        """
+        try:
+            stmt = (
+                update(TorrentItemModel)
+                .where(TorrentItemModel.raw_title == raw_title)
+                .where(TorrentItemModel.tmdb_id.is_(None))
+            )
+            if indexer:
+                stmt = stmt.where(TorrentItemModel.indexer == indexer)
+            stmt = stmt.values(
+                tmdb_id=tmdb_id,
+                updated_at=int(datetime.now(timezone.utc).timestamp())
+            )
+            result = await self.session.execute(stmt)
+            await self.session.flush()
+            row_count = result.rowcount
+            logger.debug(f"TorrentItemDAO: Updated {row_count} torrents with raw_title '{raw_title}' (indexer={indexer}) to tmdb_id {tmdb_id}")
             return row_count
         except Exception as e:
             logger.error(f"TorrentItemDAO: Error updating tmdb_id for raw_title '{raw_title}': {str(e)}")

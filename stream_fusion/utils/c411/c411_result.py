@@ -54,7 +54,7 @@ class C411Result:
         self.privacy = api_item.privacy or "public"
         self.languages = detect_languages(self.raw_title, default_language="fr")
         self.type = media.type
-        self.tmdb_id = getattr(media, 'tmdb_id', None)
+        self.tmdb_id = None  # C411 merges TMDB-ID and text results: assigned retroactively after title-match filtering
         # torrent_download and passkey tracker are reconstructed at serve time from settings
         self.torrent_download = None
         return self

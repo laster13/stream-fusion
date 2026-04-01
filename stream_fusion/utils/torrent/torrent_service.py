@@ -88,14 +88,12 @@ class TorrentService:
     async def cache_torrent(self, torrent_item: TorrentItem, id: str = None):
         unique_id = self.__generate_unique_id(torrent_item.raw_title, torrent_item.indexer)
 
-        # Indexeurs privés où le tmdb_id est important pour retrouver les entrées ensuite.
-        # Ces trackers sont interrogés par TMDB/IMDB ID, donc tous leurs résultats
-        # doivent avoir un tmdb_id valide. Sans lui, on ne peut pas retrouver l'entrée
-        # par la suite. Les trackers keyword-only (ABN, YGGFlix) n'ont pas ce check.
+        # G3Mini, GenerationFree, TheOldSchool recherchent uniquement par TMDB/IMDB ID
+        # (pas de fallback texte). Leurs résultats doivent toujours avoir un tmdb_id.
+        # Si tmdb_id est None pour ces indexeurs, c'est une anomalie — on ne cache pas.
+        # C411, Torr9, LaCale peuvent avoir tmdb_id=None (fallback texte ou merge) :
+        # leur tmdb_id sera assigné rétroactivement après filtrage par titre.
         if torrent_item.indexer in [
-            "C411 - API",
-            "Torr9 - API",
-            "LaCale - API",
             "GenerationFree - API",
             "G3MINI - API",
             "TheOldSchool - API",

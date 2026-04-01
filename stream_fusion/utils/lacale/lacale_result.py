@@ -39,7 +39,7 @@ class LaCaleResult:
             tmdb_id=self.tmdb_id,
         )
 
-    def from_api_item(self, api_item, media):
+    def from_api_item(self, api_item, media, searched_by_id: bool = True):
         self.info_hash = api_item.info_hash.lower() if api_item.info_hash else None
         if not self.info_hash or len(self.info_hash) != 40:
             raise ValueError(f"Invalid info_hash: {self.info_hash}")
@@ -52,7 +52,9 @@ class LaCaleResult:
         self.privacy = api_item.privacy or "private"
         self.languages = detect_languages(self.raw_title, default_language="fr")
         self.type = media.type
-        self.tmdb_id = getattr(media, "tmdb_id", None)
+        # Assign tmdb_id only when the search was done by TMDB/IMDB ID (reliable).
+        # Text-fallback results get tmdb_id=None and are assigned retroactively after title-match filtering.
+        self.tmdb_id = getattr(media, "tmdb_id", None) if searched_by_id else None
 
         if api_item.magnet:
             self.magnet = api_item.magnet

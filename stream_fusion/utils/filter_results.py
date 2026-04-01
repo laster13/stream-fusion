@@ -171,19 +171,13 @@ def remove_non_matching_title(items, titles):
         return items
 
 
-def filter_items(items, media, config, skip_resolution=False):
-    """Apply all configured filters to a list of torrent items for the given media."""
-    logger.debug(f"Filters: Starting item filtering for media: {media.titles[0]}")
+def apply_correctness_filters(items, media):
+    """Apply correctness filters: confirm the torrent matches the requested media.
 
-    filters = {
-        "languages": LanguageFilter(config),
-        "maxSize": MaxSizeFilter(config, media.type),
-        "exclusionKeywords": TitleExclusionFilter(config),
-    }
-    if not skip_resolution:
-        filters["exclusion"] = QualityExclusionFilter(config)
-
-    language_priority_filter = LanguagePriorityFilter(config)
+    These filters are media-driven (not user-preference-driven) and determine
+    whether a torrent is genuinely the right film or series. TMDB ID retroactive
+    assignment should happen after this function, before preference filters.
+    """
     logger.trace(f"Filters: Initial item count: {len(items)}")
 
     if media.type == "series":
@@ -199,6 +193,26 @@ def filter_items(items, media, config, skip_resolution=False):
     logger.trace(f"Filters: Filtering out items not matching titles: {media.titles}")
     items = remove_non_matching_title(items, media.titles)
     logger.trace(f"Filters: Item count after title filtering: {len(items)}")
+
+    return items
+
+
+def apply_preference_filters(items, media, config, skip_resolution=False):
+    """Apply user-preference filters: language, size, exclusions, quality, sorting.
+
+    These filters reflect the user's personal settings and should run after
+    TMDB ID retroactive assignment, so that excluded items still get their
+    tmdb_id updated in the database.
+    """
+    filters = {
+        "languages": LanguageFilter(config),
+        "maxSize": MaxSizeFilter(config, media.type),
+        "exclusionKeywords": TitleExclusionFilter(config),
+    }
+    if not skip_resolution:
+        filters["exclusion"] = QualityExclusionFilter(config)
+
+    language_priority_filter = LanguagePriorityFilter(config)
 
     for filter_name, filter_instance in filters.items():
         try:
@@ -227,6 +241,19 @@ def filter_items(items, media, config, skip_resolution=False):
         logger.error("Filters: Error while applying language priority filter", exc_info=e)
 
     logger.info(f"Filters: Filtering complete. Final item count: {len(items)}")
+    return items
+
+
+def filter_items(items, media, config, skip_resolution=False):
+    """Apply all configured filters to a list of torrent items for the given media.
+
+    Convenience wrapper that chains apply_correctness_filters() and
+    apply_preference_filters(). Use the two functions separately in views.py
+    to insert TMDB ID retroactive assignment between the two stages.
+    """
+    logger.debug(f"Filters: Starting item filtering for media: {media.titles[0]}")
+    items = apply_correctness_filters(items, media)
+    items = apply_preference_filters(items, media, config, skip_resolution=skip_resolution)
     return items
 
 

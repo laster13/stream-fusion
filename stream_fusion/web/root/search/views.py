@@ -13,6 +13,8 @@ from stream_fusion.utils.filter.results_per_quality_filter import (
     ResultsPerQualityFilter,
 )
 from stream_fusion.utils.filter_results import (
+    apply_correctness_filters,
+    apply_preference_filters,
     filter_items,
     merge_items,
     sort_items,
@@ -832,19 +834,20 @@ async def get_results(
             f"Search: Merged Postgres ({len(postgres_results)}) + External ({len(external_results)}) = {len(all_results)} total results"
         )
 
-        filtered_results = await asyncio.to_thread(
-            filter_items, all_results, media, config=config
+        # --- Step 1: correctness filters (year/season + title matching) ---
+        confirmed_results = await asyncio.to_thread(
+            apply_correctness_filters, all_results, media
         )
 
         # --- Re-fetch if stale cache has insufficient results (skip if just freshly fetched) ---
         min_results = int(config.get("minCachedResults", 8))
         if not just_fetched:
-            external_filtered = await asyncio.to_thread(
-                filter_items, external_results, media, config=config
+            external_confirmed = await asyncio.to_thread(
+                apply_correctness_filters, external_results, media
             )
-            if len(external_filtered) < min_results:
+            if len(external_confirmed) < min_results:
                 logger.warning(
-                    f"Search: Insufficient external results ({len(external_filtered)} < {min_results}). Recreating external cache."
+                    f"Search: Insufficient external results ({len(external_confirmed)} < {min_results}). Recreating external cache."
                 )
                 await redis_cache.delete(cache_key)
                 external_results = await get_search_results(media, config)
@@ -857,25 +860,37 @@ async def get_results(
                     f"Search: Recreated external cache with {len(external_results)} results"
                 )
                 all_results = merge_items(postgres_results, external_results)
-                filtered_results = await asyncio.to_thread(
-                    filter_items, all_results, media, config=config
+                confirmed_results = await asyncio.to_thread(
+                    apply_correctness_filters, all_results, media
                 )
 
-        logger.success(f"Search: Final number of filtered results: {len(filtered_results)}")
+        logger.success(f"Search: Confirmed results after correctness filters: {len(confirmed_results)}")
 
-        # --- Retroactive TMDB ID assignment for keyword-based trackers ---
-        # Keyword-only trackers (ABN, YGGFlix) cache items without tmdb_id to avoid
-        # mismatch. Now that filter_items() has confirmed these results match the media
-        # via title matching, we can safely assign the tmdb_id retroactively.
+        # --- Step 2: retroactive TMDB ID assignment (background, non-blocking) ---
+        # Any tracker that cached items without tmdb_id (keyword-based or text-fallback)
+        # gets its tmdb_id assigned here, after correctness filters confirmed the match.
+        # This runs on ALL confirmed items — including those that will be excluded by
+        # user-preference filters — so the DB is always up to date regardless of user config.
+        # Fired as a background task: the DB update does not affect the response to the user.
         if hasattr(media, "tmdb_id") and media.tmdb_id:
             tmdb_id_int = int(media.tmdb_id)
             updates = []
-            for item in filtered_results:
+            for item in confirmed_results:
                 if item.tmdb_id is None and item.indexer in _POSTGRES_INDEXERS:
-                    updates.append(torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int))
+                    # Prefer info_hash (unique per torrent) over raw_title to avoid collisions
+                    if item.info_hash:
+                        updates.append(torrent_dao.update_tmdb_id_by_info_hash(item.info_hash, tmdb_id_int))
+                    else:
+                        updates.append(torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int, indexer=item.indexer))
                     item.tmdb_id = tmdb_id_int
             if updates:
-                await asyncio.gather(*updates)
+                asyncio.ensure_future(asyncio.gather(*updates))
+
+        # --- Step 3: user-preference filters (language, quality, exclusions, sorting) ---
+        filtered_results = await asyncio.to_thread(
+            apply_preference_filters, confirmed_results, media, config
+        )
+        logger.success(f"Search: Final number of filtered results: {len(filtered_results)}")
 
         return filtered_results
 

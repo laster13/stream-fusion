@@ -243,7 +243,8 @@ class YggflixService:
             item.languages = detect_languages(item.raw_title, default_language="fr")
             item.type = media.type
             item.parsed_data = parse(item.raw_title)
-            item.tmdb_id = getattr(media, "tmdb_id", None)
+            # tmdb_id intentionally left None for keyword-based tracker.
+            # It will be assigned retroactively after title-match filtering.
             items.append(item)
 
         return items
