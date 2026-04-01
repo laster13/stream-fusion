@@ -889,7 +889,7 @@ async def get_results(
         # Fired from the fast path only. Uses an independent DB session.
         # Per-indexer Redis lock prevents redundant queries across users (TTL = bg_refresh_indexer_ttl).
         async def _background_db_refresh():
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(getattr(settings, "bg_refresh_delay_seconds", 2.0))
             bg_session = request.app.state.db_session_factory()
             try:
                 bg_torrent_dao = TorrentItemDAO(bg_session)

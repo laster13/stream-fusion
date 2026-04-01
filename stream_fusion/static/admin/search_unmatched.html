@@ -245,6 +245,7 @@ function updateVisibility() {
 
     document.querySelectorAll('.group-header').forEach(header => {
         const group = header.dataset.groupHeader;
+        // Use CSS.escape() so that special characters in group names don't break the [data-group="..."] selector.
         const rows = document.querySelectorAll(`#tableBody tr[data-group="${CSS.escape(group)}"]:not(.group-header)`);
         const isCollapsed = collapsedGroups.has(group);
         let anyPassesFilter = false;
