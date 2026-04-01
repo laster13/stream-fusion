@@ -428,10 +428,6 @@ class Torbox(BaseDebrid):
             return largest_file["id"]
 
         elif stream_type == "series":
-            if file_index is not None:
-                logger.info(f"Torbox: Selected file index {file_index} for series")
-                return file_index
-
             try:
                 numeric_season = int(season.replace("S", ""))
                 numeric_episode = int(episode.replace("E", ""))
