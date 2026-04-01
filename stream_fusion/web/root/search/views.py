@@ -88,6 +88,19 @@ _POSTGRES_INDEXERS = frozenset({
     "TheOldSchool - API",
 })
 
+# Maps Postgres indexer display name → user config key
+# Used to check whether a user has an indexer configured when serving non-instant results from cache.
+_INDEXER_CONFIG_KEY = {
+    "C411 - API":           "c411",
+    "Torr9 - API":          "torr9",
+    "LaCale - API":         "lacale",
+    "GenerationFree - API": "generationfree",
+    "ABN - API":            "abn",
+    "G3MINI - API":         "g3mini",
+    "TheOldSchool - API":   "theoldschool",
+    "Yggtorrent - API":     "yggflix",
+}
+
 
 def _build_next_episode_media(media):
     """Return (next_episode_id, next_media_mock) for the episode following the given one."""
@@ -866,19 +879,186 @@ async def get_results(
                 logger.error(f"Search: Postgres search failed: {str(pg_error)}")
                 return [], 0
 
+        # --- Helper: Redis key for per-indexer background refresh lock (Feature C) ---
+        def _bg_refresh_redis_key(indexer_key):
+            if isinstance(media, Series):
+                return f"bg_refresh:{indexer_key}:{media.tmdb_id}:{media.season}{media.episode}"
+            return f"bg_refresh:{indexer_key}:{media.tmdb_id}"
+
+        # --- Background DB refresh: queries all enabled indexers in parallel (Features B + C) ---
+        # Fired from the fast path only. Uses an independent DB session.
+        # Per-indexer Redis lock prevents redundant queries across users (TTL = bg_refresh_indexer_ttl).
+        async def _background_db_refresh():
+            await asyncio.sleep(2.0)
+            bg_session = request.app.state.db_session_factory()
+            try:
+                bg_torrent_dao = TorrentItemDAO(bg_session)
+                bg_torrent_service = TorrentService(config, bg_torrent_dao)
+                _avail_redis = await RedisCache(config).get_redis_client()
+                http_session_bg = getattr(request.app.state, "http_session", None)
+
+                async def _bg_fetch_c411():
+                    if not config.get("c411") or not settings.c411_enable:
+                        return []
+                    c411_service = C411Service(config, session=http_session_bg)
+                    raw = await c411_service.search(media)
+                    return [
+                        C411SearchResult().from_api_item(item, media)
+                        for item in (raw or [])
+                        if getattr(item, "info_hash", None) and len(item.info_hash) == 40
+                    ]
+
+                async def _bg_fetch_torr9():
+                    if not config.get("torr9") or not settings.torr9_enable:
+                        return []
+                    torr9_service = Torr9Service(config, session=http_session_bg)
+                    raw = await torr9_service.search(media)
+                    return [
+                        Torr9SearchResult().from_api_item(item, media)
+                        for item in (raw or [])
+                        if getattr(item, "info_hash", None) and len(item.info_hash) == 40
+                    ]
+
+                async def _bg_fetch_lacale():
+                    if not config.get("lacale") or not settings.lacale_enable:
+                        return []
+                    raw = await LaCaleService(config, session=http_session_bg).search(media)
+                    return raw or []
+
+                async def _bg_fetch_generationfree():
+                    if not config.get("generationfree"):
+                        return []
+                    raw = await GenerationFreeService(config, session=http_session_bg).search(media)
+                    return raw or []
+
+                async def _bg_fetch_abn():
+                    if not config.get("abn") or not settings.abn_enable:
+                        return []
+                    raw = await AbnService(config, session=http_session_bg).search(media)
+                    return raw or []
+
+                async def _bg_fetch_g3mini():
+                    if not config.get("g3mini") or not settings.g3mini_enable:
+                        return []
+                    raw = await G3MiniService(config, session=http_session_bg).search(media)
+                    return raw or []
+
+                async def _bg_fetch_theoldschool():
+                    if not config.get("theoldschool") or not settings.theoldschool_enable:
+                        return []
+                    raw = await TheOldSchoolService(config, session=http_session_bg).search(media)
+                    return raw or []
+
+                async def _bg_fetch_zilean():
+                    if not config.get("zilean"):
+                        return []
+                    raw = await ZileanService(config, session=http_session_bg).search(media)
+                    return [
+                        ZileanResult().from_api_cached_item(t, media)
+                        for t in (raw or [])
+                        if len(getattr(t, "info_hash", "")) == 40
+                    ]
+
+                async def _bg_fetch_jackett():
+                    if not config.get("jackett"):
+                        return []
+                    raw = await JackettService(config, session=http_session_bg).search(media)
+                    return raw or []
+
+                async def _bg_fetch_yggflix():
+                    if not config.get("yggflix"):
+                        return []
+                    raw = await asyncio.to_thread(YggflixService(config).search, media)
+                    return raw or []
+
+                BG_FETCHERS = [
+                    ("c411",           _bg_fetch_c411),
+                    ("torr9",          _bg_fetch_torr9),
+                    ("lacale",         _bg_fetch_lacale),
+                    ("generationfree", _bg_fetch_generationfree),
+                    ("abn",            _bg_fetch_abn),
+                    ("g3mini",         _bg_fetch_g3mini),
+                    ("theoldschool",   _bg_fetch_theoldschool),
+                    ("zilean",         _bg_fetch_zilean),
+                    ("jackett",        _bg_fetch_jackett),
+                    ("yggflix",        _bg_fetch_yggflix),
+                ]
+
+                # Feature C: wrap each fetcher with a per-indexer Redis lock
+                async def _fetch_with_guard(indexer_key, fetch_fn):
+                    if settings.bg_refresh_indexer_ttl > 0:
+                        redis_key = _bg_refresh_redis_key(indexer_key)
+                        if await _avail_redis.exists(redis_key):
+                            logger.debug(f"Search BG: {indexer_key} recently refreshed, skipping")
+                            return []
+                        await _avail_redis.set(redis_key, "1", ex=settings.bg_refresh_indexer_ttl)
+                    try:
+                        return await fetch_fn()
+                    except Exception as e:
+                        if settings.bg_refresh_indexer_ttl > 0:
+                            await _avail_redis.delete(_bg_refresh_redis_key(indexer_key))
+                        logger.debug(f"Search BG: {indexer_key} failed: {e}")
+                        return []
+
+                # All indexers in parallel — no phases, maximize coverage
+                raw_list = await asyncio.gather(*[
+                    _fetch_with_guard(key, fn) for key, fn in BG_FETCHERS
+                ])
+
+                bg_results = []
+                for (key, _), raw in zip(BG_FETCHERS, raw_list):
+                    if raw:
+                        processed = await bg_torrent_service.convert_and_process(raw)
+                        if processed:
+                            bg_results = merge_items(bg_results, processed)
+
+                if bg_results:
+                    bg_confirmed = await asyncio.to_thread(apply_correctness_filters, bg_results, media)
+                    if hasattr(media, "tmdb_id") and media.tmdb_id:
+                        tmdb_id_int = int(media.tmdb_id)
+                        tmdb_updates = []
+                        for item in bg_confirmed:
+                            if item.tmdb_id is None and item.indexer in _POSTGRES_INDEXERS:
+                                if item.info_hash:
+                                    tmdb_updates.append(bg_torrent_dao.update_tmdb_id_by_info_hash(item.info_hash, tmdb_id_int))
+                                else:
+                                    tmdb_updates.append(bg_torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int, indexer=item.indexer))
+                                item.tmdb_id = tmdb_id_int
+                        if tmdb_updates:
+                            await asyncio.gather(*tmdb_updates)
+                    pg_hashes = [
+                        item.info_hash for item in bg_confirmed
+                        if item.info_hash and item.indexer in _POSTGRES_INDEXERS
+                    ]
+                    if pg_hashes:
+                        await bg_torrent_dao.touch_items_by_info_hash(pg_hashes)
+                    logger.debug(f"Search BG: refresh complete — {len(bg_confirmed)} confirmed items processed")
+                else:
+                    logger.debug("Search BG: refresh found no results")
+            except Exception as e:
+                logger.debug(f"Search BG: refresh failed: {e}")
+            finally:
+                await bg_session.commit()
+                await bg_session.close()
+
         # --- Cache-first: check Postgres before hitting live indexers ---
         postgres_results, postgres_max_ts = await _fetch_postgres()
         confirmed_postgres = await asyncio.to_thread(apply_correctness_filters, postgres_results, media)
 
         if _is_postgres_cache_valid(confirmed_postgres, postgres_max_ts):
-            logger.info(
-                f"Search: Postgres cache sufficient and fresh "
-                f"({len(confirmed_postgres)} >= {min_postgres} results, age OK), skipping live indexers"
-            )
             _assign_tmdb_ids_background(confirmed_postgres)
             filtered_results = await asyncio.to_thread(apply_preference_filters, confirmed_postgres, media, config)
-            logger.success(f"Search: Final number of filtered results (from Postgres cache): {len(filtered_results)}")
-            return filtered_results
+            min_cached = int(config.get("minCachedResults", 8))
+            if len(filtered_results) >= min_cached:
+                logger.info(
+                    f"Search: Postgres cache fast path — {len(filtered_results)} >= minCachedResults={min_cached} results, skipping live indexers"
+                )
+                asyncio.ensure_future(_background_db_refresh())
+                return filtered_results, True
+            logger.warning(
+                f"Search: Postgres cache had only {len(filtered_results)} results after preference filters "
+                f"(< minCachedResults={min_cached}), falling back to live search"
+            )
 
         logger.debug(
             f"Search: Postgres cache insufficient or stale "
@@ -965,15 +1145,15 @@ async def get_results(
         )
         logger.success(f"Search: Final number of filtered results: {len(filtered_results)}")
 
-        return filtered_results
+        return filtered_results, False
 
     # --- Search: aggregate results from Postgres + external sources, apply quality filter ---
-    raw_search_results = await get_and_filter_results(media, config)
+    raw_search_results, from_cache = await get_and_filter_results(media, config)
     search_results = ResultsPerQualityFilter(config).filter(raw_search_results)
     logger.info(f"Search: Filtered search results per quality: {len(search_results)}")
 
     # --- Debrid availability check + stream parsing ---
-    async def stream_processing(search_results, media, config):
+    async def stream_processing(search_results, media, config, from_cache: bool = False):
         torrent_smart_container = TorrentSmartContainer(search_results, media)
 
         if config["debrid"]:
@@ -1064,6 +1244,24 @@ async def get_results(
             if excluded:
                 logger.info(f"Search: Excluded {excluded} non-cached public indexer result(s)")
 
+        # --- Cache fast path: filter non-instant results from unconfigured indexers + rename for display ---
+        # Instant results (availability=True) are always shown — debrid already has the file.
+        # Non-instant results from cache require the user to have the indexer configured, otherwise
+        # the announce URL won't work (private tracker credentials belong to another user).
+        if from_cache:
+            before = len(best_matching_results)
+            best_matching_results = [
+                item for item in best_matching_results
+                if item.availability
+                or config.get(_INDEXER_CONFIG_KEY.get(item.indexer, ""), False)
+            ]
+            excluded = before - len(best_matching_results)
+            if excluded:
+                logger.debug(f"Search: Excluded {excluded} non-instant cache result(s) from unconfigured indexers")
+            for item in best_matching_results:
+                if item.availability:
+                    item.indexer = "SF - Cache"
+
         best_matching_results = sort_items(best_matching_results, config)
         logger.info(f"Search: Found {len(best_matching_results)} best matching results")
 
@@ -1075,7 +1273,7 @@ async def get_results(
 
         return stream_list
 
-    stream_list = await stream_processing(search_results, media, config)
+    stream_list = await stream_processing(search_results, media, config, from_cache=from_cache)
     streams = [Stream(**stream) for stream in stream_list]
 
     # --- Cache final stream list (user-specific, shorter TTL for StremThru) ---

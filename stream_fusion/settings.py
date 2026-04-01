@@ -162,6 +162,7 @@ class Settings(BaseSettings):
     redis_db: int = 5
     redis_expiration: int = 604800  # 7 jours
     redis_password: str | None = None
+    bg_refresh_indexer_ttl: int = 21600  # 6 heures — TTL du verrou Redis par indexeur pour le background refresh
 
     # TMDB
     tmdb_api_key: str | None = None
