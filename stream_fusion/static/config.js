@@ -744,6 +744,8 @@ function loadData() {
         theoldschool: false,
         yggflixPriority: true,
         rdMinCachedBeforeCheck: 3,
+        minPostgresResults: 5,
+        postgresMaxAgeDays: 7,
     };
 
     Object.keys(defaultConfig).forEach(key => {
@@ -965,6 +967,8 @@ async function getLink(method) {
         maxResults: parseInt(document.getElementById('maxResults').value) || 5,
         minCachedResults: parseInt(document.getElementById('minCachedResults').value) || 5,
         rdMinCachedBeforeCheck: parseInt(document.getElementById('rdMinCachedBeforeCheck').value) ?? 3,
+        minPostgresResults: parseInt(document.getElementById('minPostgresResults').value) ?? 5,
+        postgresMaxAgeDays: parseInt(document.getElementById('postgresMaxAgeDays').value) ?? 7,
         exclusion: qualityExclusions.filter(quality => document.getElementById(quality).checked),
         jackett: document.getElementById('jackett')?.checked,
         zilean: document.getElementById('zilean')?.checked,

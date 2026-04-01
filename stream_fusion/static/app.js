@@ -683,7 +683,9 @@ document.addEventListener('DOMContentLoaded', function() {
         { range: 'range_maxSize', input: 'maxSize', fill: 'fill_maxSize', max: 500 },
         { range: 'range_resultsPerQuality', input: 'resultsPerQuality', fill: 'fill_resultsPerQuality', max: 50 },
         { range: 'range_maxResults', input: 'maxResults', fill: 'fill_maxResults', max: 100 },
-        { range: 'range_minCachedResults', input: 'minCachedResults', fill: 'fill_minCachedResults', max: 50 }
+        { range: 'range_minCachedResults', input: 'minCachedResults', fill: 'fill_minCachedResults', max: 50 },
+        { range: 'range_minPostgresResults', input: 'minPostgresResults', fill: 'fill_minPostgresResults', max: 20 },
+        { range: 'range_postgresMaxAgeDays', input: 'postgresMaxAgeDays', fill: 'fill_postgresMaxAgeDays', max: 30 }
     ];
 
     sliders.forEach(function(s) {

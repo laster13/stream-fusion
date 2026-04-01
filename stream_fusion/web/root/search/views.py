@@ -1,5 +1,6 @@
 import hashlib
 import time
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 import asyncio
 
@@ -144,35 +145,15 @@ async def full_prefetch_from_cache(
             )
 
             search_results = []
-            postgres_results = []
 
             background_session = request.app.state.db_session_factory()
             try:
                 background_torrent_dao = TorrentItemDAO(background_session)
                 torrent_service = TorrentService(config, background_torrent_dao)
 
-                if hasattr(next_media, "tmdb_id") and next_media.tmdb_id:
-                    try:
-                        postgres_items = await background_torrent_dao.search_by_tmdb_id(
-                            int(next_media.tmdb_id)
-                        )
-                        if postgres_items:
-                            logger.debug(
-                                f"Pre-fetch: Found {len(postgres_items)} results from Postgres for TMDB ID {next_media.tmdb_id}"
-                            )
-                            for db_item in postgres_items:
-                                if db_item.indexer in _POSTGRES_INDEXERS:
-                                    postgres_results.append(db_item.to_torrent_item())
-                            postgres_results = await asyncio.to_thread(
-                                filter_items, postgres_results, next_media, config=config
-                            )
-                            logger.debug(
-                                f"Pre-fetch: After filtering: {len(postgres_results)} Postgres results for {next_media.season}{next_media.episode}"
-                            )
-                    except Exception as pg_error:
-                        logger.debug(
-                            f"Pre-fetch: Postgres search failed: {str(pg_error)}"
-                        )
+                # Pre-fetch goes directly to live indexers — no Postgres cache check.
+                # The user is not impacted by latency here, and a fresh live search
+                # ensures new torrents are discovered and saved to Postgres.
 
                 # Phase-based indexer search (mirrors get_search_results logic)
                 categories = config.get("indexerCategories", {})
@@ -357,38 +338,86 @@ async def full_prefetch_from_cache(
                     phase4 = await _run_phase({"public"})
                     search_results = merge_items(search_results, phase4)
 
-                if postgres_results:
-                    search_results = merge_items(postgres_results, search_results)
+                if search_results:
+                    # Step 1: correctness filters (season/episode + title matching)
+                    confirmed_results = await asyncio.to_thread(
+                        apply_correctness_filters, search_results, next_media
+                    )
                     logger.debug(
-                        f"Pre-fetch: Merged {len(postgres_results)} Postgres + {len(search_results)} external = {len(search_results)} total"
+                        f"Pre-fetch: {len(confirmed_results)} results after correctness filters "
+                        f"for {next_media.season}{next_media.episode}"
                     )
 
-                if search_results:
-                    search_results = await asyncio.to_thread(
-                        filter_items, search_results, next_media, config=config
-                    )
+                    # Step 2: retroactive TMDB ID assignment for confirmed items
+                    if hasattr(next_media, "tmdb_id") and next_media.tmdb_id:
+                        tmdb_id_int = int(next_media.tmdb_id)
+                        tmdb_updates = []
+                        for item in confirmed_results:
+                            if item.tmdb_id is None and item.indexer in _POSTGRES_INDEXERS:
+                                if item.info_hash:
+                                    tmdb_updates.append(background_torrent_dao.update_tmdb_id_by_info_hash(item.info_hash, tmdb_id_int))
+                                else:
+                                    tmdb_updates.append(background_torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int, indexer=item.indexer))
+                                item.tmdb_id = tmdb_id_int
+                        if tmdb_updates:
+                            asyncio.ensure_future(asyncio.gather(*tmdb_updates))
+
+                    # Step 3: refresh TTL for Postgres items so cache-first stays valid
+                    postgres_hashes = [
+                        item.info_hash for item in confirmed_results
+                        if item.info_hash and item.indexer in _POSTGRES_INDEXERS
+                    ]
+                    if postgres_hashes:
+                        asyncio.ensure_future(background_torrent_dao.touch_items_by_info_hash(postgres_hashes))
+
+                    # Step 4: user-preference filters + per-quality cap
                     filtered_results = ResultsPerQualityFilter(config).filter(
-                        search_results
+                        await asyncio.to_thread(apply_preference_filters, confirmed_results, next_media, config)
                     )
                     torrent_smart_container = TorrentSmartContainer(
                         filtered_results, next_media
                     )
 
                     _avail_redis = await RedisCache(config).get_redis_client()
-                    for debrid in debrid_services:
-                        hashes = torrent_smart_container.get_unaviable_hashes()
-                        ip = get_client_ip(request)
-                        result = await debrid.get_availability_bulk_cached(hashes, ip, _avail_redis)
-                        if not result:
-                            # All hashes hit as "not_cached" sentinels — retry direct API
-                            logger.debug(
-                                f"Pre-fetch: All hashes are 'not_cached' sentinels, retrying direct API for {next_episode_id}"
-                            )
-                            result = await debrid.get_availability_bulk(hashes, ip)
-                        if result:
-                            torrent_smart_container.update_availability(
-                                result, type(debrid), next_media
-                            )
+                    ip = get_client_ip(request)
+
+                    pf_fast = [d for d in debrid_services if type(d).__name__ != "RealDebrid"]
+                    pf_rd   = [d for d in debrid_services if type(d).__name__ == "RealDebrid"]
+
+                    # --- Parallel: all non-RD debrids simultaneously ---
+                    pf_hashes = torrent_smart_container.get_unaviable_hashes()
+                    if pf_fast and pf_hashes:
+                        async def _check_pf(debrid):
+                            try:
+                                result = await debrid.get_availability_bulk_cached(pf_hashes, ip, _avail_redis)
+                                if not result:
+                                    result = await debrid.get_availability_bulk(pf_hashes, ip)
+                                return debrid, result
+                            except Exception as e:
+                                logger.debug(f"Pre-fetch: {type(debrid).__name__} availability check failed: {e}")
+                                return debrid, None
+
+                        pf_results = await asyncio.gather(*[_check_pf(d) for d in pf_fast])
+                        for debrid, result in pf_results:
+                            if result:
+                                torrent_smart_container.update_availability(result, type(debrid), next_media)
+
+                    # --- RealDebrid: only if below threshold, on remaining hashes ---
+                    if pf_rd:
+                        cached_count = torrent_smart_container.get_cached_count()
+                        rd_min = int(config.get("rdMinCachedBeforeCheck", 3))
+                        if rd_min > 0 and cached_count >= rd_min:
+                            logger.debug(f"Pre-fetch: {cached_count} cached ≥ rdMinCachedBeforeCheck ({rd_min}), skipping RealDebrid")
+                        else:
+                            for rd in pf_rd:
+                                rd_hashes = torrent_smart_container.get_unaviable_hashes()
+                                if not rd_hashes:
+                                    break
+                                result = await rd.get_availability_bulk_cached(rd_hashes, ip, _avail_redis)
+                                if not result:
+                                    result = await rd.get_availability_bulk(rd_hashes, ip)
+                                if result:
+                                    torrent_smart_container.update_availability(result, type(rd), next_media)
 
                     best_matching_results = torrent_smart_container.get_best_matching()
                     best_matching_results = sort_items(best_matching_results, config)
@@ -783,33 +812,82 @@ async def get_results(
 
     async def get_and_filter_results(media, config):
         cache_key = media_cache_key(media)
+        min_postgres = int(config.get("minPostgresResults", 5))
+        postgres_max_age_days = int(config.get("postgresMaxAgeDays", 7))
 
-        # --- Parallel lookup: Postgres (local cache) and Redis (external search cache) ---
+        # --- Helper: retroactive TMDB ID assignment (background, non-blocking) ---
+        def _assign_tmdb_ids_background(items):
+            if not (hasattr(media, "tmdb_id") and media.tmdb_id):
+                return
+            tmdb_id_int = int(media.tmdb_id)
+            updates = []
+            for item in items:
+                if item.tmdb_id is None and item.indexer in _POSTGRES_INDEXERS:
+                    if item.info_hash:
+                        updates.append(torrent_dao.update_tmdb_id_by_info_hash(item.info_hash, tmdb_id_int))
+                    else:
+                        updates.append(torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int, indexer=item.indexer))
+                    item.tmdb_id = tmdb_id_int
+            if updates:
+                asyncio.ensure_future(asyncio.gather(*updates))
+
+        # --- Helper: check Postgres cache validity (sufficient + fresh) ---
+        # max_ts comes from the DB model timestamps (not TorrentItem DTO which has no timestamp fields)
+        def _is_postgres_cache_valid(confirmed_items, max_ts: int):
+            if min_postgres <= 0 or len(confirmed_items) < min_postgres:
+                return False
+            if postgres_max_age_days <= 0:
+                return True
+            now_ts = int(datetime.now(timezone.utc).timestamp())
+            max_age_ts = postgres_max_age_days * 86400
+            return (now_ts - max_ts) < max_age_ts
+
+        # --- Helper: Postgres fetch — returns (TorrentItem list, max updated_at timestamp) ---
         async def _fetch_postgres():
             if not (hasattr(media, "tmdb_id") and media.tmdb_id):
-                return []
+                return [], 0
             try:
                 items = await torrent_dao.search_by_tmdb_id(int(media.tmdb_id))
-                results = [
-                    db_item.to_torrent_item()
-                    for db_item in (items or [])
-                    if db_item.indexer in _POSTGRES_INDEXERS
-                ]
+                results = []
+                max_ts = 0
+                for db_item in (items or []):
+                    if db_item.indexer in _POSTGRES_INDEXERS:
+                        results.append(db_item.to_torrent_item())
+                        # Read timestamps from DB model (TorrentItem DTO has no timestamp fields)
+                        item_ts = db_item.updated_at or db_item.created_at or 0
+                        if item_ts > max_ts:
+                            max_ts = item_ts
                 if results:
                     logger.success(
                         f"Search: Found {len(results)} results from Postgres (local cache) for TMDB ID {media.tmdb_id}"
                     )
-                return results
+                return results, max_ts
             except Exception as pg_error:
                 logger.error(f"Search: Postgres search failed: {str(pg_error)}")
-                return []
+                return [], 0
 
-        postgres_results, cached_external = await asyncio.gather(
-            _fetch_postgres(),
-            redis_cache.get(cache_key),
+        # --- Cache-first: check Postgres before hitting live indexers ---
+        postgres_results, postgres_max_ts = await _fetch_postgres()
+        confirmed_postgres = await asyncio.to_thread(apply_correctness_filters, postgres_results, media)
+
+        if _is_postgres_cache_valid(confirmed_postgres, postgres_max_ts):
+            logger.info(
+                f"Search: Postgres cache sufficient and fresh "
+                f"({len(confirmed_postgres)} >= {min_postgres} results, age OK), skipping live indexers"
+            )
+            _assign_tmdb_ids_background(confirmed_postgres)
+            filtered_results = await asyncio.to_thread(apply_preference_filters, confirmed_postgres, media, config)
+            logger.success(f"Search: Final number of filtered results (from Postgres cache): {len(filtered_results)}")
+            return filtered_results
+
+        logger.debug(
+            f"Search: Postgres cache insufficient or stale "
+            f"({len(confirmed_postgres)} confirmed, max_ts={postgres_max_ts}), proceeding with live search"
         )
 
-        # --- External search results: use cache if available, otherwise run fresh search ---
+        # --- Full path: Redis cache + live indexer search ---
+        cached_external = await redis_cache.get(cache_key)
+
         if cached_external is None:
             logger.debug("Search: No external sources in Redis cache. Performing new search.")
             external_results = await get_search_results(media, config)
@@ -867,24 +945,19 @@ async def get_results(
         logger.success(f"Search: Confirmed results after correctness filters: {len(confirmed_results)}")
 
         # --- Step 2: retroactive TMDB ID assignment (background, non-blocking) ---
-        # Any tracker that cached items without tmdb_id (keyword-based or text-fallback)
-        # gets its tmdb_id assigned here, after correctness filters confirmed the match.
-        # This runs on ALL confirmed items — including those that will be excluded by
-        # user-preference filters — so the DB is always up to date regardless of user config.
-        # Fired as a background task: the DB update does not affect the response to the user.
-        if hasattr(media, "tmdb_id") and media.tmdb_id:
-            tmdb_id_int = int(media.tmdb_id)
-            updates = []
-            for item in confirmed_results:
-                if item.tmdb_id is None and item.indexer in _POSTGRES_INDEXERS:
-                    # Prefer info_hash (unique per torrent) over raw_title to avoid collisions
-                    if item.info_hash:
-                        updates.append(torrent_dao.update_tmdb_id_by_info_hash(item.info_hash, tmdb_id_int))
-                    else:
-                        updates.append(torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int, indexer=item.indexer))
-                    item.tmdb_id = tmdb_id_int
-            if updates:
-                asyncio.ensure_future(asyncio.gather(*updates))
+        # Runs on ALL confirmed items (including those excluded by user preferences)
+        # so the DB stays up to date regardless of user config.
+        _assign_tmdb_ids_background(confirmed_results)
+
+        # --- Refresh Postgres TTL so the next request uses the cache ---
+        # Touch updated_at for all confirmed Postgres items so the cache-first TTL
+        # resets from now — preventing a live search loop after TTL expiry.
+        postgres_info_hashes = [
+            item.info_hash for item in confirmed_results
+            if item.info_hash and item.indexer in _POSTGRES_INDEXERS
+        ]
+        if postgres_info_hashes:
+            asyncio.ensure_future(torrent_dao.touch_items_by_info_hash(postgres_info_hashes))
 
         # --- Step 3: user-preference filters (language, quality, exclusions, sorting) ---
         filtered_results = await asyncio.to_thread(
@@ -906,59 +979,72 @@ async def get_results(
         if config["debrid"]:
             _avail_redis = await RedisCache(config).get_redis_client()
             max_results = int(config.get("maxResults", 5))
-            for debrid in debrid_services:
-                # Early exit: enough cached results already, no need to query further debrid services
+            ip = get_client_ip(request)
+
+            fast_debrids = [d for d in debrid_services if type(d).__name__ != "RealDebrid"]
+            rd_debrids   = [d for d in debrid_services if type(d).__name__ == "RealDebrid"]
+
+            # --- Phase 1: all non-RD debrids in parallel (Torbox, AllDebrid, Premiumize, StremThru…) ---
+            hashes = torrent_smart_container.get_unaviable_hashes()
+            if fast_debrids and hashes:
+                async def _check_debrid(debrid):
+                    try:
+                        result = await debrid.get_availability_bulk_cached(hashes, ip, _avail_redis, db_session=db)
+                        return debrid, result
+                    except Exception as e:
+                        logger.warning(f"Search: {type(debrid).__name__} availability check failed: {e}")
+                        return debrid, None
+
+                parallel_results = await asyncio.gather(*[_check_debrid(d) for d in fast_debrids])
+
+                for debrid, result in parallel_results:
+                    debrid_name = type(debrid).__name__
+                    if result is None:
+                        logger.warning(f"Search: {debrid_name} returned None for {len(hashes)} hashes (API failure?)")
+                    elif result:
+                        torrent_smart_container.update_availability(result, type(debrid), media)
+                        if isinstance(result, dict):
+                            data = result.get("data", [])
+                            returned_count = len(data) if isinstance(data, list) else len(data.get("magnets", []))
+                        else:
+                            returned_count = len(result)
+                        logger.info(f"Search: Checked availability for {len(hashes)} items with {debrid_name} (returned {returned_count})")
+                    else:
+                        logger.debug(f"Search: {debrid_name} found 0 cached hashes out of {len(hashes)}")
+
+            # --- Phase 2: RealDebrid — conditional, only on remaining unavailable hashes ---
+            # RD is slow (~3s) and rate-limited — only call if fast debrids didn't find enough.
+            if rd_debrids:
                 cached_count = torrent_smart_container.get_cached_count()
                 if cached_count >= max_results:
                     logger.info(
-                        f"Search: {cached_count} cached results ≥ maxResults ({max_results}), "
-                        f"skipping {type(debrid).__name__} and remaining services"
+                        f"Search: {cached_count} cached results ≥ maxResults ({max_results}), skipping RealDebrid"
                     )
-                    break
-
-                # RealDebrid-specific threshold: skip RD if prior services found enough results.
-                # RD API is slow (~3s for a few hashes) and rate-limited — only worth calling as last resort.
-                if type(debrid).__name__ == "RealDebrid":
+                else:
                     rd_min = int(config.get("rdMinCachedBeforeCheck", 3))
                     if rd_min > 0 and cached_count >= rd_min:
                         logger.info(
                             f"Search: {cached_count} cached results ≥ rdMinCachedBeforeCheck ({rd_min}), skipping RealDebrid"
                         )
-                        continue
-
-                hashes = torrent_smart_container.get_unaviable_hashes()
-                if not hashes:
-                    logger.debug(f"Search: All items already marked available, skipping {type(debrid).__name__} check")
-                    continue
-                ip = get_client_ip(request)
-                result = await debrid.get_availability_bulk_cached(hashes, ip, _avail_redis, db_session=db)
-
-                if result is None:
-                    logger.warning(
-                        f"Search: {type(debrid).__name__} returned None for {len(hashes)} hashes (API failure?)"
-                    )
-                elif result:
-                    torrent_smart_container.update_availability(
-                        result, type(debrid), media
-                    )
-
-                    checked_count = len(hashes)
-                    if isinstance(result, dict):
-                        data = result.get("data", [])
-                        if isinstance(data, list):
-                            returned_count = len(data)
-                        else:
-                            returned_count = len(data.get("magnets", []))
                     else:
-                        returned_count = len(result)
-
-                    logger.info(
-                        f"Search: Checked availability for {checked_count} items with {type(debrid).__name__} (returned {returned_count})"
-                    )
-                else:
-                    logger.debug(
-                        f"Search: {type(debrid).__name__} found 0 cached hashes out of {len(hashes)}"
-                    )
+                        for rd in rd_debrids:
+                            rd_hashes = torrent_smart_container.get_unaviable_hashes()
+                            if not rd_hashes:
+                                logger.debug("Search: All items already marked available, skipping RealDebrid")
+                                break
+                            result = await rd.get_availability_bulk_cached(rd_hashes, ip, _avail_redis, db_session=db)
+                            if result is None:
+                                logger.warning(f"Search: {type(rd).__name__} returned None for {len(rd_hashes)} hashes (API failure?)")
+                            elif result:
+                                torrent_smart_container.update_availability(result, type(rd), media)
+                                if isinstance(result, dict):
+                                    data = result.get("data", [])
+                                    returned_count = len(data) if isinstance(data, list) else len(data.get("magnets", []))
+                                else:
+                                    returned_count = len(result)
+                                logger.info(f"Search: Checked availability for {len(rd_hashes)} items with {type(rd).__name__} (returned {returned_count})")
+                            else:
+                                logger.debug(f"Search: {type(rd).__name__} found 0 cached hashes out of {len(rd_hashes)}")
 
         best_matching_results = torrent_smart_container.get_best_matching()
 

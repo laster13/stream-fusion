@@ -311,6 +311,26 @@ class TorrentItemDAO:
             logger.error(f"TorrentItemDAO: Error updating tmdb_id for raw_title '{raw_title}': {str(e)}")
             return 0
 
+    async def touch_items_by_info_hash(self, info_hashes: list) -> None:
+        """Refresh updated_at for a batch of items to reset the cache-first TTL.
+
+        Called after a live search so that the next request sees the Postgres
+        cache as fresh and doesn't trigger another live search immediately.
+        """
+        if not info_hashes:
+            return
+        try:
+            stmt = (
+                update(TorrentItemModel)
+                .where(TorrentItemModel.info_hash.in_(info_hashes))
+                .values(updated_at=int(datetime.now(timezone.utc).timestamp()))
+            )
+            await self.session.execute(stmt)
+            await self.session.flush()
+            logger.debug(f"TorrentItemDAO: Touched updated_at for {len(info_hashes)} items (TTL refresh)")
+        except Exception as e:
+            logger.error(f"TorrentItemDAO: Error touching items by info_hash: {str(e)}")
+
     async def get_latest_tmdb_ids(self, item_type: str, limit: int = 50) -> List[int]:
         async with self.session.begin():
             try:
