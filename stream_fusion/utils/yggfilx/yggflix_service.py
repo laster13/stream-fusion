@@ -16,6 +16,8 @@ class YggflixService:
     _REQUEST_DELAY = 0.3  # seconds
     # If the title pre-filter keeps >= this ratio of results, a page 2 fetch is worthwhile.
     _PAGE2_TITLE_KEEP_THRESHOLD = 0.8
+    # If the title pre-filter keeps < this ratio, retry with t=search (broader search).
+    _SEARCH_FALLBACK_RATIO = 0.5
 
     def __init__(self, config: dict):
         self.yggflix = YggflixAPI()
@@ -136,7 +138,21 @@ class YggflixService:
                 f"(ratio={keep_ratio:.2f})"
             )
 
-            if keep_ratio >= self._PAGE2_TITLE_KEEP_THRESHOLD and len(raw_results) >= 20:
+            if keep_ratio < self._SEARCH_FALLBACK_RATIO:
+                time.sleep(self._REQUEST_DELAY)
+                logger.debug(
+                    f"YGG Relay: ratio {keep_ratio:.2f} too low for '{query}', "
+                    f"falling back to t=search"
+                )
+                try:
+                    fallback_results = self.yggflix.search_movie(title=query, force_type="search")
+                    logger.debug(
+                        f"YGG Relay t=search fallback '{query}' -> {len(fallback_results)} results"
+                    )
+                    self.__merge_results(fallback_results, merged_results, seen_hashes)
+                except Exception as e:
+                    logger.warning(f"YGG Relay t=search fallback failed '{query}': {e}")
+            elif keep_ratio >= self._PAGE2_TITLE_KEEP_THRESHOLD and len(raw_results) >= 20:
                 time.sleep(self._REQUEST_DELAY)
                 try:
                     raw_p2 = self.yggflix.search_movie(title=query, offset=100)
@@ -222,7 +238,7 @@ class YggflixService:
         if isinstance(media, Series):
             results = self.__filter_series_results(results, media)
 
-        results = sorted(results, key=lambda r: r.get("seeders", 0), reverse=True)[:50]
+        results = sorted(results, key=lambda r: r.get("seeders", 0), reverse=True)[:100]
         logger.debug(f"{len(results)} results to process from YGG Relay for: {media.titles[0]}")
 
         items = []
