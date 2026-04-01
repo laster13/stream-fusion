@@ -727,12 +727,16 @@ async def flush_redis_pattern(
 
     # Whitelist des patterns autorisés pour éviter toute suppression accidentelle de session
     allowed_patterns = {
-        "stream":      ["stream_link:*", "direct_link:*", "ready:*", "download:*"],
-        "catalog":     ["catalog:*", "tmdbid_item:*"],
-        "ratelimit":   ["ratelimit:*"],
-        "metadata":    ["imdbid_item:*", "tmdbid_item:*", "tmdbid_to_imdbid:*"],
-        "peer":        ["peer:*"],
-        "searchcache": ["stream:*", "media:*"],
+        "searchcache":      ["search:*"],
+        "title_matching":   ["title_matching:*"],
+        "rd_tokens":        ["rd_access_token:*"],
+        "debrid_avail":     ["debrid_avail:*"],
+        "debrid_avail_rd":  ["debrid_avail:realdebrid:*"],
+        "debrid_avail_ad":  ["debrid_avail:alldebrid:*"],
+        "debrid_avail_tb":  ["debrid_avail:torbox:*"],
+        "debrid_avail_pm":  ["debrid_avail:premiumize:*"],
+        "ratelimit_peer":   ["ratelimit:peer:*"],
+        "bg_refresh":       ["bg_refresh:*"],
     }
 
     if pattern not in allowed_patterns:
@@ -793,6 +797,87 @@ async def reset_peer_key_counters(
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
 
+@router.post("/maintenance/disable-expired-api-keys")
+async def disable_expired_api_keys(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        result = await db.execute(
+            text("""
+                UPDATE api_keys SET is_active = false
+                WHERE never_expire = false
+                  AND expiration_date < EXTRACT(EPOCH FROM NOW())::BIGINT
+                  AND is_active = true
+            """)
+        )
+        await db.commit()
+        count = result.rowcount
+        logger.warning(f"Admin maintenance: disabled {count} expired API keys")
+        return JSONResponse({"success": True, "updated": count, "message": f"{count} clé(s) API expirée(s) désactivée(s)"})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: disable-expired-api-keys failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/disable-expired-peer-keys")
+async def disable_expired_peer_keys(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        result = await db.execute(
+            text("""
+                UPDATE peer_keys SET is_active = false
+                WHERE expires_at IS NOT NULL
+                  AND expires_at < EXTRACT(EPOCH FROM NOW())::BIGINT
+                  AND is_active = true
+            """)
+        )
+        await db.commit()
+        count = result.rowcount
+        logger.warning(f"Admin maintenance: disabled {count} expired peer keys")
+        return JSONResponse({"success": True, "updated": count, "message": f"{count} peer key(s) expirée(s) désactivée(s)"})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: disable-expired-peer-keys failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/clean-orphan-torrents")
+async def clean_orphan_torrents(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    days: int = Form(30),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        cutoff = int(time.time()) - (days * 86400)
+        result = await db.execute(
+            text("DELETE FROM torrent_items WHERE tmdb_id IS NULL AND created_at < :cutoff").bindparams(cutoff=cutoff)
+        )
+        await db.commit()
+        count = result.rowcount
+        logger.warning(f"Admin maintenance: deleted {count} orphan torrent items (tmdb_id IS NULL, older than {days} days)")
+        return JSONResponse({"success": True, "deleted": count, "message": f"{count} torrent(s) orphelin(s) supprimé(s)"})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: clean-orphan-torrents failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
 @router.get("/maintenance/stats")
 async def maintenance_stats(
     request: Request,
@@ -804,14 +889,81 @@ async def maintenance_stats(
     if isinstance(authenticated, RedirectResponse):
         return JSONResponse({"error": "Non authentifié"}, status_code=401)
 
-    tables = ["api_keys", "peer_keys", "debrid_cache", "torrent_items", "metadata_mappings"]
     pg_stats = {}
-    for table in tables:
-        try:
-            r = await db.execute(text(f"SELECT COUNT(*) FROM {table}"))
-            pg_stats[table] = r.scalar() or 0
-        except Exception:
-            pg_stats[table] = "?"
+
+    try:
+        r = await db.execute(text("""
+            SELECT COUNT(*),
+                   COUNT(*) FILTER (WHERE is_active),
+                   COUNT(*) FILTER (WHERE NOT never_expire AND expiration_date < EXTRACT(EPOCH FROM NOW())::BIGINT AND is_active)
+            FROM api_keys
+        """))
+        row = r.fetchone()
+        pg_stats["api_keys"] = {"total": row[0] or 0, "active": row[1] or 0, "expired_active": row[2] or 0}
+    except Exception:
+        pg_stats["api_keys"] = {"total": "?", "active": "?", "expired_active": "?"}
+
+    try:
+        r = await db.execute(text("""
+            SELECT COUNT(*),
+                   COUNT(*) FILTER (WHERE is_active),
+                   COUNT(*) FILTER (WHERE expires_at IS NOT NULL AND expires_at < EXTRACT(EPOCH FROM NOW())::BIGINT AND is_active)
+            FROM peer_keys
+        """))
+        row = r.fetchone()
+        pg_stats["peer_keys"] = {"total": row[0] or 0, "active": row[1] or 0, "expired_active": row[2] or 0}
+    except Exception:
+        pg_stats["peer_keys"] = {"total": "?", "active": "?", "expired_active": "?"}
+
+    try:
+        r = await db.execute(text("""
+            SELECT COUNT(*),
+                   COUNT(*) FILTER (WHERE expires_at < EXTRACT(EPOCH FROM NOW())::BIGINT)
+            FROM debrid_cache
+        """))
+        row = r.fetchone()
+        pg_stats["debrid_cache"] = {"total": row[0] or 0, "expired": row[1] or 0}
+    except Exception:
+        pg_stats["debrid_cache"] = {"total": "?", "expired": "?"}
+
+    try:
+        cutoff_90d = int(time.time()) - 7776000
+        r = await db.execute(
+            text("""
+                SELECT COUNT(*),
+                       COUNT(*) FILTER (WHERE tmdb_id IS NULL),
+                       COUNT(*) FILTER (WHERE updated_at < :cutoff)
+                FROM torrent_items
+            """),
+            {"cutoff": cutoff_90d},
+        )
+        row = r.fetchone()
+        pg_stats["torrent_items"] = {"total": row[0] or 0, "orphans": row[1] or 0, "old_90d": row[2] or 0}
+    except Exception:
+        pg_stats["torrent_items"] = {"total": "?", "orphans": "?", "old_90d": "?"}
+
+    try:
+        r = await db.execute(text(
+            "SELECT indexer, COUNT(*) AS cnt FROM torrent_items GROUP BY indexer ORDER BY cnt DESC LIMIT 5"
+        ))
+        pg_stats["top_indexers"] = [{"indexer": row[0], "count": row[1]} for row in r.fetchall()]
+    except Exception:
+        pg_stats["top_indexers"] = []
+
+    try:
+        sizes = {}
+        for table in ["torrent_items", "debrid_cache"]:
+            r = await db.execute(text(f"SELECT pg_size_pretty(pg_total_relation_size('{table}'))"))
+            sizes[table] = r.scalar() or "?"
+        pg_stats["table_sizes"] = sizes
+    except Exception:
+        pg_stats["table_sizes"] = {}
+
+    try:
+        r = await db.execute(text("SELECT COUNT(*) FROM metadata_mappings"))
+        pg_stats["metadata_mappings"] = r.scalar() or 0
+    except Exception:
+        pg_stats["metadata_mappings"] = "?"
 
     redis_stats = {}
     try:
@@ -821,7 +973,74 @@ async def maintenance_stats(
     except Exception:
         redis_stats = {"used_memory_human": "?", "total_keys": "?"}
 
+    redis_patterns = {
+        "searchcache":      ["search:*"],
+        "title_matching":   ["title_matching:*"],
+        "rd_tokens":        ["rd_access_token:*"],
+        "debrid_avail":     ["debrid_avail:*"],
+        "debrid_avail_rd":  ["debrid_avail:realdebrid:*"],
+        "debrid_avail_ad":  ["debrid_avail:alldebrid:*"],
+        "debrid_avail_tb":  ["debrid_avail:torbox:*"],
+        "debrid_avail_pm":  ["debrid_avail:premiumize:*"],
+        "ratelimit_peer":   ["ratelimit:peer:*"],
+        "bg_refresh":       ["bg_refresh:*"],
+    }
+    key_counts = {}
+    try:
+        for name, patterns in redis_patterns.items():
+            count = 0
+            for pat in patterns:
+                count += sum(1 for _ in redis_client.scan_iter(pat, count=500))
+            key_counts[name] = count
+        redis_stats["key_counts"] = key_counts
+    except Exception:
+        redis_stats["key_counts"] = {}
+
     return JSONResponse({"pg": pg_stats, "redis": redis_stats})
+
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+
+@router.get("/scheduler", response_class=HTMLResponse)
+async def scheduler_page(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+    return templates.TemplateResponse("scheduled_tasks.html", {"request": request})
+
+
+@router.get("/scheduler/status")
+async def scheduler_status(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        return JSONResponse({"error": "Scheduler non initialisé"}, status_code=503)
+    return JSONResponse(scheduler.get_status())
+
+
+@router.post("/scheduler/trigger/{job_id}")
+async def scheduler_trigger(
+    request: Request,
+    job_id: str,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        return JSONResponse({"success": False, "message": "Scheduler non initialisé"}, status_code=503)
+    triggered = await scheduler.trigger_job(job_id)
+    if triggered:
+        logger.warning(f"Admin: manual trigger of scheduler job '{job_id}'")
+        return JSONResponse({"success": True, "message": f"Job '{job_id}' déclenché manuellement"})
+    return JSONResponse({"success": False, "message": f"Job '{job_id}' introuvable"}, status_code=404)
 
 
 # ── Torrent search ────────────────────────────────────────────────────────────

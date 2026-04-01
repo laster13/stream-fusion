@@ -19,6 +19,16 @@
         align-items: center;
         gap: 8px;
     }
+    .maint-group-label {
+        padding: 7px 20px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        color: var(--bs-secondary-color);
+        background: var(--bs-tertiary-bg);
+        border-bottom: 1px solid var(--bs-border-color);
+    }
     .maint-action {
         padding: 14px 20px;
         border-bottom: 1px solid var(--bs-border-color);
@@ -57,6 +67,45 @@
     }
     .stat-pill-value { font-size: 1.3rem; font-weight: 700; line-height: 1.1; }
     .stat-pill-label { font-size: 0.72rem; color: var(--bs-secondary-color); margin-top: 3px; }
+    .stat-pill-sub { font-size: 0.7rem; color: var(--bs-secondary-color); margin-top: 2px; }
+
+    .key-count-badge {
+        font-size: 0.7rem;
+        font-weight: 500;
+        padding: 1px 6px;
+        border-radius: 10px;
+        background: var(--bs-tertiary-bg);
+        border: 1px solid var(--bs-border-color);
+        color: var(--bs-secondary-color);
+        display: inline-block;
+        min-width: 28px;
+        text-align: center;
+    }
+    .expired-badge {
+        font-size: 0.7rem;
+        font-weight: 500;
+        padding: 1px 6px;
+        border-radius: 10px;
+        background: rgba(220,53,69,0.1);
+        border: 1px solid rgba(220,53,69,0.3);
+        color: #dc3545;
+        display: inline-block;
+        min-width: 28px;
+        text-align: center;
+    }
+    .stats-indexers { padding: 0 20px 14px; }
+    .indexer-bar {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 0.78rem; margin-bottom: 5px;
+    }
+    .indexer-bar-name { min-width: 90px; color: var(--bs-secondary-color); }
+    .indexer-bar-track { flex: 1; height: 6px; border-radius: 3px; background: var(--bs-tertiary-bg); overflow: hidden; }
+    .indexer-bar-fill  { height: 100%; border-radius: 3px; background: var(--bs-info); }
+    .indexer-bar-count { font-size: 0.72rem; color: var(--bs-secondary-color); min-width: 50px; text-align: right; }
+    .danger-zone {
+        border-top: 2px solid rgba(220,53,69,0.3);
+        background: rgba(220,53,69,0.03);
+    }
 </style>
 {% endblock %}
 
@@ -91,6 +140,23 @@
 
 <div class="row g-3">
 
+    <!-- ── Stats snapshot ── -->
+    <div class="col-12">
+        <div class="maint-card">
+            <div class="maint-card-header d-flex justify-content-between">
+                <span><i class="bi bi-bar-chart-line text-secondary me-2"></i>Aperçu instantané</span>
+                <button class="btn btn-link btn-sm p-0 text-secondary" id="refreshStats" title="Rafraîchir">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+            <div id="statsContent">
+                <div class="text-center text-secondary py-3" style="font-size:0.85rem;" id="statsLoading">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Chargement…
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ── PostgreSQL ── -->
     <div class="col-12 col-xl-6">
         <div class="maint-card">
@@ -98,21 +164,40 @@
                 <i class="bi bi-database text-primary"></i> PostgreSQL
             </div>
 
+            <!-- Clés API -->
+            <div class="maint-group-label">Clés API</div>
+
             <div class="maint-action">
                 <div class="maint-action-info">
-                    <div class="maint-action-title">Nettoyer les clés API expirées</div>
+                    <div class="maint-action-title">
+                        Désactiver les clés API expirées
+                        <span class="expired-badge ms-1" id="expiredApiCount">—</span>
+                    </div>
+                    <div class="maint-action-desc">Passe <code>is_active = false</code> sur les clés dont la date d'expiration est dépassée. Non destructif — les clés restent en base.</div>
+                </div>
+                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
+                        data-action="disable-expired-api-keys"
+                        data-confirm-title="Désactiver les clés API expirées ?"
+                        data-confirm-body="Les clés expirées encore actives seront désactivées (is_active = false). Opération réversible.">
+                    <i class="bi bi-toggle-off me-1"></i>Désactiver
+                </button>
+            </div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">Supprimer les clés API expirées et inactives</div>
                     <div class="maint-action-desc">
-                        Supprime les clés inactives non utilisées depuis plus de
+                        Supprime définitivement les clés inactives non utilisées depuis plus de
                         <input type="number" class="days-input" id="apiKeyDays" value="30" min="1" max="365"> jours.
                     </div>
                 </div>
-                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
+                <button class="btn btn-sm btn-outline-danger flex-shrink-0 maint-btn"
                         data-action="clean-expired-api-keys"
                         data-confirm-title="Supprimer les clés API expirées ?"
                         data-confirm-body="Les clés non utilisées depuis le nombre de jours spécifié seront définitivement supprimées."
                         data-extra-field="apiKeyDays"
                         data-extra-param="days">
-                    <i class="bi bi-trash3 me-1"></i>Nettoyer
+                    <i class="bi bi-trash3 me-1"></i>Supprimer
                 </button>
             </div>
 
@@ -129,6 +214,25 @@
                 </button>
             </div>
 
+            <!-- Peer Keys -->
+            <div class="maint-group-label">Peer Keys</div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">
+                        Désactiver les peer keys expirées
+                        <span class="expired-badge ms-1" id="expiredPeerCount">—</span>
+                    </div>
+                    <div class="maint-action-desc">Passe <code>is_active = false</code> sur les peer keys dont <code>expires_at</code> est dépassé. Non destructif.</div>
+                </div>
+                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
+                        data-action="disable-expired-peer-keys"
+                        data-confirm-title="Désactiver les peer keys expirées ?"
+                        data-confirm-body="Les peer keys expirées encore actives seront désactivées. Opération réversible.">
+                    <i class="bi bi-toggle-off me-1"></i>Désactiver
+                </button>
+            </div>
+
             <div class="maint-action">
                 <div class="maint-action-info">
                     <div class="maint-action-title">Réinitialiser les compteurs des peer keys</div>
@@ -142,10 +246,16 @@
                 </button>
             </div>
 
+            <!-- Cache Debrid PG -->
+            <div class="maint-group-label">Cache Debrid (PostgreSQL)</div>
+
             <div class="maint-action">
                 <div class="maint-action-info">
-                    <div class="maint-action-title">Nettoyer le cache debrid expiré</div>
-                    <div class="maint-action-desc">Supprime les entrées dont la date d'expiration est dépassée.</div>
+                    <div class="maint-action-title">
+                        Nettoyer le cache debrid expiré
+                        <span class="expired-badge ms-1" id="expiredDebridCount">—</span>
+                    </div>
+                    <div class="maint-action-desc">Supprime les entrées dont <code>expires_at</code> est dépassé.</div>
                 </div>
                 <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
                         data-action="clean-expired-debrid-cache"
@@ -170,11 +280,14 @@
                 </button>
             </div>
 
+            <!-- Torrents -->
+            <div class="maint-group-label">Torrents</div>
+
             <div class="maint-action">
                 <div class="maint-action-info">
                     <div class="maint-action-title">Nettoyer les torrents anciens</div>
                     <div class="maint-action-desc">
-                        Supprime les entrées <code>torrent_items</code> non mises à jour depuis plus de
+                        Supprime les <code>torrent_items</code> non mis à jour depuis plus de
                         <input type="number" class="days-input" id="torrentDays" value="90" min="1" max="730"> jours.
                     </div>
                 </div>
@@ -187,6 +300,28 @@
                     <i class="bi bi-trash3 me-1"></i>Nettoyer
                 </button>
             </div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">
+                        Nettoyer les torrents orphelins
+                        <span class="expired-badge ms-1" id="orphanTorrentCount">—</span>
+                    </div>
+                    <div class="maint-action-desc">
+                        Supprime les <code>torrent_items</code> sans <code>tmdb_id</code> créés il y a plus de
+                        <input type="number" class="days-input" id="orphanDays" value="30" min="7" max="365"> jours.
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
+                        data-action="clean-orphan-torrents"
+                        data-confirm-title="Supprimer les torrents orphelins ?"
+                        data-confirm-body="Les torrents sans tmdb_id (non résolus) plus vieux que le nombre de jours spécifié seront supprimés."
+                        data-extra-field="orphanDays"
+                        data-extra-param="days">
+                    <i class="bi bi-trash3 me-1"></i>Nettoyer
+                </button>
+            </div>
+
         </div>
     </div>
 
@@ -197,127 +332,222 @@
                 <i class="bi bi-hdd-stack text-danger"></i> Redis Cache
             </div>
 
-            <div class="maint-action">
-                <div class="maint-action-info">
-                    <div class="maint-action-title">Flush complet Redis</div>
-                    <div class="maint-action-desc text-danger-emphasis">
-                        Vide <strong>toute</strong> la base Redis (FLUSHDB) — inclut les sessions actives.
-                    </div>
-                </div>
-                <button class="btn btn-sm btn-outline-danger flex-shrink-0 maint-btn"
-                        data-action="flush-redis-all"
-                        data-confirm-title="Vider tout Redis ?"
-                        data-confirm-body="FLUSHDB sera exécuté. Toutes les clés Redis seront supprimées, y compris les sessions admin actives. Vous serez déconnecté.">
-                    <i class="bi bi-lightning me-1"></i>FLUSHDB
-                </button>
-            </div>
+            <!-- Cache Recherche -->
+            <div class="maint-group-label">Cache Recherche</div>
 
             <div class="maint-action">
                 <div class="maint-action-info">
-                    <div class="maint-action-title">Flush cache stream links</div>
+                    <div class="maint-action-title">
+                        Cache films &amp; séries
+                        <span class="key-count-badge ms-1" data-key-cat="searchcache">—</span>
+                    </div>
                     <div class="maint-action-desc">
-                        Supprime <code>stream_link:*</code>, <code>direct_link:*</code>, <code>ready:*</code>, <code>download:*</code>.
+                        <code>search:*</code> — Résultats de recherche de torrents. TTL&nbsp;: 7 jours.
                     </div>
-                </div>
-                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
-                        data-action="flush-redis-pattern"
-                        data-pattern="stream"
-                        data-confirm-title="Vider le cache stream ?"
-                        data-confirm-body="Les liens de streaming mis en cache seront supprimés. Ils seront recalculés à la prochaine lecture.">
-                    <i class="bi bi-trash3 me-1"></i>Vider
-                </button>
-            </div>
-
-            <div class="maint-action">
-                <div class="maint-action-info">
-                    <div class="maint-action-title">Flush cache catalog</div>
-                    <div class="maint-action-desc">Supprime <code>catalog:*</code> et <code>tmdbid_item:*</code>.</div>
-                </div>
-                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
-                        data-action="flush-redis-pattern"
-                        data-pattern="catalog"
-                        data-confirm-title="Vider le cache catalog ?"
-                        data-confirm-body="Les métadonnées de catalog seront supprimées et rechargées depuis les APIs externes.">
-                    <i class="bi bi-trash3 me-1"></i>Vider
-                </button>
-            </div>
-
-            <div class="maint-action">
-                <div class="maint-action-info">
-                    <div class="maint-action-title">Flush cache metadata TMDB</div>
-                    <div class="maint-action-desc">
-                        Supprime <code>imdbid_item:*</code>, <code>tmdbid_item:*</code>, <code>tmdbid_to_imdbid:*</code>.
-                    </div>
-                </div>
-                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
-                        data-action="flush-redis-pattern"
-                        data-pattern="metadata"
-                        data-confirm-title="Vider le cache metadata TMDB ?"
-                        data-confirm-body="Les métadonnées IMDB/TMDB en cache seront supprimées. Utile après modification d'un mapping.">
-                    <i class="bi bi-trash3 me-1"></i>Vider
-                </button>
-            </div>
-
-            <div class="maint-action">
-                <div class="maint-action-info">
-                    <div class="maint-action-title">Flush cache recherche</div>
-                    <div class="maint-action-desc">Supprime <code>stream:*</code> et <code>media:*</code> — résultats de recherche et torrents mis en cache.</div>
                 </div>
                 <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
                         data-action="flush-redis-pattern"
                         data-pattern="searchcache"
                         data-confirm-title="Vider le cache de recherche ?"
-                        data-confirm-body="Les résultats de recherche et les torrents en cache seront supprimés. Les prochaines recherches seront plus lentes.">
+                        data-confirm-body="Les résultats de recherche en cache (films et séries) seront supprimés. Les prochaines recherches interrogeront directement les indexers.">
                     <i class="bi bi-trash3 me-1"></i>Vider
+                </button>
+            </div>
+
+            <!-- Cache Debrid Redis -->
+            <div class="maint-group-label">Cache Disponibilité Debrid</div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">
+                        Tous les services
+                        <span class="key-count-badge ms-1" data-key-cat="debrid_avail">—</span>
+                    </div>
+                    <div class="maint-action-desc">
+                        <code>debrid_avail:*</code> — TTL&nbsp;: 10 jours (en cache) / 3 h (non dispo).
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-danger flex-shrink-0 maint-btn"
+                        data-action="flush-redis-pattern"
+                        data-pattern="debrid_avail"
+                        data-confirm-title="Vider tout le cache debrid Redis ?"
+                        data-confirm-body="Toutes les entrées debrid_avail:* seront supprimées (tous services). Les prochaines requêtes repasseront par l'API debrid.">
+                    <i class="bi bi-lightning me-1"></i>Tout vider
                 </button>
             </div>
 
             <div class="maint-action">
                 <div class="maint-action-info">
-                    <div class="maint-action-title">Flush cache peer</div>
-                    <div class="maint-action-desc">Supprime les clés <code>peer:*</code> — cache de partage inter-instances.</div>
+                    <div class="maint-action-title">
+                        Real-Debrid
+                        <span class="key-count-badge ms-1" data-key-cat="debrid_avail_rd">—</span>
+                    </div>
+                    <div class="maint-action-desc"><code>debrid_avail:realdebrid:*</code></div>
                 </div>
                 <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
                         data-action="flush-redis-pattern"
-                        data-pattern="peer"
-                        data-confirm-title="Vider le cache peer ?"
-                        data-confirm-body="Les entrées de cache partagées entre instances seront supprimées.">
+                        data-pattern="debrid_avail_rd"
+                        data-confirm-title="Vider le cache Real-Debrid ?"
+                        data-confirm-body="Toutes les entrées debrid_avail:realdebrid:* seront supprimées.">
                     <i class="bi bi-trash3 me-1"></i>Vider
                 </button>
             </div>
 
             <div class="maint-action">
                 <div class="maint-action-info">
-                    <div class="maint-action-title">Flush rate limits</div>
-                    <div class="maint-action-desc">Supprime <code>ratelimit:*</code> — réinitialise les compteurs de débit.</div>
+                    <div class="maint-action-title">
+                        AllDebrid
+                        <span class="key-count-badge ms-1" data-key-cat="debrid_avail_ad">—</span>
+                    </div>
+                    <div class="maint-action-desc"><code>debrid_avail:alldebrid:*</code></div>
+                </div>
+                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
+                        data-action="flush-redis-pattern"
+                        data-pattern="debrid_avail_ad"
+                        data-confirm-title="Vider le cache AllDebrid ?"
+                        data-confirm-body="Toutes les entrées debrid_avail:alldebrid:* seront supprimées.">
+                    <i class="bi bi-trash3 me-1"></i>Vider
+                </button>
+            </div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">
+                        TorBox
+                        <span class="key-count-badge ms-1" data-key-cat="debrid_avail_tb">—</span>
+                    </div>
+                    <div class="maint-action-desc"><code>debrid_avail:torbox:*</code></div>
+                </div>
+                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
+                        data-action="flush-redis-pattern"
+                        data-pattern="debrid_avail_tb"
+                        data-confirm-title="Vider le cache TorBox ?"
+                        data-confirm-body="Toutes les entrées debrid_avail:torbox:* seront supprimées.">
+                    <i class="bi bi-trash3 me-1"></i>Vider
+                </button>
+            </div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">
+                        Premiumize
+                        <span class="key-count-badge ms-1" data-key-cat="debrid_avail_pm">—</span>
+                    </div>
+                    <div class="maint-action-desc"><code>debrid_avail:premiumize:*</code></div>
+                </div>
+                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
+                        data-action="flush-redis-pattern"
+                        data-pattern="debrid_avail_pm"
+                        data-confirm-title="Vider le cache Premiumize ?"
+                        data-confirm-body="Toutes les entrées debrid_avail:premiumize:* seront supprimées.">
+                    <i class="bi bi-trash3 me-1"></i>Vider
+                </button>
+            </div>
+
+            <!-- Règles & Auth -->
+            <div class="maint-group-label">Règles &amp; Auth</div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">
+                        Règles de matching de titres
+                        <span class="key-count-badge ms-1" data-key-cat="title_matching">—</span>
+                    </div>
+                    <div class="maint-action-desc">
+                        <code>title_matching:*</code> — Règles de normalisation et de langue. Pas de TTL.
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
+                        data-action="flush-redis-pattern"
+                        data-pattern="title_matching"
+                        data-confirm-title="Vider le cache des règles de matching ?"
+                        data-confirm-body="Les règles de normalisation et de langue en cache seront supprimées. Elles seront rechargées depuis la base au prochain appel.">
+                    <i class="bi bi-trash3 me-1"></i>Vider
+                </button>
+            </div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">
+                        Tokens Real-Debrid OAuth
+                        <span class="key-count-badge ms-1" data-key-cat="rd_tokens">—</span>
+                    </div>
+                    <div class="maint-action-desc">
+                        <code>rd_access_token:*</code> — Tokens d'accès en cache. TTL&nbsp;: 12 h.
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-warning flex-shrink-0 maint-btn"
+                        data-action="flush-redis-pattern"
+                        data-pattern="rd_tokens"
+                        data-confirm-title="Supprimer les tokens Real-Debrid ?"
+                        data-confirm-body="Les tokens d'accès Real-Debrid en cache seront supprimés. Ils seront renouvelés automatiquement au prochain appel.">
+                    <i class="bi bi-trash3 me-1"></i>Vider
+                </button>
+            </div>
+
+            <!-- Jobs & Limites -->
+            <div class="maint-group-label">Jobs &amp; Limites</div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">
+                        Rate limits peers
+                        <span class="key-count-badge ms-1" data-key-cat="ratelimit_peer">—</span>
+                    </div>
+                    <div class="maint-action-desc">
+                        <code>ratelimit:peer:*</code> — Compteurs de limitation de débit. TTL dynamique.
+                    </div>
                 </div>
                 <button class="btn btn-sm btn-outline-secondary flex-shrink-0 maint-btn"
                         data-action="flush-redis-pattern"
-                        data-pattern="ratelimit"
-                        data-confirm-title="Réinitialiser les rate limits ?"
-                        data-confirm-body="Tous les compteurs de limitation de débit seront remis à zéro.">
+                        data-pattern="ratelimit_peer"
+                        data-confirm-title="Réinitialiser les rate limits peers ?"
+                        data-confirm-body="Tous les compteurs de limitation de débit peers seront remis à zéro.">
                     <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
                 </button>
             </div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">
+                        Verrous de rafraîchissement background
+                        <span class="key-count-badge ms-1" data-key-cat="bg_refresh">—</span>
+                    </div>
+                    <div class="maint-action-desc">
+                        <code>bg_refresh:*</code> — Verrous distribués par indexer/média. TTL&nbsp;: 6 h.
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary flex-shrink-0 maint-btn"
+                        data-action="flush-redis-pattern"
+                        data-pattern="bg_refresh"
+                        data-confirm-title="Supprimer les verrous background ?"
+                        data-confirm-body="Les verrous de rafraîchissement background seront supprimés. Utile si un verrou est bloqué.">
+                    <i class="bi bi-unlock me-1"></i>Débloquer
+                </button>
+            </div>
+
+            <!-- Zone dangereuse -->
+            <div class="danger-zone">
+                <div class="maint-group-label" style="color:rgba(220,53,69,0.7);background:rgba(220,53,69,0.05);">Zone dangereuse</div>
+                <div class="maint-action">
+                    <div class="maint-action-info">
+                        <div class="maint-action-title text-danger">Flush complet Redis (FLUSHDB)</div>
+                        <div class="maint-action-desc text-danger-emphasis">
+                            Vide <strong>toute</strong> la base Redis — inclut les sessions actives et tous les caches.
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-danger flex-shrink-0 maint-btn"
+                            data-action="flush-redis-all"
+                            data-confirm-title="Vider tout Redis ?"
+                            data-confirm-body="FLUSHDB sera exécuté. Toutes les clés Redis seront supprimées, y compris les sessions admin actives. Vous serez déconnecté.">
+                        <i class="bi bi-lightning me-1"></i>FLUSHDB
+                    </button>
+                </div>
+            </div>
+
         </div>
     </div>
 
-    <!-- ── Stats snapshot ── -->
-    <div class="col-12">
-        <div class="maint-card">
-            <div class="maint-card-header d-flex justify-content-between">
-                <span><i class="bi bi-bar-chart-line text-secondary me-2"></i>Aperçu instantané</span>
-                <button class="btn btn-link btn-sm p-0 text-secondary" id="refreshStats" title="Rafraîchir">
-                    <i class="bi bi-arrow-clockwise"></i>
-                </button>
-            </div>
-            <div id="statsContent">
-                <div class="text-center text-secondary py-3" style="font-size:0.85rem;" id="statsLoading">
-                    <span class="spinner-border spinner-border-sm me-2"></span>Chargement…
-                </div>
-            </div>
-        </div>
-    </div>
 
 </div>
 {% endblock %}
@@ -383,34 +613,89 @@ async function loadStats() {
     try {
         const res  = await fetch('/admin/maintenance/stats');
         const data = await res.json();
-        const pg   = data.pg || {};
+        const pg   = data.pg   || {};
         const rd   = data.redis || {};
 
-        const fmt = n => (typeof n === 'number') ? n.toLocaleString('fr-FR') : n;
+        const fmt   = n => (typeof n === 'number') ? n.toLocaleString('fr-FR') : (n ?? '?');
+        const apiK  = pg.api_keys    || {};
+        const peerK = pg.peer_keys   || {};
+        const dCache= pg.debrid_cache|| {};
+        const tItems= pg.torrent_items || {};
+        const sizes = pg.table_sizes || {};
 
+        // Update expired badges in the action list
+        if (typeof apiK.expired_active === 'number')
+            document.getElementById('expiredApiCount').textContent = fmt(apiK.expired_active);
+        if (typeof peerK.expired_active === 'number')
+            document.getElementById('expiredPeerCount').textContent = fmt(peerK.expired_active);
+        if (typeof dCache.expired === 'number')
+            document.getElementById('expiredDebridCount').textContent = fmt(dCache.expired);
+        if (typeof tItems.orphans === 'number')
+            document.getElementById('orphanTorrentCount').textContent = fmt(tItems.orphans);
+
+        // Update Redis key count badges
+        const keyCounts = rd.key_counts || {};
+        document.querySelectorAll('[data-key-cat]').forEach(el => {
+            const cat = el.dataset.keyCat;
+            el.textContent = cat in keyCounts ? fmt(keyCounts[cat]) : '—';
+        });
+
+        // Build PostgreSQL pills
         const pgItems = [
-            { label: 'Clés API',         value: fmt(pg.api_keys),          color: 'text-primary' },
-            { label: 'Peer keys',         value: fmt(pg.peer_keys),         color: 'text-success' },
-            { label: 'Cache debrid',      value: fmt(pg.debrid_cache),      color: 'text-warning' },
-            { label: 'Torrents indexés',  value: fmt(pg.torrent_items),     color: 'text-info' },
-            { label: 'Mappings méta',     value: fmt(pg.metadata_mappings), color: 'text-secondary' },
+            { label: 'Clés API (total)',    value: fmt(apiK.total),          color: 'text-primary',
+              sub: apiK.expired_active > 0 ? `${fmt(apiK.expired_active)} expirée(s) active(s)` : null },
+            { label: 'Peer keys (total)',   value: fmt(peerK.total),         color: 'text-success',
+              sub: peerK.expired_active > 0 ? `${fmt(peerK.expired_active)} expirée(s) active(s)` : null },
+            { label: 'Cache debrid',        value: fmt(dCache.total),        color: 'text-warning',
+              sub: dCache.expired > 0 ? `${fmt(dCache.expired)} expirée(s)` : null },
+            { label: 'Torrents indexés',    value: fmt(tItems.total),        color: 'text-info',
+              sub: [
+                tItems.orphans > 0 ? `${fmt(tItems.orphans)} orphelins` : null,
+                tItems.old_90d > 0 ? `${fmt(tItems.old_90d)} >90j` : null,
+              ].filter(Boolean).join(' · ') || null },
+            { label: 'Mappings méta',       value: fmt(pg.metadata_mappings),color: 'text-secondary', sub: null },
         ];
+        if (sizes.torrent_items)
+            pgItems[3].sub = (pgItems[3].sub ? pgItems[3].sub + ' · ' : '') + sizes.torrent_items;
+
+        // Build Redis pills
         const rdItems = [
-            { label: 'Clés Redis',   value: fmt(rd.total_keys),      color: 'text-danger' },
-            { label: 'Mémoire Redis',value: rd.used_memory_human,    color: 'text-danger' },
+            { label: 'Clés Redis (total)', value: fmt(rd.total_keys),        color: 'text-danger', sub: rd.used_memory_human || null },
+            { label: 'Cache recherche',    value: fmt(keyCounts.searchcache), color: 'text-info',   sub: 'search:*' },
+            { label: 'Debrid avail',       value: fmt(keyCounts.debrid_avail),color: 'text-warning',sub: 'debrid_avail:*' },
+            { label: 'Rate limits',        value: fmt(keyCounts.ratelimit_peer), color: 'text-secondary', sub: 'ratelimit:peer:*' },
+            { label: 'BG refresh locks',   value: fmt(keyCounts.bg_refresh),  color: 'text-secondary', sub: 'bg_refresh:*' },
         ];
 
-        const makeGrid = (items) => items.map(it => `
+        const makePills = items => items.map(it => `
             <div class="stat-pill">
                 <div class="stat-pill-value ${it.color}">${it.value}</div>
                 <div class="stat-pill-label">${it.label}</div>
+                ${it.sub ? `<div class="stat-pill-sub">${it.sub}</div>` : ''}
             </div>`).join('');
+
+        // Top indexers bar chart
+        const topIdx = pg.top_indexers || [];
+        let indexerHtml = '';
+        if (topIdx.length) {
+            const maxCount = topIdx[0].count || 1;
+            indexerHtml = `
+                <div style="padding:4px 20px 0;font-size:0.72rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--bs-secondary-color);border-top:1px solid var(--bs-border-color);">Top indexers (torrents)</div>
+                <div class="stats-indexers">${topIdx.map(row => `
+                    <div class="indexer-bar">
+                        <div class="indexer-bar-name">${row.indexer || '(null)'}</div>
+                        <div class="indexer-bar-track"><div class="indexer-bar-fill" style="width:${Math.round(row.count/maxCount*100)}%"></div></div>
+                        <div class="indexer-bar-count">${fmt(row.count)}</div>
+                    </div>`).join('')}
+                </div>`;
+        }
 
         document.getElementById('statsContent').innerHTML = `
             <div style="padding:10px 20px 4px;font-size:0.72rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--bs-secondary-color);">PostgreSQL</div>
-            <div class="stats-grid" style="padding-top:8px;">${makeGrid(pgItems)}</div>
+            <div class="stats-grid" style="padding-top:8px;">${makePills(pgItems)}</div>
+            ${indexerHtml}
             <div style="padding:4px 20px 4px;font-size:0.72rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--bs-secondary-color);border-top:1px solid var(--bs-border-color);">Redis</div>
-            <div class="stats-grid" style="padding-top:8px;">${makeGrid(rdItems)}</div>`;
+            <div class="stats-grid" style="padding-top:8px;">${makePills(rdItems)}</div>`;
     } catch (e) {
         document.getElementById('statsContent').innerHTML =
             '<div class="text-secondary text-center py-3" style="font-size:0.85rem;">Impossible de charger les statistiques.</div>';

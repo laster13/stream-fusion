@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from stream_fusion.logging_config import configure_logging, logger
 from stream_fusion.services.postgresql.base import Base
 from stream_fusion.services.postgresql.models import load_all_models
+from stream_fusion.services.scheduler.scheduler import StreamFusionScheduler
 from stream_fusion.settings import settings
 from stream_fusion.utils.filter.title_matching import initialize_title_matching
 
@@ -83,9 +84,19 @@ async def lifespan_setup(
     # Initialize title matching module (loads rules from DB/Redis, seeds if empty)
     await initialize_title_matching(app.state.redis_pool, app.state.db_session_factory)
 
+    # Start the database cleanup scheduler (leader election via Redis)
+    scheduler = StreamFusionScheduler(
+        session_factory=app.state.db_session_factory,
+        redis_pool=app.state.redis_pool,
+    )
+    await scheduler.start()
+    app.state.scheduler = scheduler
+
     yield
 
     # Shutdown actions
+    if hasattr(app.state, "scheduler"):
+        await app.state.scheduler.stop()
     if app.state.http_session:
         await app.state.http_session.close()
     if app.state.debrid_session:
