@@ -232,18 +232,26 @@
             <i class="bi bi-diagram-3"></i> Peer Keys
         </a>
 
-        <div class="sidebar-section">Données</div>
+        <div class="sidebar-section">Base de données</div>
+        <a class="sidebar-link {% if '/search/tmdb' in request.url.path %}active{% endif %}"
+           href="{{ url_for('search_tmdb_page')(request) }}">
+            <i class="bi bi-film"></i> Par TMDB ID
+        </a>
+        <a class="sidebar-link {% if '/search/hash' in request.url.path %}active{% endif %}"
+           href="{{ url_for('search_hash_page')(request) }}">
+            <i class="bi bi-hash"></i> Par hash
+        </a>
+        <a class="sidebar-link {% if '/search/unmatched' in request.url.path %}active{% endif %}"
+           href="{{ url_for('search_unmatched_page')(request) }}">
+            <i class="bi bi-question-circle"></i> Non-matchés
+        </a>
+        <a class="sidebar-link {% if '/mismatches' in request.url.path %}active{% endif %}"
+           href="{{ url_for('list_mismatches')(request) }}">
+            <i class="bi bi-exclamation-triangle"></i> Mismatches TMDB
+        </a>
         <a class="sidebar-link {% if '/mappings' in request.url.path %}active{% endif %}"
            href="{{ url_for('list_mappings')(request) }}">
             <i class="bi bi-arrow-left-right"></i> Mappings méta
-        </a>
-        <a class="sidebar-link {% if '/maintenance' in request.url.path %}active{% endif %}"
-           href="{{ url_for('maintenance_page')(request) }}">
-            <i class="bi bi-tools"></i> Maintenance
-        </a>
-        <a class="sidebar-link {% if '/config' in request.url.path %}active{% endif %}"
-           href="{{ url_for('config_page')(request) }}">
-            <i class="bi bi-sliders"></i> Configuration
         </a>
 
         <div class="sidebar-section">Matching</div>
@@ -260,14 +268,14 @@
             <i class="bi bi-flask"></i> Test matching
         </a>
 
-        <div class="sidebar-section">Recherche</div>
-        <a class="sidebar-link {% if '/search/hash' in request.url.path %}active{% endif %}"
-           href="{{ url_for('search_hash_page')(request) }}">
-            <i class="bi bi-hash"></i> Par hash
+        <div class="sidebar-section">Système</div>
+        <a class="sidebar-link {% if '/maintenance' in request.url.path %}active{% endif %}"
+           href="{{ url_for('maintenance_page')(request) }}">
+            <i class="bi bi-tools"></i> Maintenance
         </a>
-        <a class="sidebar-link {% if '/search/tmdb' in request.url.path %}active{% endif %}"
-           href="{{ url_for('search_tmdb_page')(request) }}">
-            <i class="bi bi-film"></i> Par TMDB ID
+        <a class="sidebar-link {% if '/config' in request.url.path %}active{% endif %}"
+           href="{{ url_for('config_page')(request) }}">
+            <i class="bi bi-sliders"></i> Configuration
         </a>
     </div>
 

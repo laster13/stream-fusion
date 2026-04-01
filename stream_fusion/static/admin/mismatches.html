@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Mismatches TMDB — StreamFusion Admin{% endblock %}
+{% block page_title %}Mismatches TMDB signalés{% endblock %}
+
+{% block extra_head %}
+<style>
+    code.hash-code { font-size: 0.78rem; color: var(--bs-secondary-color); letter-spacing: 0.01em; }
+    code.tmdb-id   { color: #f0b27a; font-size: 0.85rem; }
+    .search-input  { max-width: 300px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <input type="text" class="form-control form-control-sm search-input"
+           id="searchInput" placeholder="Filtrer (titre, hash, TMDB…)">
+    <span class="text-secondary" style="font-size:0.85rem;">
+        {{ mismatches|length }} entrée(s)
+    </span>
+</div>
+
+{% if not mismatches %}
+<div class="text-center text-secondary py-5">
+    <i class="bi bi-check-circle fs-2 d-block mb-2"></i>
+    Aucun mismatch signalé.
+</div>
+{% else %}
+<div class="table-responsive">
+    <table class="table table-hover align-middle" id="mismatchTable">
+        <thead>
+            <tr style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--bs-secondary-color);">
+                <th>Hash</th>
+                <th>TMDB ID</th>
+                <th>Titre brut</th>
+                <th>Indexeur</th>
+                <th>Notes</th>
+                <th>Signalé le</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody id="mismatchBody">
+            {% for m in mismatches %}
+            <tr data-search="{{ m.raw_title }} {{ m.info_hash }} {{ m.tmdb_id }} {{ m.indexer }} {{ m.notes or '' }}">
+                <td>
+                    <div class="d-flex align-items-center gap-1">
+                        <code class="hash-code">{{ m.info_hash[:10] }}…</code>
+                        <button class="btn btn-link btn-sm p-0 copy-btn text-secondary" title="Copier le hash"
+                                data-value="{{ m.info_hash }}">
+                            <i class="bi bi-clipboard" style="font-size:0.8rem;"></i>
+                        </button>
+                    </div>
+                </td>
+                <td>
+                    <a href="https://www.themoviedb.org/movie/{{ m.tmdb_id }}" target="_blank"
+                       class="text-decoration-none">
+                        <code class="tmdb-id">{{ m.tmdb_id }}</code>
+                        <i class="bi bi-box-arrow-up-right ms-1" style="font-size:0.7rem;"></i>
+                    </a>
+                </td>
+                <td style="font-size:0.875rem;max-width:340px;word-break:break-word;">{{ m.raw_title }}</td>
+                <td style="font-size:0.83rem;">{{ m.indexer }}</td>
+                <td style="font-size:0.83rem;color:var(--bs-secondary-color);">{{ m.notes or '—' }}</td>
+                <td style="white-space:nowrap;font-size:0.8rem;">{{ m.created_at | fmt_date }}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-danger delete-btn"
+                            data-id="{{ m.id }}" data-title="{{ m.raw_title[:40] }}"
+                            title="Supprimer ce mismatch">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div id="emptyMsg" class="text-center text-secondary py-3 d-none" style="font-size:0.85rem;">
+        <i class="bi bi-search me-1"></i>Aucun résultat ne correspond au filtre.
+    </div>
+</div>
+{% endif %}
+
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+    <div id="toast" class="toast align-items-center text-bg-success border-0" role="alert">
+        <div class="d-flex">
+            <div class="toast-body" id="toastMsg">Action effectuée.</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const CSRF = "{{ csrf_token_gen() }}";
+
+// ── Filter ──
+const searchInput = document.getElementById('searchInput');
+if (searchInput) {
+    searchInput.addEventListener('input', function () {
+        const q = this.value.toLowerCase();
+        let visible = 0;
+        document.querySelectorAll('#mismatchBody tr').forEach(row => {
+            const show = !q || row.dataset.search.toLowerCase().includes(q);
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        document.getElementById('emptyMsg')?.classList.toggle('d-none', visible > 0);
+    });
+}
+
+// ── Copy ──
+document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.value).then(() => {
+            const icon = btn.querySelector('i');
+            icon.className = 'bi bi-clipboard-check text-success';
+            setTimeout(() => { icon.className = 'bi bi-clipboard'; }, 1500);
+        });
+    });
+});
+
+// ── Delete ──
+function showToast(msg, isError = false) {
+    const toast = document.getElementById('toast');
+    document.getElementById('toastMsg').textContent = msg;
+    toast.className = `toast align-items-center border-0 text-bg-${isError ? 'danger' : 'success'}`;
+    new bootstrap.Toast(toast, { delay: 3000 }).show();
+}
+
+document.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        if (!confirm(`Supprimer le mismatch pour "${btn.dataset.title}" ?`)) return;
+        const fd = new FormData();
+        fd.append('csrf_token', CSRF);
+        fd.append('mismatch_id', btn.dataset.id);
+        const resp = await fetch('{{ url_for("delete_mismatch")(request) }}', { method: 'POST', body: fd });
+        if (resp.ok) {
+            btn.closest('tr').remove();
+            showToast('Mismatch supprimé.');
+        } else {
+            showToast('Erreur lors de la suppression.', true);
+        }
+    });
+});
+</script>
+{% endblock %}
