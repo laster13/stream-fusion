@@ -1,6 +1,3 @@
-import re
-
-from stream_fusion.constants import FR_RELEASE_GROUPS
 from stream_fusion.utils.filter.base_filter import BaseFilter
 from stream_fusion.logging_config import logger
 
@@ -8,8 +5,12 @@ from stream_fusion.logging_config import logger
 class LanguageFilter(BaseFilter):
     def __init__(self, config):
         super().__init__(config)
-        self.fr_regex_patterns = FR_RELEASE_GROUPS
-        self.fr_regex = re.compile("|".join(self.fr_regex_patterns))
+        # Load language rules from the title_matching module singleton
+        try:
+            from stream_fusion.utils.filter.title_matching import get_lang_manager
+            self._lang_manager = get_lang_manager()
+        except RuntimeError:
+            self._lang_manager = None
 
     def filter(self, data):
         filtered_data = []
@@ -21,15 +22,23 @@ class LanguageFilter(BaseFilter):
             languages = torrent.languages.copy()
 
             if torrent.indexer == "DMM - API" and "multi" in languages:
-                regex = self.fr_regex.search(torrent.raw_title)
-                logger.trace(f"Regex match for {torrent.raw_title} : {regex}")
-                if not regex:
+                matched = (
+                    self._lang_manager.match_release_group(torrent.raw_title)
+                    if self._lang_manager
+                    else False
+                )
+                logger.trace(f"Release group match for {torrent.raw_title}: {matched}")
+                if not matched:
                     languages.remove("multi")
-            
+
             if torrent.indexer == "DMM - API" and "fr" in languages:
-                regex = self.fr_regex.search(torrent.raw_title)
-                logger.trace(f"Regex match for {torrent.raw_title} : {regex}")
-                if not regex:
+                matched = (
+                    self._lang_manager.match_release_group(torrent.raw_title)
+                    if self._lang_manager
+                    else False
+                )
+                logger.trace(f"Release group match for {torrent.raw_title}: {matched}")
+                if not matched:
                     languages.remove("fr")
 
             if "multi" in languages or any(

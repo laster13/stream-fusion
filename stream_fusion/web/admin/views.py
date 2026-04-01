@@ -1013,3 +1013,401 @@ async def delete_mapping(
     except Exception as e:
         logger.error(f"Admin: failed to delete mapping {mapping_id}: {e}")
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+# ── Matching & Language rules ──────────────────────────────────────────────────
+
+@router.get("/matching/title-rules", response_class=HTMLResponse)
+async def matching_title_rules(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+    from stream_fusion.services.postgresql.dao.title_normalization_rule_dao import TitleNormalizationRuleDAO
+    dao = TitleNormalizationRuleDAO(db)
+    rules = await dao.get_all()
+    grouped: dict[str, list] = {}
+    for r in rules:
+        grouped.setdefault(r.rule_type, []).append(r)
+    return templates.TemplateResponse(
+        "matching_title_rules.html",
+        admin_context(request, grouped=grouped, rule_types=["substitution", "release_tag", "article", "ligature"]),
+    )
+
+
+@router.post("/matching/title-rules/create")
+async def matching_title_rules_create(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+    rule_type: str = Form(...),
+    pattern: str = Form(...),
+    replacement: str = Form(""),
+    description: str = Form(""),
+    is_active: bool = Form(True),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    from stream_fusion.services.postgresql.dao.title_normalization_rule_dao import TitleNormalizationRuleDAO
+    dao = TitleNormalizationRuleDAO(db)
+    try:
+        rule = await dao.create(
+            rule_type=rule_type.strip(),
+            pattern=pattern.strip(),
+            replacement=replacement.strip(),
+            description=description.strip() or None,
+            is_active=is_active,
+        )
+        return JSONResponse({"success": True, "id": rule.id})
+    except Exception as e:
+        logger.error(f"Admin: failed to create title rule: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/matching/title-rules/update")
+async def matching_title_rules_update(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+    rule_id: int = Form(...),
+    rule_type: str = Form(...),
+    pattern: str = Form(...),
+    replacement: str = Form(""),
+    description: str = Form(""),
+    is_active: bool = Form(True),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    from stream_fusion.services.postgresql.dao.title_normalization_rule_dao import TitleNormalizationRuleDAO
+    dao = TitleNormalizationRuleDAO(db)
+    try:
+        rule = await dao.update(
+            rule_id=rule_id,
+            rule_type=rule_type.strip(),
+            pattern=pattern.strip(),
+            replacement=replacement.strip(),
+            description=description.strip() or None,
+            is_active=is_active,
+        )
+        if not rule:
+            return JSONResponse({"success": False, "message": "Règle introuvable"}, status_code=404)
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"Admin: failed to update title rule {rule_id}: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/matching/title-rules/delete")
+async def matching_title_rules_delete(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+    rule_id: int = Form(...),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    from stream_fusion.services.postgresql.dao.title_normalization_rule_dao import TitleNormalizationRuleDAO
+    dao = TitleNormalizationRuleDAO(db)
+    try:
+        await dao.delete(rule_id)
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"Admin: failed to delete title rule {rule_id}: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/matching/title-rules/reload")
+async def matching_title_rules_reload(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        from stream_fusion.utils.filter.title_matching import get_normalizer
+        await get_normalizer().reload()
+        return JSONResponse({"success": True, "message": "Règles de normalisation rechargées"})
+    except Exception as e:
+        logger.error(f"Admin: failed to reload title rules: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+# ── Language rules ─────────────────────────────────────────────────────────────
+
+@router.get("/matching/language-rules", response_class=HTMLResponse)
+async def matching_language_rules(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+    from stream_fusion.services.postgresql.dao.language_rule_dao import LanguageRuleDAO
+    dao = LanguageRuleDAO(db)
+    rules = await dao.get_all()
+    grouped: dict[str, list] = {}
+    for r in rules:
+        grouped.setdefault(r.rule_type, []).append(r)
+    return templates.TemplateResponse(
+        "matching_language_rules.html",
+        admin_context(
+            request,
+            grouped=grouped,
+            rule_types=["french_pattern", "release_group", "code_mapping", "priority_group"],
+        ),
+    )
+
+
+@router.post("/matching/language-rules/create")
+async def matching_language_rules_create(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+    rule_type: str = Form(...),
+    key: str = Form(...),
+    value: str = Form(...),
+    description: str = Form(""),
+    is_active: bool = Form(True),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    from stream_fusion.services.postgresql.dao.language_rule_dao import LanguageRuleDAO
+    dao = LanguageRuleDAO(db)
+    try:
+        rule = await dao.create(
+            rule_type=rule_type.strip(),
+            key=key.strip(),
+            value=value.strip(),
+            description=description.strip() or None,
+            is_active=is_active,
+        )
+        return JSONResponse({"success": True, "id": rule.id})
+    except Exception as e:
+        logger.error(f"Admin: failed to create language rule: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/matching/language-rules/update")
+async def matching_language_rules_update(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+    rule_id: int = Form(...),
+    rule_type: str = Form(...),
+    key: str = Form(...),
+    value: str = Form(...),
+    description: str = Form(""),
+    is_active: bool = Form(True),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    from stream_fusion.services.postgresql.dao.language_rule_dao import LanguageRuleDAO
+    dao = LanguageRuleDAO(db)
+    try:
+        rule = await dao.update(
+            rule_id=rule_id,
+            rule_type=rule_type.strip(),
+            key=key.strip(),
+            value=value.strip(),
+            description=description.strip() or None,
+            is_active=is_active,
+        )
+        if not rule:
+            return JSONResponse({"success": False, "message": "Règle introuvable"}, status_code=404)
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"Admin: failed to update language rule {rule_id}: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/matching/language-rules/delete")
+async def matching_language_rules_delete(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+    rule_id: int = Form(...),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    from stream_fusion.services.postgresql.dao.language_rule_dao import LanguageRuleDAO
+    dao = LanguageRuleDAO(db)
+    try:
+        await dao.delete(rule_id)
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"Admin: failed to delete language rule {rule_id}: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/matching/language-rules/reload")
+async def matching_language_rules_reload(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        from stream_fusion.utils.filter.title_matching import get_lang_manager
+        await get_lang_manager().reload()
+        return JSONResponse({"success": True, "message": "Règles de langue rechargées"})
+    except Exception as e:
+        logger.error(f"Admin: failed to reload language rules: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+# ── Matching test page ─────────────────────────────────────────────────────────
+
+@router.get("/matching/test", response_class=HTMLResponse)
+async def matching_test_page(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+    return templates.TemplateResponse("matching_test.html", admin_context(request))
+
+
+@router.post("/matching/test")
+async def matching_test_run(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    raw_title: str = Form(...),
+    tmdb_titles: str = Form(...),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        from stream_fusion.utils.filter.title_matching import get_matcher
+        matcher = get_matcher()
+        titles = [t.strip() for t in tmdb_titles.splitlines() if t.strip()]
+        result = matcher.analyze(raw_title.strip(), titles)
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error(f"Admin: matching test failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── TMDB Mismatches ───────────────────────────────────────────────────────────
+
+@router.get("/mismatches", response_class=HTMLResponse)
+async def list_mismatches(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    from stream_fusion.services.postgresql.dao.mismatch_dao import TmdbMismatchDAO
+    dao = TmdbMismatchDAO(db)
+    mismatches = await dao.list_all()
+    return templates.TemplateResponse(
+        "mismatches.html", {"request": request, "mismatches": mismatches}
+    )
+
+
+@router.post("/mismatches/create")
+async def create_mismatch(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    info_hash: str = Form(...),
+    tmdb_id: int = Form(...),
+    raw_title: str = Form(...),
+    indexer: str = Form(...),
+    notes: str = Form(None),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    from stream_fusion.services.postgresql.dao.mismatch_dao import TmdbMismatchDAO
+    dao = TmdbMismatchDAO(db)
+    result = await dao.create(
+        info_hash=info_hash.strip().lower(),
+        tmdb_id=tmdb_id,
+        raw_title=raw_title.strip(),
+        indexer=indexer.strip(),
+        notes=notes.strip() if notes else None,
+    )
+    if result:
+        logger.info(f"Admin: mismatch created for ({info_hash[:8]}…, tmdb_id={tmdb_id})")
+        return JSONResponse({"success": True, "id": result.id})
+    return JSONResponse({"error": "Déjà signalé ou erreur"}, status_code=409)
+
+
+@router.post("/mismatches/delete")
+async def delete_mismatch(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    mismatch_id: int = Form(...),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    from stream_fusion.services.postgresql.dao.mismatch_dao import TmdbMismatchDAO
+    dao = TmdbMismatchDAO(db)
+    deleted = await dao.delete(mismatch_id)
+    if deleted:
+        return JSONResponse({"success": True})
+    return JSONResponse({"error": "Non trouvé"}, status_code=404)
+
+
+# ── Unmatched Torrents ────────────────────────────────────────────────────────
+
+@router.get("/search/unmatched", response_class=HTMLResponse)
+async def search_unmatched_page(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    q: str = None,
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    from stream_fusion.services.postgresql.dao.torrentitem_dao import TorrentItemDAO
+    dao = TorrentItemDAO(db)
+    items = await dao.search_unmatched(query=q) if q else []
+    return templates.TemplateResponse(
+        "search_unmatched.html",
+        {"request": request, "items": items, "query": q or ""},
+    )
+
+
+@router.post("/search/assign-tmdb")
+async def assign_tmdb_to_selection(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    form = await request.form()
+    tmdb_id_raw = form.get("tmdb_id", "").strip()
+    info_hashes = [v.strip().lower() for v in form.getlist("info_hashes") if v.strip()]
+
+    if not tmdb_id_raw or not tmdb_id_raw.isdigit():
+        return JSONResponse({"error": "TMDB ID invalide"}, status_code=400)
+    if not info_hashes:
+        return JSONResponse({"error": "Aucun torrent sélectionné"}, status_code=400)
+
+    from stream_fusion.services.postgresql.dao.torrentitem_dao import TorrentItemDAO
+    dao = TorrentItemDAO(db)
+    updated = await dao.assign_tmdb_by_info_hashes(info_hashes, int(tmdb_id_raw))
+    logger.info(f"Admin: assigned tmdb_id={tmdb_id_raw} to {updated} torrents")
+    return JSONResponse({"success": True, "updated": updated})

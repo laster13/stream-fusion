@@ -2121,6 +2121,41 @@
                 </div>
             </div>
 
+            <!-- CACHE LOCAL -->
+            <div class="card anim" id="sec-cache-local" style="animation-delay:0.6s">
+                <div class="card-header" onclick="toggleCard(this)"><div class="card-icon" style="background:rgba(16,185,129,0.1);color:#34d399;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg></div><h2 class="card-title">Cache Local</h2><svg class="card-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></div>
+                <p class="card-desc">Exploitez le cache Postgres local avant de requêter les indexeurs — accélère les recherches répétées.</p>
+                <div style="padding:0 14px;">
+                    <div class="slider-grid">
+
+                        <div class="slider-control">
+                            <label>Min. résultats cache local</label>
+                            <div class="slider-row">
+                                <div class="slider-track-wrap">
+                                    <div class="slider-fill" id="fill_minPostgresResults"></div>
+                                    <input type="range" class="slider-range" id="range_minPostgresResults" min="0" max="20" step="1" value="5">
+                                </div>
+                                <div class="slider-val"><input type="number" name="minPostgresResults" id="minPostgresResults" min="0" max="20" value="5"></div>
+                            </div>
+                            <p class="fi-hint">Nombre minimum de résultats confirmés en cache local (Postgres) pour bypasser entièrement la recherche live sur les indexeurs. Si le cache contient au moins N résultats valides et récents, les indexeurs ne sont pas interrogés — réponse quasi-instantanée. (0 = désactivé, toujours interroger les indexeurs)</p>
+                        </div>
+
+                        <div class="slider-control">
+                            <label>Durée de validité du cache (jours)</label>
+                            <div class="slider-row">
+                                <div class="slider-track-wrap">
+                                    <div class="slider-fill" id="fill_postgresMaxAgeDays"></div>
+                                    <input type="range" class="slider-range" id="range_postgresMaxAgeDays" min="0" max="30" step="1" value="7">
+                                </div>
+                                <div class="slider-val"><input type="number" name="postgresMaxAgeDays" id="postgresMaxAgeDays" min="0" max="30" value="7"></div>
+                            </div>
+                            <p class="fi-hint">Durée maximale (TTL) en jours pendant laquelle le cache local est considéré frais. Après N jours sans nouvelle recherche live, les indexeurs sont ré-interrogés pour récupérer les nouveaux torrents parus depuis. Le TTL est remis à zéro automatiquement après chaque recherche live. (0 = désactivé, cache toujours considéré frais)</p>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
             </div>
 
             <!-- ÉTAPE 6: INSTALLATION -->
@@ -2202,8 +2237,8 @@
     </div>
 
 	<!-- JAVASCRIPT -->  
-    <script src="/static/config.js?v=4"></script>
-    <script src="/static/app.js?v=4"></script>
+    <script src="/static/config.js?v=5"></script>
+    <script src="/static/app.js?v=5"></script>
 	
 </body>
 </html>

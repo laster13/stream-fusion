@@ -1,8 +1,5 @@
-import re
-from typing import List, Dict
+from typing import List, Optional
 
-from RTN import ParsedData, title_match
-from stream_fusion.constants import FRENCH_PATTERNS
 from stream_fusion.utils.filter.base_filter import BaseFilter
 from stream_fusion.logging_config import logger
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
@@ -10,140 +7,59 @@ from stream_fusion.utils.torrent.torrent_item import TorrentItem
 
 class LanguagePriorityFilter(BaseFilter):
     """
-    Filtre pour trier les torrents selon une priorité de langue spécifique.
-    Ordre de priorité:
-    1. Groupe 1: VFF, VOF, VFI
-    2. Groupe 2: VF2, VFQ
-    3. Groupe 3: VOST
+    Sorts torrents by language priority.
+    Priority groups and detection patterns are loaded from the title_matching module
+    (backed by DB and Redis cache), replacing the former hardcoded constants.
+
+    Priority order (default):
+      1. VFF, VOF, VFI, MULTI
+      2. VF2, VFQ, VQ, FRENCH
+      3. VOSTFR
     """
 
     def __init__(self, config):
         super().__init__(config)
-        
-        # Vérifier si VFQ est explicitement sélectionné dans les préférences de langue
-        vfq_selected = 'vfq' in config.get('languages', [])
-        
-        # Adapter les groupes de priorité en fonction des préférences de l'utilisateur
-        if vfq_selected:
-            # Si VFQ est sélectionné, placer VFQ et VF2 dans le groupe 1 (priorité la plus élevée)
-            # car VF2 est aussi du français québécois
-            self.language_priority_groups = {
-                # Groupe 1 (priorité la plus élevée)
-                1: ["VFQ", "VF2", "VQ"],  # VFQ et VF2 en priorité absolue
-                # Groupe 2 (priorité secondaire)
-                2: ["VFF", "VOF", "VFI", "FRENCH", "MULTI"],
-                # Groupe 3 (priorité basse)
-                3: ["VOSTFR"],
+        self._vfq_mode = "vfq" in config.get("languages", [])
 
-            }
-            logger.info("Language preference set: VFQ/VF2 prioritized as group 1")
-        else:
-            # Configuration standard si VFQ n'est pas explicitement sélectionné
-            self.language_priority_groups = {
-                # Groupe 1 (priorité la plus élevée)
-                1: ["VFF", "VOF", "VFI", "MULTI"],
-                # Groupe 2 (priorité moyenne)
-                2: ["VF2", "VFQ", "VQ", "FRENCH"],
-                # Groupe 3 (priorité basse)
-                3: ["VOSTFR"],
-            }
-        
-        # Créer un dictionnaire inversé pour un accès rapide à la priorité par langue
-        self.language_priority_map = {}
-        for priority, languages in self.language_priority_groups.items():
-            for lang in languages:
-                self.language_priority_map[lang] = priority
+        try:
+            from stream_fusion.utils.filter.title_matching import get_lang_manager
+            self._lang_manager = get_lang_manager()
+        except RuntimeError:
+            self._lang_manager = None
+            logger.warning("LanguagePriorityFilter: title_matching module not initialized, using fallback priorities")
 
     def filter(self, data: List[TorrentItem]) -> List[TorrentItem]:
-        """
-        Trie les torrents selon la priorité de langue définie.
-        Utilise RTN pour l'analyse et le classement des torrents.
-        """
+        """Assign language_priority to each torrent and sort by it."""
         for torrent in data:
-            language_priority = self._get_language_priority(torrent)
-            
-            torrent.language_priority = language_priority
-            
-            logger.trace(f"Torrent {torrent.raw_title} a une priorité de langue: {language_priority}")
+            torrent.language_priority = self._get_language_priority(torrent)
+            logger.trace(f"Torrent {torrent.raw_title} — priority: {torrent.language_priority}")
 
-
-        sorted_data = sorted(data, key=lambda x: x.language_priority)
-        
-        logger.debug(f"Language sort complete. Priority order: VFF/VOF/VFI > VF2/VFQ > VOST > others")
-        
-        return sorted_data
+        return sorted(data, key=lambda x: x.language_priority)
 
     def _get_language_priority(self, torrent: TorrentItem) -> int:
-        """
-        Détermine la priorité de langue d'un torrent.
-        
-        Args:
-            torrent: L'objet torrent à évaluer
-            
-        Returns:
-            int: Valeur de priorité (plus petit = plus prioritaire)
-        """
-        language = self._detect_language_from_title(torrent.raw_title)
-        
-        if not language:
-            if hasattr(torrent, 'languages') and torrent.languages:
-                best_priority = 999
-                for lang in torrent.languages:
-                    lang_code = self._convert_language_code(lang)
-                    if lang_code in self.language_priority_map:
-                        priority = self.language_priority_map[lang_code]
-                        best_priority = min(best_priority, priority)
-                return best_priority
-            return 999  
-        
-        return self.language_priority_map.get(language, 998)  
-    
-    def _detect_language_from_title(self, title: str) -> str:
-        """
-        Détecte la langue à partir du titre du torrent.
-        
-        Args:
-            title: Titre du torrent
-            
-        Returns:
-            str: Code de langue détecté ou None
-        """
-        if not title:
-            return None
-            
-        for language, pattern in FRENCH_PATTERNS.items():
-            if re.search(pattern, title, re.IGNORECASE):
-                return language
-        
-        return None
-        
-    def _convert_language_code(self, lang_code: str) -> str:
-        """
-        Convertit les codes de langue courts en codes correspondant à nos groupes de priorité.
-        
-        Args:
-            lang_code: Code de langue court (ex: 'fr', 'multi')
-            
-        Returns:
-            str: Code de langue correspondant à nos groupes ou None
-        """
-        lang_mapping = {
-            'fr': 'FRENCH',
-            'vff': 'VFF',
-            'vf': 'FRENCH',
-            'vostfr': 'VOSTFR',
-            'multi': 'VFF', 
-            'voi': 'VOF',
-            'vfi': 'VFI',
-            'vf2': 'VF2',
-            'vfq': 'VFQ'
-        }
-        
-        return lang_mapping.get(lang_code.lower(), None)
+        lang_code = self._detect_language(torrent.raw_title)
 
-    def can_filter(self):
-        """
-        Ce filtre peut toujours être appliqué, car il s'agit d'un tri et non d'une exclusion.
-        """
+        if lang_code and self._lang_manager:
+            priority = self._lang_manager.get_priority_group(lang_code, self._vfq_mode)
+            if priority != 999:
+                return priority
+
+        # Fallback: look at torrent.languages attribute
+        if hasattr(torrent, "languages") and torrent.languages and self._lang_manager:
+            best = 999
+            for lang in torrent.languages:
+                canonical = self._lang_manager.get_canonical_code(lang)
+                if canonical:
+                    p = self._lang_manager.get_priority_group(canonical, self._vfq_mode)
+                    best = min(best, p)
+            return best
+
+        return 999
+
+    def _detect_language(self, title: str) -> Optional[str]:
+        if not title or not self._lang_manager:
+            return None
+        return self._lang_manager.detect_language_from_title(title)
+
+    def can_filter(self) -> bool:
         return True
-        

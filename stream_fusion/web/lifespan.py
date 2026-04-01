@@ -12,6 +12,7 @@ from stream_fusion.logging_config import configure_logging, logger
 from stream_fusion.services.postgresql.base import Base
 from stream_fusion.services.postgresql.models import load_all_models
 from stream_fusion.settings import settings
+from stream_fusion.utils.filter.title_matching import initialize_title_matching
 
 
 def _setup_db(app: FastAPI) -> None:  # pragma: no cover
@@ -78,6 +79,9 @@ async def lifespan_setup(
     app.state.redis_pool = ConnectionPool(
         host=settings.redis_host, port=settings.redis_port, db=settings.redis_db, max_connections=200
     )
+
+    # Initialize title matching module (loads rules from DB/Redis, seeds if empty)
+    await initialize_title_matching(app.state.redis_pool, app.state.db_session_factory)
 
     yield
 

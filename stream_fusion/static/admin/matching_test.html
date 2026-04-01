@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}Test de matching — StreamFusion Admin{% endblock %}
+{% block page_title %}Test de matching de titres{% endblock %}
+
+{% block extra_head %}
+<style>
+    .level-pass  { color: #20c997; }
+    .level-fail  { color: var(--bs-secondary-color); }
+    .match-yes   { color: #20c997; font-weight: 600; }
+    .match-no    { color: #dc3545; font-weight: 600; }
+    .step-label  { font-size: 0.75rem; color: var(--bs-secondary-color); text-transform: uppercase; letter-spacing: .06em; }
+    .step-value  { font-family: monospace; font-size: 0.9rem; }
+    .level-row   { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; margin: 3px 0; }
+    .level-name  { min-width: 220px; color: var(--bs-secondary-color); }
+    code.hl      { color: #f0b27a; }
+    .title-card  { border: 1px solid var(--bs-border-color); border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
+    .title-card.matched   { border-color: rgba(32,201,151,.4); background: rgba(32,201,151,.05); }
+    .title-card.unmatched { border-color: rgba(220,53,69,.2);  background: rgba(220,53,69,.04); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+    <!-- Input form -->
+    <div class="col-lg-5">
+        <div class="card border" style="border-color:var(--bs-border-color)!important;">
+            <div class="card-body">
+                <h6 class="card-title mb-3">Paramètres du test</h6>
+                <div class="mb-3">
+                    <label class="form-label">Titre brut du torrent</label>
+                    <input type="text" class="form-control form-control-sm" id="rawTitle"
+                           placeholder="ex: Le.Seigneur.des.Anneaux.FRENCH.AMZN.WEB-DL.1080p"
+                           value="">
+                    <div class="form-text">Tel que reçu de l'indexer (avec les dots, tags, etc.)</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Titres TMDB <span class="text-secondary">(un par ligne)</span></label>
+                    <textarea class="form-control form-control-sm" id="tmdbTitles" rows="4"
+                              placeholder="Le Seigneur des Anneaux : La Communauté de l'Anneau&#10;The Lord of the Rings: The Fellowship of the Ring"></textarea>
+                </div>
+                <button class="btn btn-primary btn-sm w-100" id="testBtn">
+                    <i class="bi bi-play-fill me-1"></i>Tester
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results -->
+    <div class="col-lg-7" id="resultsCol" style="display:none;">
+        <h6 class="mb-3">Résultats</h6>
+
+        <!-- Normalization steps -->
+        <div class="card border mb-3" style="border-color:var(--bs-border-color)!important;">
+            <div class="card-body">
+                <h6 class="card-title mb-3" style="font-size:.85rem;">
+                    <i class="bi bi-funnel me-1 text-primary"></i>Étapes de normalisation
+                </h6>
+                <table class="table table-sm mb-0" style="font-size:.85rem;">
+                    <tbody id="stepsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Conclusion -->
+        <div class="card border mb-3" id="conclusionCard" style="border-color:var(--bs-border-color)!important;">
+            <div class="card-body py-2 px-3">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="bi bi-arrow-right-circle-fill fs-5" id="conclusionIcon"></i>
+                    <span id="conclusionText" style="font-size:.9rem;"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Per-title breakdown -->
+        <h6 style="font-size:.82rem;text-transform:uppercase;letter-spacing:.06em;color:var(--bs-secondary-color);">
+            Détail par titre TMDB
+        </h6>
+        <div id="titlesBreakdown"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const csrf = window.__ADMIN_CSRF__;
+
+const LEVEL_LABELS = {
+    exact_normalized:        'Niveau 1 — Exact normalisé',
+    ordered_subset:          'Niveau 2 — Sous-ensemble ordonné (item ⊂ TMDB)',
+    reverse_ordered_subset:  'Niveau 3 — Sous-ensemble inverse (TMDB ⊂ item)',
+    fuzzy_rtn:               'Niveau 4 — Fuzzy RTN (Levenshtein)',
+    article_stripped:        'Niveau 5 — Sans article de tête (exact)',
+    article_stripped_subset: 'Niveau 5b — Sans article de tête (sous-ensemble)',
+};
+
+document.getElementById('testBtn').addEventListener('click', async () => {
+    const rawTitle   = document.getElementById('rawTitle').value.trim();
+    const tmdbTitles = document.getElementById('tmdbTitles').value.trim();
+    if (!rawTitle || !tmdbTitles) { alert('Remplissez les deux champs.'); return; }
+
+    const btn = document.getElementById('testBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Analyse…';
+
+    const fd = new FormData();
+    fd.append('csrf_token', csrf);
+    fd.append('raw_title', rawTitle);
+    fd.append('tmdb_titles', tmdbTitles);
+
+    try {
+        const resp = await fetch('/admin/matching/test', {method: 'POST', body: fd});
+        const data = await resp.json();
+        if (data.error) { alert('Erreur : ' + data.error); return; }
+        renderResults(data);
+        document.getElementById('resultsCol').style.display = '';
+    } catch(e) {
+        alert('Erreur réseau : ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Tester';
+    }
+});
+
+function renderResults(data) {
+    // Steps
+    const stepsBody = document.getElementById('stepsBody');
+    const steps = data.steps || {};
+    const stepDefs = [
+        ['Titre brut',              steps.raw_title],
+        ['Après remove_integrale',  steps.after_integrale],
+        ['Après dot → espace',      steps.after_dot_to_space],
+        ['Frontière détectée',      steps.boundary_detected],
+        ['Après clean_release',     steps.after_clean_release],
+        ['Après normalize()',       steps.after_normalize],
+        ['Après strip_article()',   steps.after_strip_article],
+    ];
+    stepsBody.innerHTML = stepDefs.map(([label, val]) => `
+        <tr>
+            <td class="step-label pe-3" style="width:200px;">${label}</td>
+            <td class="step-value">${escHtml(val || '—')}</td>
+        </tr>
+    `).join('');
+
+    // Conclusion
+    const conclusionIcon = document.getElementById('conclusionIcon');
+    const conclusionText = document.getElementById('conclusionText');
+    const conclusionCard = document.getElementById('conclusionCard');
+    if (data.matched) {
+        conclusionIcon.className = 'bi bi-check-circle-fill fs-5 text-success';
+        conclusionText.innerHTML = `<span class="match-yes">CONSERVÉ</span> — raison : <code class="hl">${data.reason}</code>, correspondance : <code class="hl">${escHtml(data.matched_with)}</code>`;
+        conclusionCard.style.borderColor = 'rgba(32,201,151,.4)';
+    } else {
+        conclusionIcon.className = 'bi bi-x-circle-fill fs-5 text-danger';
+        conclusionText.innerHTML = '<span class="match-no">REJETÉ</span> — aucun titre ne correspond';
+        conclusionCard.style.borderColor = 'rgba(220,53,69,.3)';
+    }
+
+    // Per-title breakdown
+    const breakdown = document.getElementById('titlesBreakdown');
+    breakdown.innerHTML = (data.title_results || []).map(tr => {
+        const cls = tr.matched ? 'matched' : 'unmatched';
+        const icon = tr.matched ? '✓' : '✗';
+        const levelsHtml = Object.entries(tr.levels).map(([k, v]) => `
+            <div class="level-row">
+                <span class="level-name">${LEVEL_LABELS[k] || k}</span>
+                <span class="${v ? 'level-pass' : 'level-fail'}">${v ? '✓' : '✗'}</span>
+            </div>
+        `).join('');
+        return `
+            <div class="title-card ${cls}">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div>
+                        <div style="font-weight:600;font-size:.9rem;">${escHtml(tr.tmdb_title)}</div>
+                        <div style="font-size:.78rem;color:var(--bs-secondary-color);font-family:monospace;">
+                            normalisé : ${escHtml(tr.normalized)}<br>
+                            sans article : ${escHtml(tr.stripped)}
+                        </div>
+                    </div>
+                    <span class="${tr.matched ? 'match-yes' : 'match-no'}" style="font-size:1.1rem;">${icon}</span>
+                </div>
+                ${levelsHtml}
+                ${tr.reason ? `<div class="mt-1" style="font-size:.78rem;color:#20c997;">→ raison : ${tr.reason}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+function escHtml(s) {
+    if (s == null) return '—';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+{% endblock %}

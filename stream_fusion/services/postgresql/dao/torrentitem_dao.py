@@ -1,11 +1,12 @@
 from typing import List, Optional
 from fastapi import Depends
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func, update, exists, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, timedelta
 
 from stream_fusion.services.postgresql.dependencies import get_db_session
 from stream_fusion.services.postgresql.models.torrentitem_model import TorrentItemModel
+from stream_fusion.services.postgresql.models.mismatch_model import TmdbMismatchModel
 from stream_fusion.logging_config import logger
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
 
@@ -206,7 +207,18 @@ class TorrentItemDAO:
     async def search_by_tmdb_id(self, tmdb_id: int) -> List[TorrentItemModel]:
         async with self.session.begin():
             try:
-                query = select(TorrentItemModel).where(TorrentItemModel.tmdb_id == tmdb_id)
+                # Exclude items that have been flagged as mismatches for this TMDB ID
+                mismatch_subq = (
+                    select(TmdbMismatchModel.id)
+                    .where(TmdbMismatchModel.info_hash == TorrentItemModel.info_hash)
+                    .where(TmdbMismatchModel.tmdb_id == tmdb_id)
+                    .correlate(TorrentItemModel)
+                )
+                query = (
+                    select(TorrentItemModel)
+                    .where(TorrentItemModel.tmdb_id == tmdb_id)
+                    .where(~exists(mismatch_subq))
+                )
                 result = await self.session.execute(query)
                 items = result.scalars().all()
                 logger.debug(f"TorrentItemDAO: Found {len(items)} torrents for TMDB ID: {tmdb_id}")
@@ -259,12 +271,24 @@ class TorrentItemDAO:
                 logger.error(f"TorrentItemDAO: Error updating torrent_file_path and tmdb_id for {torrent_id}: {str(e)}")
                 return False
 
-    async def update_tmdb_id_by_raw_title(self, raw_title: str, tmdb_id: int) -> int:
+    async def update_tmdb_id_by_info_hash(self, info_hash: str, tmdb_id: int) -> int:
+        """Update tmdb_id for a specific torrent identified by its info_hash.
+
+        Preferred over update_tmdb_id_by_raw_title when info_hash is available,
+        as info_hash is unique per torrent and avoids title-collision risks.
+        Skips the update if (info_hash, tmdb_id) is a known mismatch.
+        """
         try:
+            mismatch_subq = (
+                select(TmdbMismatchModel.id)
+                .where(TmdbMismatchModel.info_hash == info_hash)
+                .where(TmdbMismatchModel.tmdb_id == tmdb_id)
+            )
             stmt = (
                 update(TorrentItemModel)
-                .where(TorrentItemModel.raw_title == raw_title)
+                .where(TorrentItemModel.info_hash == info_hash)
                 .where(TorrentItemModel.tmdb_id.is_(None))
+                .where(~exists(mismatch_subq))
                 .values(
                     tmdb_id=tmdb_id,
                     updated_at=int(datetime.now(timezone.utc).timestamp())
@@ -273,11 +297,115 @@ class TorrentItemDAO:
             result = await self.session.execute(stmt)
             await self.session.flush()
             row_count = result.rowcount
-            logger.debug(f"TorrentItemDAO: Updated {row_count} torrents with raw_title '{raw_title}' to tmdb_id {tmdb_id}")
+            if row_count:
+                logger.debug(f"TorrentItemDAO: Updated {row_count} torrents with info_hash '{info_hash}' to tmdb_id {tmdb_id}")
+            else:
+                logger.debug(f"TorrentItemDAO: Skipped tmdb_id assignment for '{info_hash}' (already set or known mismatch)")
             return row_count
+        except Exception as e:
+            logger.error(f"TorrentItemDAO: Error updating tmdb_id for info_hash '{info_hash}': {str(e)}")
+            return 0
+
+    async def update_tmdb_id_by_raw_title(self, raw_title: str, tmdb_id: int, indexer: str = None) -> int:
+        """Update tmdb_id for torrents matching raw_title, propagating to all siblings with the same info_hash.
+
+        Fallback for when info_hash is not available on the calling item. Two-step process:
+        1. Collect info_hashes of rows matching raw_title (+indexer safety filter), excluding known mismatches.
+        2. Update ALL rows sharing those hashes (propagates to other indexers' copies of the same torrent).
+        3. Rows without info_hash: update directly by raw_title+indexer (no propagation possible).
+        """
+        try:
+            now_ts = int(datetime.now(timezone.utc).timestamp())
+            total_rows = 0
+
+            # ── Step 1: collect info_hashes of matching rows ──
+            hash_conditions = [
+                TorrentItemModel.raw_title == raw_title,
+                TorrentItemModel.tmdb_id.is_(None),
+                TorrentItemModel.info_hash.isnot(None),
+            ]
+            if indexer:
+                hash_conditions.append(TorrentItemModel.indexer == indexer)
+
+            hash_result = await self.session.execute(
+                select(TorrentItemModel.info_hash).where(*hash_conditions)
+            )
+            matched_hashes = [row[0] for row in hash_result.fetchall()]
+
+            if matched_hashes:
+                # Filter out hashes that are known mismatches for this tmdb_id
+                mismatch_result = await self.session.execute(
+                    select(TmdbMismatchModel.info_hash)
+                    .where(TmdbMismatchModel.info_hash.in_(matched_hashes))
+                    .where(TmdbMismatchModel.tmdb_id == tmdb_id)
+                )
+                mismatch_hashes = {row[0] for row in mismatch_result.fetchall()}
+                safe_hashes = [h for h in matched_hashes if h not in mismatch_hashes]
+
+                if safe_hashes:
+                    # ── Step 2: propagate to ALL rows with those hashes (all indexers) ──
+                    result = await self.session.execute(
+                        update(TorrentItemModel)
+                        .where(TorrentItemModel.info_hash.in_(safe_hashes))
+                        .where(TorrentItemModel.tmdb_id.is_(None))
+                        .values(tmdb_id=tmdb_id, updated_at=now_ts)
+                    )
+                    total_rows += result.rowcount
+
+            # ── Step 3: rows without info_hash — direct update, no propagation possible ──
+            no_hash_conditions = [
+                TorrentItemModel.raw_title == raw_title,
+                TorrentItemModel.tmdb_id.is_(None),
+                TorrentItemModel.info_hash.is_(None),
+            ]
+            if indexer:
+                no_hash_conditions.append(TorrentItemModel.indexer == indexer)
+
+            result = await self.session.execute(
+                update(TorrentItemModel)
+                .where(*no_hash_conditions)
+                .values(tmdb_id=tmdb_id, updated_at=now_ts)
+            )
+            total_rows += result.rowcount
+
+            await self.session.flush()
+
+            if total_rows:
+                sibling_info = f", propagated via {len(matched_hashes)} hash(es)" if matched_hashes else ""
+                logger.debug(
+                    f"TorrentItemDAO: Updated {total_rows} torrents with raw_title '{raw_title}'"
+                    f" (indexer={indexer}{sibling_info}) to tmdb_id {tmdb_id}"
+                )
+            else:
+                logger.debug(
+                    f"TorrentItemDAO: Skipped tmdb_id for raw_title '{raw_title}'"
+                    f" (already set, no match, or known mismatch)"
+                )
+            return total_rows
+
         except Exception as e:
             logger.error(f"TorrentItemDAO: Error updating tmdb_id for raw_title '{raw_title}': {str(e)}")
             return 0
+
+    async def touch_items_by_info_hash(self, info_hashes: list) -> None:
+        """Refresh updated_at for a batch of items to reset the cache-first TTL.
+
+        Called after a live search so that the next request sees the Postgres
+        cache as fresh and doesn't trigger another live search immediately.
+        """
+        if not info_hashes:
+            return
+        try:
+            stmt = (
+                update(TorrentItemModel)
+                .where(TorrentItemModel.info_hash.in_(info_hashes))
+                .values(updated_at=int(datetime.now(timezone.utc).timestamp()))
+            )
+            await self.session.execute(stmt)
+            await self.session.flush()
+            logger.debug(f"TorrentItemDAO: Touched updated_at for {len(info_hashes)} items (TTL refresh)")
+        except Exception as e:
+            logger.error(f"TorrentItemDAO: Error touching items by info_hash: {str(e)}")
 
     async def get_latest_tmdb_ids(self, item_type: str, limit: int = 50) -> List[int]:
         async with self.session.begin():
@@ -504,3 +632,60 @@ class TorrentItemDAO:
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error filtering TMDB IDs for {item_type}: {str(e)}")
                 return []
+
+    async def search_unmatched(self, query: str = None, limit: int = 200) -> List[TorrentItemModel]:
+        """Return torrents with tmdb_id=NULL, grouped by indexer for visual grouping.
+
+        If a query string is provided, each word is matched against raw_title (ILIKE).
+        Results are ordered by indexer then raw_title — the admin selects manually.
+        """
+        async with self.session.begin():
+            try:
+                conditions = [TorrentItemModel.tmdb_id.is_(None)]
+                if query:
+                    for word in query.split():
+                        conditions.append(TorrentItemModel.raw_title.ilike(f"%{word}%"))
+                stmt = (
+                    select(TorrentItemModel)
+                    .where(*conditions)
+                    .order_by(
+                        TorrentItemModel.indexer.asc(),
+                        TorrentItemModel.raw_title.asc(),
+                    )
+                    .limit(limit)
+                )
+                result = await self.session.execute(stmt)
+                items = result.scalars().all()
+                logger.debug(f"TorrentItemDAO: Found {len(items)} unmatched torrents (query={query!r})")
+                return items
+            except Exception as e:
+                logger.error(f"TorrentItemDAO: Error searching unmatched torrents: {str(e)}")
+                return []
+
+    async def assign_tmdb_by_info_hashes(self, info_hashes: list[str], tmdb_id: int) -> int:
+        """Assign a tmdb_id to a list of torrents explicitly selected by the admin.
+
+        Does not check tmdb_id IS NULL — the admin may intentionally re-assign
+        a torrent that was previously mismatched and then cleaned.
+        """
+        if not info_hashes:
+            return 0
+        try:
+            stmt = (
+                update(TorrentItemModel)
+                .where(TorrentItemModel.info_hash.in_(info_hashes))
+                .values(
+                    tmdb_id=tmdb_id,
+                    updated_at=int(datetime.now(timezone.utc).timestamp()),
+                )
+            )
+            result = await self.session.execute(stmt)
+            await self.session.flush()
+            row_count = result.rowcount
+            logger.info(
+                f"TorrentItemDAO: Admin assigned tmdb_id={tmdb_id} to {row_count} torrents"
+            )
+            return row_count
+        except Exception as e:
+            logger.error(f"TorrentItemDAO: Error in assign_tmdb_by_info_hashes: {str(e)}")
+            return 0

@@ -48,7 +48,8 @@ class LaCaleService:
             imdb_id=imdb_id,
         )
         logger.info(f"LaCale: {len(raw)} raw results for movie '{media.titles[0]}'")
-        return self._build_results(raw, media)
+        searched_by_id = bool(tmdb_id or imdb_id)
+        return self._build_results(raw, media, searched_by_id=searched_by_id)
 
     async def _search_series(self, media: Series) -> List[LaCaleResult]:
         logger.info(f"LaCale: Searching series: {media.titles[0]}")
@@ -73,13 +74,14 @@ class LaCaleService:
             f"LaCale: {len(raw)} raw results for series '{media.titles[0]}' "
             f"(season={season}, episode={episode})"
         )
-        return self._build_results(raw, media)
+        searched_by_id = bool(tmdb_id or imdb_id)
+        return self._build_results(raw, media, searched_by_id=searched_by_id)
 
-    def _build_results(self, raw_results, media) -> List[LaCaleResult]:
+    def _build_results(self, raw_results, media, searched_by_id: bool = True) -> List[LaCaleResult]:
         results = []
         for item in raw_results:
             try:
-                result = LaCaleResult().from_api_item(item, media)
+                result = LaCaleResult().from_api_item(item, media, searched_by_id=searched_by_id)
                 results.append(result)
             except ValueError as e:
                 logger.trace(f"LaCale: Skipping item - {e}")

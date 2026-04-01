@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}Règles de normalisation — StreamFusion Admin{% endblock %}
+{% block page_title %}Règles de normalisation des titres{% endblock %}
+
+{% block extra_head %}
+<style>
+    .rule-type-badge {
+        font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 4px;
+    }
+    .badge-substitution { background: rgba(13,202,240,0.15); color: #0dcaf0; border: 1px solid rgba(13,202,240,0.3); }
+    .badge-release_tag  { background: rgba(255,193,7,0.15);  color: #ffc107; border: 1px solid rgba(255,193,7,0.3); }
+    .badge-article      { background: rgba(25,135,84,0.15);  color: #20c997; border: 1px solid rgba(25,135,84,0.3); }
+    .badge-ligature     { background: rgba(111,66,193,0.15); color: #a98eda; border: 1px solid rgba(111,66,193,0.3); }
+    .inactive-row { opacity: 0.45; }
+    code.pattern { color: #f0b27a; font-size: 0.85rem; }
+    code.replacement { color: #82e0aa; font-size: 0.85rem; }
+    .search-input { max-width: 300px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <input type="text" class="form-control form-control-sm search-input" id="searchInput" placeholder="Filtrer (pattern, type, description…)">
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-warning btn-sm" id="reloadBtn" title="Invalider Redis et recharger en mémoire">
+            <i class="bi bi-arrow-clockwise me-1"></i>Recharger le cache
+        </button>
+        <button class="btn btn-primary btn-sm" id="createBtn">
+            <i class="bi bi-plus-lg me-1"></i>Nouvelle règle
+        </button>
+    </div>
+</div>
+
+{% for rt in rule_types %}
+{% set rules = grouped.get(rt, []) %}
+<div class="mb-4">
+    <h6 class="text-uppercase text-secondary" style="font-size:0.72rem;letter-spacing:.08em;">
+        {{ rt }} <span class="ms-1 text-muted">({{ rules|length }})</span>
+    </h6>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle" id="table-{{ rt }}">
+            <thead>
+                <tr style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.05em;color:var(--bs-secondary-color);">
+                    <th>Pattern</th>
+                    <th>Remplacement</th>
+                    <th>Description</th>
+                    <th>Actif</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rules %}
+                <tr data-search="{{ r.pattern }} {{ r.replacement }} {{ r.description or '' }}" class="{% if not r.is_active %}inactive-row{% endif %}">
+                    <td><code class="pattern">{{ r.pattern }}</code></td>
+                    <td><code class="replacement">{{ r.replacement or '—' }}</code></td>
+                    <td style="font-size:0.82rem;color:var(--bs-secondary-color);">{{ r.description or '—' }}</td>
+                    <td>
+                        {% if r.is_active %}
+                        <span class="badge text-bg-success" style="font-size:.7rem;">Oui</span>
+                        {% else %}
+                        <span class="badge text-bg-secondary" style="font-size:.7rem;">Non</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="d-flex gap-1">
+                            <button class="btn btn-sm btn-outline-secondary edit-btn"
+                                data-id="{{ r.id }}" data-rule-type="{{ r.rule_type }}"
+                                data-pattern="{{ r.pattern }}" data-replacement="{{ r.replacement }}"
+                                data-description="{{ r.description or '' }}" data-is-active="{{ r.is_active | lower }}"
+                                title="Modifier"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-sm btn-outline-danger delete-btn" data-id="{{ r.id }}" title="Supprimer">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-secondary text-center" style="font-size:.82rem;">Aucune règle</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endfor %}
+
+<!-- Modal create/edit -->
+<div class="modal fade" id="ruleModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">Nouvelle règle</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="ruleForm">
+                    <input type="hidden" id="ruleId" name="rule_id" value="">
+                    <div class="mb-3">
+                        <label class="form-label">Type</label>
+                        <select class="form-select form-select-sm" id="ruleType" name="rule_type" required>
+                            <option value="substitution">substitution</option>
+                            <option value="release_tag">release_tag</option>
+                            <option value="article">article</option>
+                            <option value="ligature">ligature</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Pattern</label>
+                        <input type="text" class="form-control form-control-sm" id="rulePattern" name="pattern" required placeholder="ex: &, NF, the, œ">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Remplacement</label>
+                        <input type="text" class="form-control form-control-sm" id="ruleReplacement" name="replacement" placeholder="ex: and (vide = suppression)">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <input type="text" class="form-control form-control-sm" id="ruleDescription" name="description" placeholder="Optionnel">
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="ruleActive" name="is_active" checked>
+                        <label class="form-check-label" for="ruleActive">Actif</label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-primary btn-sm" id="saveBtn">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const csrf = window.__ADMIN_CSRF__;
+const modal = new bootstrap.Modal(document.getElementById('ruleModal'));
+
+// Search filter
+document.getElementById('searchInput').addEventListener('input', function() {
+    const q = this.value.toLowerCase();
+    document.querySelectorAll('tbody tr[data-search]').forEach(r => {
+        r.style.display = r.dataset.search.toLowerCase().includes(q) ? '' : 'none';
+    });
+});
+
+// Create
+document.getElementById('createBtn').addEventListener('click', () => {
+    document.getElementById('modalTitle').textContent = 'Nouvelle règle';
+    document.getElementById('ruleId').value = '';
+    document.getElementById('ruleForm').reset();
+    document.getElementById('ruleActive').checked = true;
+    modal.show();
+});
+
+// Edit
+document.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.getElementById('modalTitle').textContent = 'Modifier la règle';
+        document.getElementById('ruleId').value = btn.dataset.id;
+        document.getElementById('ruleType').value = btn.dataset.ruleType;
+        document.getElementById('rulePattern').value = btn.dataset.pattern;
+        document.getElementById('ruleReplacement').value = btn.dataset.replacement;
+        document.getElementById('ruleDescription').value = btn.dataset.description;
+        document.getElementById('ruleActive').checked = btn.dataset.isActive === 'true';
+        modal.show();
+    });
+});
+
+// Save
+document.getElementById('saveBtn').addEventListener('click', async () => {
+    const id = document.getElementById('ruleId').value;
+    const url = id ? '/admin/matching/title-rules/update' : '/admin/matching/title-rules/create';
+    const formData = new FormData(document.getElementById('ruleForm'));
+    formData.append('csrf_token', csrf);
+    if (!id) formData.delete('rule_id');
+    if (!document.getElementById('ruleActive').checked) formData.delete('is_active');
+    const r = await fetch(url, {method:'POST', body: formData});
+    const data = await r.json();
+    if (data.success) { modal.hide(); location.reload(); }
+    else alert('Erreur : ' + (data.message || 'Inconnue'));
+});
+
+// Delete
+document.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        if (!confirm('Supprimer cette règle ?')) return;
+        const fd = new FormData();
+        fd.append('rule_id', btn.dataset.id);
+        fd.append('csrf_token', csrf);
+        const r = await fetch('/admin/matching/title-rules/delete', {method:'POST', body: fd});
+        const data = await r.json();
+        if (data.success) location.reload();
+        else alert('Erreur : ' + (data.message || 'Inconnue'));
+    });
+});
+
+// Reload cache
+document.getElementById('reloadBtn').addEventListener('click', async () => {
+    const fd = new FormData();
+    fd.append('csrf_token', csrf);
+    const btn = document.getElementById('reloadBtn');
+    btn.disabled = true;
+    const r = await fetch('/admin/matching/title-rules/reload', {method:'POST', body: fd});
+    const data = await r.json();
+    btn.disabled = false;
+    if (data.success) {
+        btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Rechargé';
+        setTimeout(() => { btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Recharger le cache'; }, 2000);
+    } else {
+        alert('Erreur : ' + (data.message || 'Inconnue'));
+    }
+});
+</script>
+{% endblock %}

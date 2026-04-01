@@ -17,7 +17,29 @@
         color: var(--bs-secondary-color);
         letter-spacing: 0.01em;
     }
-    .raw-title-cell { font-size: 0.875rem; max-width: 380px; word-break: break-word; line-height: 1.35; }
+    .raw-title-cell { font-size: 0.875rem; max-width: 340px; word-break: break-word; line-height: 1.35; }
+    .mismatch-badge {
+        font-size: 0.7rem;
+        background: rgba(255,193,7,0.15);
+        color: #ffc107;
+        border: 1px solid rgba(255,193,7,0.3);
+        border-radius: 4px;
+        padding: 1px 6px;
+        white-space: nowrap;
+    }
+    .group-header {
+        background: rgba(255,255,255,0.04);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--bs-secondary-color);
+        user-select: none;
+        cursor: pointer;
+    }
+    .group-header:hover { background: rgba(255,255,255,0.07); }
+    [data-bs-theme="light"] .group-header { background: rgba(0,0,0,0.04); }
+    [data-bs-theme="light"] .group-header:hover { background: rgba(0,0,0,0.07); }
+    .group-toggle i { font-size: 0.7rem; }
 </style>
 {% endblock %}
 
@@ -45,12 +67,28 @@
         Aucun résultat pour TMDB ID <code class="text-primary">{{ query }}</code>
     </div>
     {% else %}
-    <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
         <span class="text-secondary" style="font-size:0.85rem;">
             {{ results|length }} entrée(s) pour TMDB ID <code class="text-primary">{{ query }}</code>
         </span>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
         <input type="text" id="searchInput" class="form-control form-control-sm"
-               style="width:220px;" placeholder="Filtrer (titre, hash, indexeur…)">
+               style="width:200px;font-size:0.83rem;" placeholder="Titre, hash…">
+        <select id="filterLang" class="form-select form-select-sm" style="width:auto;min-width:130px;font-size:0.83rem;">
+            <option value="">Toutes les langues</option>
+        </select>
+        <select id="filterType" class="form-select form-select-sm" style="width:auto;min-width:110px;font-size:0.83rem;">
+            <option value="">Tous les types</option>
+            <option value="movie">Film</option>
+            <option value="series">Série</option>
+        </select>
+        <button id="clearFilters" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-x-lg me-1"></i>Effacer
+        </button>
+        <span class="text-secondary ms-2" style="font-size:0.8rem;" id="filteredCount"></span>
     </div>
 
     <div class="table-responsive">
@@ -60,17 +98,34 @@
                     <th>Titre brut</th>
                     <th>Taille</th>
                     <th>Hash</th>
-                    <th>Indexeur</th>
                     <th style="text-align:right;">Seeders</th>
                     <th>Langues</th>
                     <th>Créé le</th>
                     <th>Mis à jour</th>
-                    <th></th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody id="tableBody">
-                {% for r in results %}
-                <tr data-search="{{ r.raw_title }} {{ r.info_hash }} {{ r.indexer }}">
+                {% for indexer, group in results | groupby('indexer') %}
+                <tr class="group-header" data-group-header="{{ indexer }}">
+                    <td colspan="8" class="py-2 px-3">
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-link btn-sm p-0 group-toggle text-secondary"
+                                    data-group="{{ indexer }}" tabindex="-1">
+                                <i class="bi bi-chevron-down"></i>
+                            </button>
+                            <i class="bi bi-server"></i>
+                            {{ indexer }}
+                            <span class="ms-1" style="font-size:0.72rem;opacity:0.6;">({{ group | list | length }})</span>
+                        </div>
+                    </td>
+                </tr>
+                {% for r in group %}
+                <tr data-group="{{ indexer }}"
+                    data-search="{{ r.raw_title }} {{ r.info_hash }}"
+                    data-type="{{ r.type or '' }}"
+                    data-langs="{{ (r.languages or []) | join(',') }}"
+                    id="row-{{ r.info_hash }}">
                     <td class="raw-title-cell">
                         {% if r.type == 'series' %}
                         <span class="badge me-1" style="font-size:0.65rem;background:rgba(13,202,240,0.15);color:#0dcaf0;border:1px solid rgba(13,202,240,0.3);">S</span>
@@ -89,7 +144,6 @@
                             </button>
                         </div>
                     </td>
-                    <td style="font-size:0.83rem;">{{ r.indexer }}</td>
                     <td style="text-align:right;font-size:0.83rem;font-variant-numeric:tabular-nums;">{{ r.seeders }}</td>
                     <td>
                         <div class="d-flex flex-wrap gap-1">
@@ -106,17 +160,28 @@
                         <div style="font-size:0.72rem;color:var(--bs-secondary-color);">{{ r.updated_at | fmt_date }}</div>
                     </td>
                     <td>
-                        <a href="{{ url_for('search_hash_page')(request) }}?q={{ r.info_hash }}"
-                           class="btn btn-sm btn-outline-info" title="Voir le détail complet par hash">
-                            <i class="bi bi-hash"></i>
-                        </a>
+                        <div class="d-flex gap-1">
+                            <a href="{{ url_for('search_hash_page')(request) }}?q={{ r.info_hash }}"
+                               class="btn btn-sm btn-outline-info" title="Voir le détail complet par hash">
+                                <i class="bi bi-hash"></i>
+                            </a>
+                            <button class="btn btn-sm btn-outline-warning mismatch-btn"
+                                    data-hash="{{ r.info_hash }}"
+                                    data-tmdb="{{ query }}"
+                                    data-title="{{ r.raw_title | replace('"', '&quot;') }}"
+                                    data-indexer="{{ r.indexer }}"
+                                    title="Signaler comme mismatch TMDB">
+                                <i class="bi bi-exclamation-triangle"></i>
+                            </button>
+                        </div>
                     </td>
                 </tr>
+                {% endfor %}
                 {% endfor %}
             </tbody>
         </table>
         <div id="emptyMsg" class="text-center text-secondary py-3 d-none" style="font-size:0.85rem;">
-            <i class="bi bi-search me-1"></i>Aucun résultat ne correspond au filtre.
+            <i class="bi bi-search me-1"></i>Aucun résultat ne correspond aux filtres.
         </div>
     </div>
     {% endif %}
@@ -124,8 +189,127 @@
 
 {% endblock %}
 
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+    <div id="toast" class="toast align-items-center border-0" role="alert">
+        <div class="d-flex">
+            <div class="toast-body" id="toastMsg"></div>
+            <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+</div>
+
 {% block extra_scripts %}
 <script>
+const CSRF = "{{ csrf_token_gen() }}";
+
+function showToast(msg, isError = false) {
+    const toast = document.getElementById('toast');
+    toast.className = `toast align-items-center border-0 text-bg-${isError ? 'danger' : 'success'}`;
+    document.getElementById('toastMsg').textContent = msg;
+    new bootstrap.Toast(toast, { delay: 3500 }).show();
+}
+
+// ── State ──
+const collapsedGroups = new Set();
+
+// ── Build language filter ──
+function buildFilters() {
+    const langs = new Set();
+    document.querySelectorAll('#tableBody tr[data-group]:not(.group-header)').forEach(row => {
+        (row.dataset.langs || '').split(',').filter(Boolean).forEach(l => langs.add(l));
+    });
+    const langSel = document.getElementById('filterLang');
+    if (langSel) {
+        [...langs].sort().forEach(lang => {
+            const opt = document.createElement('option');
+            opt.value = lang; opt.textContent = lang;
+            langSel.appendChild(opt);
+        });
+    }
+}
+
+// ── Apply all filters ──
+function applyFilters() {
+    const text     = (document.getElementById('searchInput')?.value || '').toLowerCase();
+    const filterLang = document.getElementById('filterLang')?.value || '';
+    const filterType = document.getElementById('filterType')?.value || '';
+
+    document.querySelectorAll('#tableBody tr[data-group]:not(.group-header)').forEach(row => {
+        const passesText = !text || (row.dataset.search || '').toLowerCase().includes(text);
+        const passesLang = !filterLang || (row.dataset.langs || '').split(',').includes(filterLang);
+        const passesType = !filterType || row.dataset.type === filterType;
+        row.dataset.filteredOut = (passesText && passesLang && passesType) ? 'false' : 'true';
+    });
+
+    updateVisibility();
+}
+
+function updateVisibility() {
+    const total = document.querySelectorAll('#tableBody tr[data-group]:not(.group-header)').length;
+    let totalVisible = 0;
+
+    document.querySelectorAll('.group-header').forEach(header => {
+        const group = header.dataset.groupHeader;
+        const rows = document.querySelectorAll(`#tableBody tr[data-group="${CSS.escape(group)}"]:not(.group-header)`);
+        const isCollapsed = collapsedGroups.has(group);
+        let anyPassesFilter = false;
+
+        rows.forEach(row => {
+            const filtered = row.dataset.filteredOut === 'true';
+            if (!filtered) anyPassesFilter = true;
+            row.style.display = (filtered || isCollapsed) ? 'none' : '';
+            if (!filtered && !isCollapsed) totalVisible++;
+        });
+
+        header.style.display = anyPassesFilter ? '' : 'none';
+
+        const icon = header.querySelector('.group-toggle i');
+        if (icon) icon.className = isCollapsed ? 'bi bi-chevron-right' : 'bi bi-chevron-down';
+    });
+
+    const filteredCount = document.getElementById('filteredCount');
+    if (filteredCount) {
+        filteredCount.textContent = totalVisible < total ? `${totalVisible} / ${total} affichés` : '';
+    }
+
+    document.getElementById('emptyMsg')?.classList.toggle('d-none', totalVisible > 0);
+}
+
+// ── Group toggle ──
+function toggleGroup(group) {
+    collapsedGroups.has(group) ? collapsedGroups.delete(group) : collapsedGroups.add(group);
+    updateVisibility();
+}
+
+document.querySelectorAll('.group-header').forEach(header => {
+    header.addEventListener('click', function (e) {
+        if (e.target.closest('button') && !e.target.closest('.group-toggle')) return;
+        toggleGroup(this.dataset.groupHeader);
+    });
+});
+
+document.querySelectorAll('.group-toggle').forEach(btn => {
+    btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleGroup(this.dataset.group);
+    });
+});
+
+// ── Filters ──
+document.getElementById('searchInput')?.addEventListener('input', applyFilters);
+document.getElementById('filterLang')?.addEventListener('change', applyFilters);
+document.getElementById('filterType')?.addEventListener('change', applyFilters);
+document.getElementById('clearFilters')?.addEventListener('click', () => {
+    const si = document.getElementById('searchInput');
+    if (si) si.value = '';
+    const fl = document.getElementById('filterLang');
+    if (fl) fl.value = '';
+    const ft = document.getElementById('filterType');
+    if (ft) ft.value = '';
+    applyFilters();
+});
+
 // ── Copy buttons ──
 document.querySelectorAll('.copy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -137,20 +321,45 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     });
 });
 
-// ── Client-side filter ──
-const searchInput = document.getElementById('searchInput');
-if (searchInput) {
-    searchInput.addEventListener('input', function () {
-        const q = this.value.toLowerCase();
-        let visible = 0;
-        document.querySelectorAll('#tableBody tr').forEach(row => {
-            const show = !q || row.dataset.search.toLowerCase().includes(q);
-            row.style.display = show ? '' : 'none';
-            if (show) visible++;
-        });
-        const empty = document.getElementById('emptyMsg');
-        if (empty) empty.classList.toggle('d-none', visible > 0);
+// ── Mismatch buttons ──
+document.querySelectorAll('.mismatch-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const title = btn.dataset.title.substring(0, 60);
+        if (!confirm(`Signaler comme mismatch ?\n\n"${title}"\n\nLe tmdb_id sera remis à NULL dans la base de données.`)) return;
+
+        const fd = new FormData();
+        fd.append('csrf_token', CSRF);
+        fd.append('info_hash', btn.dataset.hash);
+        fd.append('tmdb_id', btn.dataset.tmdb);
+        fd.append('raw_title', btn.dataset.title);
+        fd.append('indexer', btn.dataset.indexer);
+
+        btn.disabled = true;
+        try {
+            const resp = await fetch('{{ url_for("create_mismatch")(request) }}', { method: 'POST', body: fd });
+            const data = await resp.json();
+            if (resp.ok) {
+                btn.replaceWith(Object.assign(document.createElement('span'), {
+                    className: 'mismatch-badge',
+                    textContent: '⚠ Mismatch'
+                }));
+                showToast('Mismatch signalé — tmdb_id remis à NULL.');
+            } else if (resp.status === 409) {
+                showToast('Déjà signalé comme mismatch.', true);
+                btn.disabled = false;
+            } else {
+                showToast(data.error || 'Erreur lors du signalement.', true);
+                btn.disabled = false;
+            }
+        } catch {
+            showToast('Erreur réseau.', true);
+            btn.disabled = false;
+        }
     });
-}
+});
+
+// ── Init ──
+buildFilters();
+applyFilters();
 </script>
 {% endblock %}
