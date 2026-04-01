@@ -255,7 +255,7 @@ class BaseDebrid:
 
     # TTLs — Redis L1
     _AVAIL_TTL_CACHED     = 10 * 24 * 3600  # 10 days (debrid caches are stable long-term)
-    _AVAIL_TTL_NOT_CACHED = 20 * 60          # 20 minutes (re-check frequently for not-cached)
+    _AVAIL_TTL_NOT_CACHED = 3 * 60 * 60         # 3 hours (re-check frequently for not-cached)
     # TTL — PostgreSQL L2 (persistent, survives Redis restarts)
     _PG_TTL_CACHED        = 30 * 24 * 3600  # 30 days
 
