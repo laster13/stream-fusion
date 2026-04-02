@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% from "_config_macros.html" import render_field, save_button, save_feedback, save_script, config_breadcrumb %}
+{% block title %}Général — Configuration — StreamFusion Admin{% endblock %}
+{% block page_title %}Configuration — Général{% endblock %}
+
+{% block extra_head %}
+<style>
+    .cfg-card { border: 1px solid var(--bs-border-color); border-radius: 10px; background: var(--bs-secondary-bg); overflow: hidden; margin-bottom: 1.25rem; }
+    .cfg-card-header { padding: 13px 20px; border-bottom: 1px solid var(--bs-border-color); font-weight: 600; font-size: 0.875rem; display: flex; align-items: center; gap: 8px; }
+    .cfg-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 20px; border-bottom: 1px solid var(--bs-border-color); gap: 12px; font-size: 0.83rem; min-height: 40px; }
+    .cfg-row:last-child { border-bottom: none; }
+    .cfg-label { color: var(--bs-secondary-color); flex-shrink: 0; }
+    .cfg-value { font-weight: 500; text-align: right; }
+</style>
+{% endblock %}
+
+{% block content %}
+{{ config_breadcrumb('Général') }}
+{{ save_feedback() }}
+
+<form id="cfg-form" method="POST">
+
+    <div class="cfg-card">
+        <div class="cfg-card-header"><i class="bi bi-toggles text-primary"></i> Feature Flags</div>
+        {% for defn in registry_sections.get('general', []) if defn.type == 'bool' %}
+        {{ render_field(defn, effective) }}
+        {% endfor %}
+    </div>
+
+    <div class="cfg-card">
+        <div class="cfg-card-header"><i class="bi bi-cloud-arrow-down text-info"></i> Téléchargement & Logs</div>
+        {% for defn in registry_sections.get('general', []) if defn.type in ('enum', 'int', 'str') %}
+        {{ render_field(defn, effective) }}
+        {% endfor %}
+    </div>
+
+    {{ save_button(url_for('config_general_reset')(request)) }}
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+{{ save_script('cfg-form', url_for('config_general_post')(request), url_for('config_general_reset')(request)) }}
+{% endblock %}

@@ -4,380 +4,412 @@
 
 {% block extra_head %}
 <style>
-    .cfg-card {
+    .config-nav-card {
+        border: 1px solid var(--bs-border-color);
+        border-radius: 10px;
+        background: var(--bs-secondary-bg);
+        padding: 24px;
+        text-decoration: none;
+        color: var(--bs-body-color);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        transition: border-color 0.15s, background 0.15s;
+        height: 100%;
+    }
+    .config-nav-card:hover {
+        border-color: var(--bs-primary);
+        background: var(--bs-tertiary-bg);
+        color: var(--bs-body-color);
+    }
+    .config-nav-card .card-icon { font-size: 1.8rem; opacity: 0.8; }
+    .config-nav-card .card-title { font-weight: 600; font-size: 1rem; }
+    .config-nav-card .card-desc { font-size: 0.82rem; color: var(--bs-secondary-color); }
+    .config-nav-card .card-count { font-size: 0.75rem; color: var(--bs-secondary-color); margin-top: auto; }
+
+    /* Doc sections */
+    .doc-section {
         border: 1px solid var(--bs-border-color);
         border-radius: 10px;
         background: var(--bs-secondary-bg);
         overflow: hidden;
-        height: 100%;
+        margin-top: 2rem;
     }
-    .cfg-card-header {
-        padding: 13px 20px;
+    .doc-section-header {
+        padding: 14px 20px;
         border-bottom: 1px solid var(--bs-border-color);
         font-weight: 600;
-        font-size: 0.875rem;
+        font-size: 0.9rem;
         display: flex;
         align-items: center;
-        gap: 8px;
-    }
-    .cfg-row {
-        display: flex;
         justify-content: space-between;
-        align-items: center;
-        padding: 8px 20px;
-        border-bottom: 1px solid var(--bs-border-color);
-        gap: 12px;
-        font-size: 0.83rem;
-        min-height: 38px;
+        cursor: pointer;
+        user-select: none;
     }
-    .cfg-row:last-child { border-bottom: none; }
-    .cfg-label {
-        color: var(--bs-secondary-color);
-        flex-shrink: 0;
-    }
-    .cfg-value {
-        font-weight: 500;
-        text-align: right;
-        word-break: break-all;
-    }
-    .cfg-mono {
-        font-family: var(--bs-font-monospace);
-        font-size: 0.8rem;
-        color: var(--bs-body-color);
-    }
+    .doc-section-header:hover { background: var(--bs-tertiary-bg); }
+    .doc-section-body { padding: 20px 24px; font-size: 0.855rem; line-height: 1.65; }
 
-    /* Indexer table */
-    .idx-table {
-        width: 100%;
-        font-size: 0.82rem;
-        border-collapse: collapse;
+    /* Proxy guide */
+    .proxy-block {
+        border-left: 3px solid var(--bs-primary);
+        padding: 10px 16px;
+        background: var(--bs-tertiary-bg);
+        border-radius: 0 6px 6px 0;
+        margin-bottom: 1rem;
     }
-    .idx-table th {
-        padding: 8px 20px;
-        color: var(--bs-secondary-color);
-        font-weight: 500;
-        border-bottom: 1px solid var(--bs-border-color);
-        text-align: left;
-    }
-    .idx-table td {
-        padding: 8px 20px;
-        border-bottom: 1px solid var(--bs-border-color);
-        vertical-align: middle;
-    }
-    .idx-table tr:last-child td { border-bottom: none; }
+    .proxy-block h6 { font-weight: 600; margin-bottom: 6px; font-size: 0.875rem; }
+    .proxy-table { font-size: 0.8rem; width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+    .proxy-table th { padding: 7px 12px; border: 1px solid var(--bs-border-color); background: var(--bs-tertiary-bg); font-weight: 500; text-align: left; }
+    .proxy-table td { padding: 7px 12px; border: 1px solid var(--bs-border-color); font-family: var(--bs-font-monospace); font-size: 0.78rem; }
+
+    /* Env vars */
+    .env-category { margin-bottom: 1.5rem; }
+    .env-category:last-child { margin-bottom: 0; }
+    .env-category-title { font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--bs-secondary-color); margin-bottom: 0.5rem; }
+    .env-var-row { display: grid; grid-template-columns: 220px 1fr; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--bs-border-color); align-items: start; }
+    .env-var-row:last-child { border-bottom: none; }
+    .env-var-name { font-family: var(--bs-font-monospace); font-size: 0.8rem; color: var(--bs-primary); font-weight: 500; padding-top: 1px; }
+    .env-var-desc { font-size: 0.82rem; color: var(--bs-body-color); }
+    .env-var-desc small { display: block; color: var(--bs-secondary-color); margin-top: 2px; font-size: 0.77rem; }
 </style>
 {% endblock %}
 
 {% block content %}
 
-{% if cfg.session_key_is_default %}
-<div class="alert alert-danger d-flex align-items-center gap-2 mb-4" role="alert" style="font-size:0.875rem;">
-    <i class="bi bi-shield-exclamation fs-5 flex-shrink-0"></i>
-    <div>
-        <strong>Avertissement de sécurité :</strong> La variable <code>SESSION_KEY</code> utilise la valeur par défaut non sécurisée.
-        Définissez <code>SESSION_KEY</code> dans vos variables d'environnement avec une valeur unique et secrète.
-    </div>
-</div>
-{% endif %}
+<!-- ── Navigation ──────────────────────────────────────────────────────────── -->
+<p class="text-secondary mb-4" style="font-size:0.9rem;">
+    Sélectionnez une catégorie pour configurer les paramètres de l'instance.
+    Les variables d'environnement (tokens, credentials) restent en lecture seule.
+</p>
 
 <div class="row g-3">
-
-    <!-- Général -->
-    <div class="col-md-6">
-        <div class="cfg-card">
-            <div class="cfg-card-header">
-                <i class="bi bi-gear text-primary"></i> Général
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Hôte</span>
-                <span class="cfg-value cfg-mono">{{ cfg.general.host }}:{{ cfg.general.port }}</span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Workers</span>
-                <span class="cfg-value">{{ cfg.general.workers_count }}</span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">HTTPS</span>
-                <span class="cfg-value">
-                    {% if cfg.general.use_https %}<span class="badge bg-success">Activé</span>{% else %}<span class="badge bg-secondary">Désactivé</span>{% endif %}
-                </span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Log level</span>
-                <span class="cfg-value cfg-mono">{{ cfg.general.log_level }}</span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Debug</span>
-                <span class="cfg-value">
-                    {% if cfg.general.debug %}<span class="badge bg-warning text-dark">Activé</span>{% else %}<span class="badge bg-secondary">Désactivé</span>{% endif %}
-                </span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Debrid downloads</span>
-                <span class="cfg-value">
-                    {% if cfg.general.allow_debrid_download %}<span class="badge bg-success">Autorisé</span>{% else %}<span class="badge bg-secondary">Masqué</span>{% endif %}
-                </span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Service préféré</span>
-                <span class="cfg-value">
-                    {% if cfg.general.download_service %}<span class="cfg-mono">{{ cfg.general.download_service }}</span>{% else %}<span class="text-secondary">Non défini</span>{% endif %}
-                </span>
-            </div>
-        </div>
+    <div class="col-md-4 col-sm-6">
+        <a href="{{ url_for('config_general_get')(request) }}" class="config-nav-card">
+            <i class="bi bi-gear-fill text-primary card-icon"></i>
+            <span class="card-title">Général</span>
+            <span class="card-desc">Feature flags, service debrid, log level, timeouts HTTP.</span>
+            <span class="card-count"><i class="bi bi-sliders me-1"></i>{{ page_counts.get('general', 0) }} paramètres</span>
+        </a>
     </div>
-
-    <!-- Sécurité -->
-    <div class="col-md-6">
-        <div class="cfg-card">
-            <div class="cfg-card-header">
-                <i class="bi bi-shield-lock text-warning"></i> Sécurité
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">SESSION_KEY</span>
-                <span class="cfg-value">
-                    {% if cfg.security.session_key_is_default %}
-                        <span class="badge bg-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>Défaut — non sécurisé</span>
-                    {% else %}
-                        <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Personnalisé</span>
-                    {% endif %}
-                </span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Clé API secrète</span>
-                <span class="cfg-value">
-                    {% if cfg.security.secret_api_key_set %}<span class="badge bg-success">Configurée</span>{% else %}<span class="badge bg-secondary">Non configurée</span>{% endif %}
-                </span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">CONFIG_SECRET_KEY</span>
-                <span class="cfg-value">
-                    {% if cfg.security.config_secret_key_set %}
-                        <span class="badge bg-success"><i class="bi bi-shield-lock-fill me-1"></i>Configurée</span>
-                    {% else %}
-                        <span class="badge bg-danger"><i class="bi bi-shield-exclamation me-1"></i>Non configurée — Base64 seulement</span>
-                    {% endif %}
-                </span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Masquer la doc API</span>
-                <span class="cfg-value">
-                    {% if cfg.security.security_hide_docs %}<span class="badge bg-success">Oui</span>{% else %}<span class="badge bg-warning text-dark">Non</span>{% endif %}
-                </span>
-            </div>
-        </div>
+    <div class="col-md-4 col-sm-6">
+        <a href="{{ url_for('config_proxy_get')(request) }}" class="config-nav-card">
+            <i class="bi bi-hdd-network text-secondary card-icon"></i>
+            <span class="card-title">Proxy & Rate Limits</span>
+            <span class="card-desc">Proxy de lecture, buffer, limites de requêtes par utilisateur.</span>
+            <span class="card-count"><i class="bi bi-sliders me-1"></i>{{ page_counts.get('proxy', 0) }} paramètres</span>
+        </a>
     </div>
-
-    <!-- Services Debrid -->
-    <div class="col-12">
-        <div class="cfg-card">
-            <div class="cfg-card-header">
-                <i class="bi bi-cloud-arrow-down text-info"></i> Services Debrid
-            </div>
-            <table class="idx-table">
-                <thead>
-                    <tr>
-                        <th>Service</th>
-                        <th>Token / Credentials</th>
-                        <th>Compte unique</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for svc in cfg.debrid %}
-                    <tr>
-                        <td class="fw-500">{{ svc.name }}</td>
-                        <td>
-                            {% if svc.token_set %}
-                                <span class="badge bg-success">Configuré</span>
-                            {% else %}
-                                <span class="badge bg-secondary text-white-50">Non configuré</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if svc.unique %}
-                                <span class="badge bg-primary">Serveur</span>
-                            {% else %}
-                                <span class="badge bg-secondary text-white-50">Non</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+    <div class="col-md-4 col-sm-6">
+        <a href="{{ url_for('config_cache_get')(request) }}" class="config-nav-card">
+            <i class="bi bi-hdd-stack text-danger card-icon"></i>
+            <span class="card-title">Cache & Scheduler</span>
+            <span class="card-desc">TTL Redis, refresh indexeurs, planificateur de nettoyage.</span>
+            <span class="card-count"><i class="bi bi-sliders me-1"></i>{{ page_counts.get('cache', 0) }} paramètres</span>
+        </a>
     </div>
-
-    <!-- Proxy -->
-    <div class="col-md-6">
-        <div class="cfg-card">
-            <div class="cfg-card-header">
-                <i class="bi bi-hdd-network text-secondary"></i> Proxy
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Proxy URL</span>
-                <span class="cfg-value cfg-mono">
-                    {% if cfg.proxy.proxy_url %}{{ cfg.proxy.proxy_url }}{% else %}<span class="text-secondary">Non configuré</span>{% endif %}
-                </span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Playback proxy</span>
-                <span class="cfg-value">
-                    {% if cfg.proxy.playback_proxy is none %}<span class="badge bg-secondary">Auto</span>
-                    {% elif cfg.proxy.playback_proxy %}<span class="badge bg-success">Activé</span>
-                    {% else %}<span class="badge bg-secondary">Désactivé</span>{% endif %}
-                </span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Buffer size</span>
-                <span class="cfg-value">{{ cfg.proxy.proxy_buffer_size_kb }} KB</span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Rate limit</span>
-                <span class="cfg-value">{{ cfg.proxy.playback_limit_requests }} req / {{ cfg.proxy.playback_limit_seconds }}s</span>
-            </div>
-        </div>
+    <div class="col-md-4 col-sm-6">
+        <a href="{{ url_for('config_indexers_get')(request) }}" class="config-nav-card">
+            <i class="bi bi-search text-info card-icon"></i>
+            <span class="card-title">Indexeurs</span>
+            <span class="card-desc">Activation et URLs de chaque indexeur torrent.</span>
+            <span class="card-count"><i class="bi bi-sliders me-1"></i>{{ page_counts.get('indexers', 0) }} paramètres</span>
+        </a>
     </div>
-
-    <!-- Peer -->
-    <div class="col-md-6">
-        <div class="cfg-card">
-            <div class="cfg-card-header">
-                <i class="bi bi-diagram-3 text-success"></i> Peer Cache
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">URL Peer</span>
-                <span class="cfg-value cfg-mono">
-                    {% if cfg.peer.url %}{{ cfg.peer.url }}{% else %}<span class="text-secondary">Non configuré</span>{% endif %}
-                </span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Key ID</span>
-                <span class="cfg-value">
-                    {% if cfg.peer.key_id_set %}<span class="badge bg-success">Configuré</span>{% else %}<span class="badge bg-secondary">Non configuré</span>{% endif %}
-                </span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Secret</span>
-                <span class="cfg-value">
-                    {% if cfg.peer.secret_set %}<span class="badge bg-success">Configuré</span>{% else %}<span class="badge bg-secondary">Non configuré</span>{% endif %}
-                </span>
-            </div>
-        </div>
+    <div class="col-md-4 col-sm-6">
+        <a href="{{ url_for('config_tmdb_get')(request) }}" class="config-nav-card">
+            <i class="bi bi-film text-warning card-icon"></i>
+            <span class="card-title">TMDB</span>
+            <span class="card-desc">Langue de l'API TMDB et vidéo no-cache.</span>
+            <span class="card-count"><i class="bi bi-sliders me-1"></i>{{ page_counts.get('tmdb', 0) }} paramètres</span>
+        </a>
     </div>
-
-    <!-- Indexeurs -->
-    <div class="col-12">
-        <div class="cfg-card">
-            <div class="cfg-card-header">
-                <i class="bi bi-search text-primary"></i> Indexeurs
-            </div>
-            <table class="idx-table">
-                <thead>
-                    <tr>
-                        <th>Indexeur</th>
-                        <th>Activé</th>
-                        <th>URL</th>
-                        <th>Clé / Passkey</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for idx in cfg.indexers %}
-                    <tr>
-                        <td class="fw-500">{{ idx.name }}</td>
-                        <td>
-                            {% if idx.enabled %}
-                                <span class="badge bg-success">Oui</span>
-                            {% else %}
-                                <span class="badge bg-secondary text-white-50">Non</span>
-                            {% endif %}
-                        </td>
-                        <td class="cfg-mono" style="color:var(--bs-secondary-color);font-size:0.78rem;">{{ idx.url }}</td>
-                        <td>
-                            {% if idx.key_set is none %}
-                                <span class="text-secondary" style="font-size:0.78rem;">—</span>
-                            {% elif idx.key_set %}
-                                <span class="badge bg-success">Configurée</span>
-                            {% else %}
-                                <span class="badge bg-secondary text-white-50">Non configurée</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+    <div class="col-md-4 col-sm-6">
+        <a href="{{ url_for('config_system_get')(request) }}" class="config-nav-card">
+            <i class="bi bi-cpu text-success card-icon"></i>
+            <span class="card-title">Système</span>
+            <span class="card-desc">Pool PostgreSQL, workers, infos connexions (lecture seule).</span>
+            <span class="card-count"><i class="bi bi-sliders me-1"></i>{{ page_counts.get('system', 0) }} paramètres</span>
+        </a>
     </div>
-
-    <!-- TMDB -->
-    <div class="col-md-4">
-        <div class="cfg-card">
-            <div class="cfg-card-header">
-                <i class="bi bi-film text-warning"></i> TMDB
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Langue</span>
-                <span class="cfg-value cfg-mono">{{ cfg.tmdb.language }}</span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">API Key</span>
-                <span class="cfg-value">
-                    {% if cfg.tmdb.api_key_set %}<span class="badge bg-success">Configurée</span>{% else %}<span class="badge bg-secondary">Non configurée</span>{% endif %}
-                </span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Redis -->
-    <div class="col-md-4">
-        <div class="cfg-card">
-            <div class="cfg-card-header">
-                <i class="bi bi-hdd-stack text-danger"></i> Redis
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Hôte</span>
-                <span class="cfg-value cfg-mono">{{ cfg.redis.host }}:{{ cfg.redis.port }}</span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Base (DB)</span>
-                <span class="cfg-value cfg-mono">{{ cfg.redis.db }}</span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Expiration</span>
-                <span class="cfg-value">{{ cfg.redis.expiration_days }} jours</span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Mot de passe</span>
-                <span class="cfg-value">
-                    {% if cfg.redis.password_set %}<span class="badge bg-success">Configuré</span>{% else %}<span class="badge bg-secondary">Non configuré</span>{% endif %}
-                </span>
-            </div>
-        </div>
-    </div>
-
-    <!-- PostgreSQL -->
-    <div class="col-md-4">
-        <div class="cfg-card">
-            <div class="cfg-card-header">
-                <i class="bi bi-database text-primary"></i> PostgreSQL
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Hôte</span>
-                <span class="cfg-value cfg-mono">{{ cfg.postgresql.host }}:{{ cfg.postgresql.port }}</span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Base</span>
-                <span class="cfg-value cfg-mono">{{ cfg.postgresql.database }}</span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Utilisateur</span>
-                <span class="cfg-value cfg-mono">{{ cfg.postgresql.user }}</span>
-            </div>
-            <div class="cfg-row">
-                <span class="cfg-label">Pool size</span>
-                <span class="cfg-value">{{ cfg.postgresql.pool_size }} (overflow +{{ cfg.postgresql.max_overflow }})</span>
-            </div>
-        </div>
-    </div>
-
 </div>
+
+
+<!-- ── Guide proxy ─────────────────────────────────────────────────────────── -->
+<div class="doc-section">
+    <div class="doc-section-header" onclick="toggleSection('proxy-guide')">
+        <span><i class="bi bi-diagram-2 text-primary me-2"></i>Guide — Comprendre les options de proxy</span>
+        <i class="bi bi-chevron-down" id="proxy-guide-chevron"></i>
+    </div>
+    <div class="doc-section-body" id="proxy-guide" style="display:none;">
+
+        <div class="proxy-block" style="border-left-color: #0d6efd;">
+            <h6><i class="bi bi-box-seam me-1"></i> StremThru — à quoi ça sert ?</h6>
+            <p class="mb-0">
+                StremThru est un intermédiaire qui fait transiter les appels API debrid via une IP tierce plutôt que celle de votre serveur.
+                Par défaut, Stream-Fusion utilise une <strong>instance publique partagée</strong> (<code>stremthru.13377001.xyz</code>).
+                Dans ce mode, l'application <strong>ne proxifie pas les liens de streaming</strong> — le flux vidéo va directement du CDN du débrider à votre client Stremio.
+                StremThru n'intervient que pour les vérifications de cache et la génération du lien.
+            </p>
+            <p class="mt-2 mb-0">
+                Si vous hébergez <strong>votre propre instance StremThru</strong>, vous pouvez configurer les variables d'environnement correspondantes
+                pour proxifier les liens CDN via votre propre infrastructure.
+            </p>
+            <p class="mt-2 mb-1"><strong>⚠️ Note cache :</strong> Quand StremThru est activé, les vérifications de cache n'utilisent plus l'API native de votre débrider
+                — elles passent uniquement par le cache communautaire de l'instance. Des torrents présents dans votre compte personnel
+                peuvent donc ne pas être détectés comme disponibles, ce qui peut réduire le nombre de résultats affichés.</p>
+        </div>
+
+        <div class="proxy-block" style="border-left-color: #fd7e14;">
+            <h6><i class="bi bi-shield-fill-check me-1"></i> WARP — pourquoi c'est là ?</h6>
+            <p class="mb-0">
+                Stream-Fusion embarque un container <strong>Cloudflare WARP</strong> qui fait transiter tous les appels API debrid
+                (vérifications de cache, génération de liens) par une IP Cloudflare fixe plutôt que l'IP brute de votre serveur.
+            </p>
+            <p class="mt-2 mb-0">
+                À une certaine époque, <strong>AllDebrid bloquait les IP de serveurs</strong> au niveau de ses appels API.
+                WARP permet de contourner ça en présentant une IP Cloudflare "propre".
+            </p>
+        </div>
+
+        <div class="proxy-block" style="border-left-color: #198754;">
+            <h6><i class="bi bi-camera-video me-1"></i> Proxification du streaming — pour qui, pourquoi ?</h6>
+            <p class="mb-0">Voici le fonctionnement normal :</p>
+            <p class="mt-1 mb-1" style="font-family:var(--bs-font-monospace);font-size:0.8rem;padding:6px 12px;background:var(--bs-tertiary-bg);border-radius:4px;">
+                Clic sur un résultat → Stream-Fusion génère un lien CDN → Stremio télécharge le flux <strong>directement</strong> depuis ce CDN
+            </p>
+            <p class="mb-1">
+                Dans ce cas, <strong>c'est l'IP depuis laquelle vous regardez la vidéo</strong> qui est vue par le débrider, pas celle du serveur.
+                <strong>Si vous avez un compte par personne, il n'y a aucune raison de proxifier le streaming.</strong>
+            </p>
+            <p class="mb-1">
+                Le problème survient quand <strong>plusieurs personnes utilisent le même compte</strong> : le débrider voit plusieurs IP différentes
+                accéder au même fichier en simultané, ce qui lève une alerte de partage de compte.
+            </p>
+            <p class="mb-1">
+                Pour pallier ça, Stream-Fusion propose un <strong>mode proxy streaming</strong> (<code>proxied_link</code>) : le serveur se place
+                en relai entre vous et le CDN. Le débrider ne voit plus que l'IP du serveur, quelle que soit l'IP des utilisateurs derrière.
+            </p>
+            <p class="mb-0">
+                L'option <code>playback_proxy</code> permet en plus de faire transiter ce relai <strong>à travers WARP</strong>.
+                Utile si l'IP de votre serveur elle-même est bloquée (certains VPS Oracle avaient ce problème).
+            </p>
+        </div>
+
+        <h6 class="mt-3 mb-2" style="font-size:0.82rem;font-weight:600;color:var(--bs-secondary-color);text-transform:uppercase;letter-spacing:.05em;">Résumé</h6>
+        <div class="table-responsive">
+            <table class="proxy-table">
+                <thead>
+                    <tr>
+                        <th>Situation</th>
+                        <th>IP vue par l'API debrid</th>
+                        <th>IP vue par le CDN (stream)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>Natif + WARP</td><td>IP Cloudflare WARP</td><td>IP de votre player</td></tr>
+                    <tr><td>proxied_link activé</td><td>IP Cloudflare WARP</td><td>IP du serveur</td></tr>
+                    <tr><td>proxied_link + playback_proxy WARP</td><td>IP Cloudflare WARP</td><td>IP Cloudflare WARP</td></tr>
+                    <tr><td>StremThru public</td><td>IP instance publique</td><td>IP de votre player</td></tr>
+                    <tr><td>StremThru self-hosted</td><td>IP de votre serveur</td><td>IP de votre serveur</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+</div>
+
+
+<!-- ── Variables d'environnement ──────────────────────────────────────────── -->
+<div class="doc-section">
+    <div class="doc-section-header" onclick="toggleSection('env-vars')">
+        <span><i class="bi bi-terminal text-warning me-2"></i>Référence — Variables d'environnement (lecture seule)</span>
+        <i class="bi bi-chevron-down" id="env-vars-chevron"></i>
+    </div>
+    <div class="doc-section-body" id="env-vars" style="display:none;">
+        <p class="text-secondary mb-4" style="font-size:0.82rem;">
+            Ces variables doivent être définies dans votre fichier <code>.env</code> ou en tant que secrets Docker/Kubernetes.
+            Elles ne peuvent pas être modifiées depuis l'interface admin car elles contiennent des secrets ou des paramètres d'infrastructure.
+        </p>
+
+        <!-- Sécurité -->
+        <div class="env-category">
+            <div class="env-category-title"><i class="bi bi-shield-lock me-1"></i> Sécurité</div>
+            <div class="env-var-row">
+                <span class="env-var-name">SESSION_KEY</span>
+                <span class="env-var-desc">Clé secrète utilisée par Starlette pour signer les cookies de session admin. Doit être une chaîne hexadécimale longue et unique. Si absente, la valeur par défaut non sécurisée est utilisée — un avertissement s'affiche au démarrage.
+                    <small>Exemple : <code>openssl rand -hex 32</code></small>
+                </span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">SECRET_API_KEY</span>
+                <span class="env-var-desc">Clé secrète utilisée pour l'authentification admin de l'API REST (<code>/api/admin/*</code>). Si absente, ces endpoints sont inaccessibles.
+                    <small>Exemple : une chaîne aléatoire de 32+ caractères</small>
+                </span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">CONFIG_SECRET_KEY</span>
+                <span class="env-var-desc">Clé Fernet (32 bytes base64url) utilisée pour chiffrer les tokens de configuration embarqués dans les URLs d'addon Stremio. Si absente, les tokens ne sont qu'encodés en Base64 (réversible). <strong>Ne jamais changer après mise en production</strong> — cela invalide toutes les URLs existantes.
+                    <small>Générer : <code>python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"</code></small>
+                </span>
+            </div>
+        </div>
+
+        <!-- Services Debrid -->
+        <div class="env-category">
+            <div class="env-category-title"><i class="bi bi-cloud-arrow-down me-1"></i> Services Debrid</div>
+            <div class="env-var-row">
+                <span class="env-var-name">RD_TOKEN</span>
+                <span class="env-var-desc">Token d'API Real-Debrid. Active automatiquement <code>proxied_link</code> et <code>rd_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">AD_TOKEN</span>
+                <span class="env-var-desc">Token d'API AllDebrid. Active automatiquement <code>proxied_link</code> et <code>ad_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">TB_TOKEN</span>
+                <span class="env-var-desc">Token d'API TorBox. Active <code>tb_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">PM_TOKEN</span>
+                <span class="env-var-desc">Token d'API Premiumize. Active <code>pm_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">DL_TOKEN</span>
+                <span class="env-var-desc">Token d'API Debrid-Link. Active <code>dl_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">ED_TOKEN</span>
+                <span class="env-var-desc">Token d'API EasyDebrid. Active <code>ed_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">OC_CREDENTIALS</span>
+                <span class="env-var-desc">Credentials Offcloud au format <code>email:password</code>. Active <code>oc_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">PP_CREDENTIALS</span>
+                <span class="env-var-desc">Credentials PikPak au format <code>email:password</code>. Active <code>pp_unique_account</code>.</span>
+            </div>
+        </div>
+
+        <!-- Proxy & Réseau -->
+        <div class="env-category">
+            <div class="env-category-title"><i class="bi bi-hdd-network me-1"></i> Proxy & Réseau</div>
+            <div class="env-var-row">
+                <span class="env-var-name">PROXY_URL</span>
+                <span class="env-var-desc">URL du proxy sortant (SOCKS5 ou HTTP) utilisé pour les appels API debrid et optionnellement pour le streaming. Active automatiquement <code>ad_use_proxy</code>.
+                    <small>Exemples : <code>socks5://user:pass@host:1080</code> &nbsp;|&nbsp; <code>http://proxy:8080</code></small>
+                </span>
+            </div>
+        </div>
+
+        <!-- Base de données -->
+        <div class="env-category">
+            <div class="env-category-title"><i class="bi bi-database me-1"></i> Base de données PostgreSQL</div>
+            <div class="env-var-row">
+                <span class="env-var-name">PG_HOST</span>
+                <span class="env-var-desc">Nom d'hôte ou IP du serveur PostgreSQL. En Docker Compose : nom du service.
+                    <small>Défaut : <code>stremio-postgres</code></small></span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">PG_PORT</span>
+                <span class="env-var-desc">Port TCP de PostgreSQL. <small>Défaut : <code>5432</code></small></span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">PG_USER</span>
+                <span class="env-var-desc">Nom d'utilisateur PostgreSQL. <small>Défaut : <code>streamfusion</code></small></span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">PG_PASS</span>
+                <span class="env-var-desc">Mot de passe PostgreSQL. Doit correspondre à l'utilisateur PG_USER.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">PG_BASE</span>
+                <span class="env-var-desc">Nom de la base de données PostgreSQL à utiliser. <small>Défaut : <code>streamfusion</code></small></span>
+            </div>
+        </div>
+
+        <!-- Redis -->
+        <div class="env-category">
+            <div class="env-category-title"><i class="bi bi-hdd-stack me-1"></i> Redis</div>
+            <div class="env-var-row">
+                <span class="env-var-name">REDIS_HOST</span>
+                <span class="env-var-desc">Nom d'hôte du serveur Redis. <small>Défaut : <code>redis</code></small></span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">REDIS_PORT</span>
+                <span class="env-var-desc">Port TCP de Redis. <small>Défaut : <code>6379</code></small></span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">REDIS_PASSWORD</span>
+                <span class="env-var-desc">Mot de passe Redis (optionnel). Laisser vide si Redis n'a pas d'authentification.</span>
+            </div>
+        </div>
+
+        <!-- TMDB -->
+        <div class="env-category">
+            <div class="env-category-title"><i class="bi bi-film me-1"></i> TMDB</div>
+            <div class="env-var-row">
+                <span class="env-var-name">TMDB_API_KEY</span>
+                <span class="env-var-desc">Clé d'API The Movie Database (v3). Obligatoire — sans elle, la résolution des métadonnées films/séries est non fonctionnelle.
+                    <small>Obtenir sur <code>themoviedb.org/settings/api</code></small>
+                </span>
+            </div>
+        </div>
+
+        <!-- Indexeurs -->
+        <div class="env-category">
+            <div class="env-category-title"><i class="bi bi-search me-1"></i> Indexeurs — Clés API &amp; Passkeys</div>
+            <div class="env-var-row">
+                <span class="env-var-name">JACKETT_API_KEY</span>
+                <span class="env-var-desc">Clé API de l'instance Jackett. Active automatiquement <code>jackett_enable</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">YGG_PASSKEY</span>
+                <span class="env-var-desc">Passkey YGG personnelle (pour les announce URLs de torrent). Requise si <code>ygg_unique_account</code> est activé.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">C411_API_KEY / C411_PASSKEY</span>
+                <span class="env-var-desc">Clé API et passkey C411. La clé API active <code>c411_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">TORR9_API_KEY</span>
+                <span class="env-var-desc">Clé API Torr9. Active <code>torr9_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">LACALE_API_KEY</span>
+                <span class="env-var-desc">Clé API LaCale. Active <code>lacale_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">GENERATIONFREE_API_KEY / GENERATIONFREE_PASSKEY</span>
+                <span class="env-var-desc">Clé API et passkey GénérationFree. La clé active <code>generationfree_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">ABN_API_KEY / ABN_PASSKEY</span>
+                <span class="env-var-desc">Clé API et passkey ABN (Abnormal). La clé active <code>abn_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">G3MINI_API_KEY / G3MINI_PASSKEY</span>
+                <span class="env-var-desc">Clé API et passkey G3Mini. La clé active <code>g3mini_unique_account</code>.</span>
+            </div>
+            <div class="env-var-row">
+                <span class="env-var-name">THEOLDSCHOOL_API_KEY / THEOLDSCHOOL_PASSKEY</span>
+                <span class="env-var-desc">Clé API et passkey TheOldSchool. La clé active <code>theoldschool_unique_account</code>.</span>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function toggleSection(id) {
+    const body    = document.getElementById(id);
+    const chevron = document.getElementById(id + '-chevron');
+    const open    = body.style.display !== 'none';
+    body.style.display    = open ? 'none' : '';
+    chevron.className     = open ? 'bi bi-chevron-down' : 'bi bi-chevron-up';
+}
+</script>
 {% endblock %}

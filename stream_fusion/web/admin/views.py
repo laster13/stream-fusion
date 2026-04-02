@@ -1208,8 +1208,286 @@ async def config_page(
 ):
     if isinstance(authenticated, RedirectResponse):
         return authenticated
+    from stream_fusion.services.settings.settings_registry import REGISTRY_BY_CATEGORY, PAGE_CATEGORIES
+    # Build summary: count of settings per sub-page
+    page_counts = {
+        page: sum(len(REGISTRY_BY_CATEGORY.get(cat, [])) for cat in cats)
+        for page, cats in PAGE_CATEGORIES.items()
+    }
+    return templates.TemplateResponse(
+        "config_page.html",
+        {"request": request, "page_counts": page_counts},
+    )
+
+
+async def _get_settings_service(request: Request):
+    from stream_fusion.services.settings.settings_service import SettingsService
+    return request.app.state.settings_service
+
+
+async def _config_subpage(
+    request: Request,
+    page_name: str,
+    template_name: str,
+    authenticated,
+    extra_ctx: dict = None,
+):
+    """Shared logic for all config sub-pages (GET)."""
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+    from stream_fusion.services.settings.settings_registry import (
+        REGISTRY_BY_CATEGORY, PAGE_CATEGORIES, SETTINGS_REGISTRY,
+    )
+    svc = await _get_settings_service(request)
+    effective = await svc.get_all_effective()
+    cats = PAGE_CATEGORIES.get(page_name, [])
+    registry_sections = {cat: REGISTRY_BY_CATEGORY.get(cat, []) for cat in cats}
+    ctx = {
+        "request": request,
+        "effective": effective,
+        "registry_sections": registry_sections,
+        "page_name": page_name,
+    }
+    if extra_ctx:
+        ctx.update(extra_ctx)
+    return templates.TemplateResponse(template_name, ctx)
+
+
+async def _config_subpage_post(request: Request, page_name: str, authenticated):
+    """Shared logic for all config sub-pages (POST)."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    from stream_fusion.services.settings.settings_registry import (
+        REGISTRY_BY_KEY, PAGE_CATEGORIES, REGISTRY_BY_CATEGORY,
+    )
+    svc = await _get_settings_service(request)
+    form = await request.form()
+
+    # Collect all keys that belong to this page's categories
+    cats = PAGE_CATEGORIES.get(page_name, [])
+    page_keys = {
+        defn.key
+        for cat in cats
+        for defn in REGISTRY_BY_CATEGORY.get(cat, [])
+    }
+
+    updates: dict[str, str] = {}
+    validation_errors: list[str] = []
+
+    for key in page_keys:
+        defn = REGISTRY_BY_KEY.get(key)
+        if defn is None:
+            continue
+        raw = form.get(key)
+        if raw is None:
+            # Unchecked checkboxes don't appear in form data — treat as False
+            if defn.type == "bool":
+                updates[key] = "false"
+            continue
+        try:
+            svc._coerce(key, str(raw))
+            updates[key] = str(raw)
+        except (ValueError, TypeError) as exc:
+            validation_errors.append(f"{defn.label}: {exc}")
+
+    if validation_errors:
+        return JSONResponse({"success": False, "errors": validation_errors}, status_code=422)
+
+    requires_restart = await svc.set_many(updates)
+    logger.info(
+        f"Admin: config/{page_name} — saved {len(updates)} setting(s), "
+        f"{len(requires_restart)} require restart"
+    )
+    return JSONResponse({
+        "success": True,
+        "saved": len(updates),
+        "requires_restart": requires_restart,
+    })
+
+
+# ── Config sub-pages ──────────────────────────────────────────────────────────
+
+@router.get("/config/general", response_class=HTMLResponse)
+async def config_general_get(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    return await _config_subpage(request, "general", "config_general.html", authenticated)
+
+
+@router.post("/config/general")
+async def config_general_post(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_post(request, "general", authenticated)
+
+
+@router.get("/config/proxy", response_class=HTMLResponse)
+async def config_proxy_get(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    return await _config_subpage(request, "proxy", "config_proxy.html", authenticated)
+
+
+@router.post("/config/proxy")
+async def config_proxy_post(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_post(request, "proxy", authenticated)
+
+
+@router.get("/config/cache", response_class=HTMLResponse)
+async def config_cache_get(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    return await _config_subpage(request, "cache", "config_cache.html", authenticated)
+
+
+@router.post("/config/cache")
+async def config_cache_post(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_post(request, "cache", authenticated)
+
+
+@router.get("/config/indexers", response_class=HTMLResponse)
+async def config_indexers_get(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    return await _config_subpage(request, "indexers", "config_indexers.html", authenticated)
+
+
+@router.post("/config/indexers")
+async def config_indexers_post(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_post(request, "indexers", authenticated)
+
+
+@router.get("/config/tmdb", response_class=HTMLResponse)
+async def config_tmdb_get(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
     cfg = _build_config_view(settings)
-    return templates.TemplateResponse("config_page.html", {"request": request, "cfg": cfg})
+    return await _config_subpage(
+        request, "tmdb", "config_tmdb.html", authenticated,
+        extra_ctx={"cfg_readonly": cfg},
+    )
+
+
+@router.post("/config/tmdb")
+async def config_tmdb_post(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_post(request, "tmdb", authenticated)
+
+
+@router.get("/config/system", response_class=HTMLResponse)
+async def config_system_get(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    cfg = _build_config_view(settings)
+    return await _config_subpage(
+        request, "system", "config_system.html", authenticated,
+        extra_ctx={"cfg_readonly": cfg},
+    )
+
+
+@router.post("/config/system")
+async def config_system_post(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_post(request, "system", authenticated)
+
+
+# ── Config reset routes ───────────────────────────────────────────────────────
+
+async def _config_subpage_reset(request: Request, page_name: str, authenticated):
+    """Restore all settings of a page to their original env-var defaults."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    from stream_fusion.services.settings.settings_registry import PAGE_CATEGORIES, REGISTRY_BY_CATEGORY
+    svc = await _get_settings_service(request)
+    cats = PAGE_CATEGORIES.get(page_name, [])
+    keys = [
+        defn.key
+        for cat in cats
+        for defn in REGISTRY_BY_CATEGORY.get(cat, [])
+    ]
+    requires_restart = await svc.reset_many(keys)
+    logger.info(f"Admin: config/{page_name} — reset {len(keys)} setting(s) to env defaults")
+    return JSONResponse({"success": True, "reset": len(keys), "requires_restart": requires_restart})
+
+
+@router.post("/config/general/reset")
+async def config_general_reset(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_reset(request, "general", authenticated)
+
+
+@router.post("/config/proxy/reset")
+async def config_proxy_reset(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_reset(request, "proxy", authenticated)
+
+
+@router.post("/config/cache/reset")
+async def config_cache_reset(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_reset(request, "cache", authenticated)
+
+
+@router.post("/config/indexers/reset")
+async def config_indexers_reset(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_reset(request, "indexers", authenticated)
+
+
+@router.post("/config/tmdb/reset")
+async def config_tmdb_reset(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_reset(request, "tmdb", authenticated)
+
+
+@router.post("/config/system/reset")
+async def config_system_reset(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_reset(request, "system", authenticated)
 
 
 @router.post("/mappings/delete")

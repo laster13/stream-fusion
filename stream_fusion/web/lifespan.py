@@ -81,6 +81,16 @@ async def lifespan_setup(
         host=settings.redis_host, port=settings.redis_port, db=settings.redis_db, max_connections=200
     )
 
+    # Initialize dynamic settings service (DB + Redis cache, seeds env-var defaults)
+    from stream_fusion.services.settings.settings_service import SettingsService
+    settings_service = SettingsService(
+        session_factory=app.state.db_session_factory,
+        redis_pool=app.state.redis_pool,
+    )
+    await settings_service.seed_defaults()
+    await settings_service.apply_overrides_to_singleton()
+    app.state.settings_service = settings_service
+
     # Initialize title matching module (loads rules from DB/Redis, seeds if empty)
     await initialize_title_matching(app.state.redis_pool, app.state.db_session_factory)
 
