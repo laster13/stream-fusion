@@ -84,7 +84,7 @@
         }
         .card:hover { border-color: var(--border-hover); box-shadow: 0 12px 40px rgba(0,0,0,0.25); }
 
-        .card-header { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+        .card-header { display: flex; align-items: center; gap: 14px; margin-bottom: 0px; }
         .card-icon {
             width: 40px; height: 40px; border-radius: 12px;
             display: flex; align-items: center; justify-content: center;
@@ -131,35 +131,58 @@
         .tog-sub { font-size: 0.8rem; color: var(--text-dim); margin-top: 3px; line-height: 1.4; }
 
         /* Indexer search phase selector */
-        .indexer-category-row { margin-top: 8px; }
+        .indexer-category-row { margin-top: 8px; margin-left: -14px; }
         .category-label { display: block; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 4px; font-weight: 500; letter-spacing: 0.02em; }
         .category-select { max-width: 280px; padding: 5px 10px; font-size: 0.8rem; }
 
-        /* "Requires API Key" badge */
-        .api-tag {
-            display: inline-flex; align-items: center; gap: 5px;
-            padding: 3px 10px; border-radius: 999px;
-            background: linear-gradient(135deg, rgba(234,179,8,0.12), rgba(249,115,22,0.1));
-            border: 1px solid rgba(234,179,8,0.25);
-            font-size: 0.67rem; font-weight: 700; text-transform: uppercase;
-            letter-spacing: 0.06em; color: #fbbf24;
+        /* "Requires API Key" icon indicator */
+        .api-key-indicator {
+            position: relative;
+            width: 32px; height: 32px; border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, rgba(234,179,8,0.1), rgba(249,115,22,0.08));
+            border: 1px solid rgba(234,179,8,0.2);
+            color: #fbbf24; flex-shrink: 0; cursor: help;
             transition: all 0.35s;
-            white-space: nowrap;
         }
-        .api-tag svg { width: 10px; height: 10px; flex-shrink: 0; }
-        .tog-row:has(input:checked) .api-tag {
+        .api-key-indicator svg { width: 17px; height: 17px; }
+        .api-key-indicator:hover {
             background: linear-gradient(135deg, rgba(234,179,8,0.18), rgba(249,115,22,0.15));
             border-color: rgba(234,179,8,0.4);
-            box-shadow: 0 0 12px rgba(234,179,8,0.12);
+            box-shadow: 0 0 16px rgba(234,179,8,0.15);
+            transform: scale(1.1);
+        }
+        .tog-row:has(input:checked) .api-key-indicator {
+            background: linear-gradient(135deg, rgba(234,179,8,0.18), rgba(249,115,22,0.15));
+            border-color: rgba(234,179,8,0.4);
+            box-shadow: 0 0 14px rgba(234,179,8,0.12);
             animation: apiPulse 2s ease-in-out 1;
         }
         @keyframes apiPulse {
             0% { transform: scale(1); }
-            30% { transform: scale(1.08); }
+            30% { transform: scale(1.12); }
             60% { transform: scale(0.97); }
             100% { transform: scale(1); }
         }
-        .api-tag { cursor: default; }
+        .api-key-indicator .api-key-tooltip {
+            position: absolute; bottom: calc(100% + 10px); right: 0;
+            padding: 8px 14px; border-radius: 9px;
+            background: rgba(10,10,25,0.97);
+            border: 1px solid rgba(234,179,8,0.25);
+            box-shadow: 0 14px 36px rgba(0,0,0,0.5), 0 0 20px rgba(234,179,8,0.06);
+            font-family: 'Outfit', sans-serif; font-size: 0.76rem; font-weight: 500;
+            color: #fbbf24; white-space: nowrap;
+            opacity: 0; pointer-events: none; z-index: 50;
+            transform: translateY(4px);
+            transition: opacity 0.25s, transform 0.25s;
+        }
+        .api-key-indicator .api-key-tooltip::after {
+            content: ''; position: absolute; top: 100%; right: 14px;
+            border: 6px solid transparent; border-top-color: rgba(234,179,8,0.25);
+        }
+        .api-key-indicator:hover .api-key-tooltip {
+            opacity: 1; pointer-events: auto; transform: translateY(0);
+        }
 
         /* ═══ TAG INPUT ═══ */
         .tag-input-wrap {
@@ -366,6 +389,283 @@
         }
         .fi-hint a:hover { color: #a5b4fc; text-decoration: underline; }
 
+        /* ═══ EN SVOIR PLUS (FLAIR) ═══ */
+        .slider-label-row {
+            display: flex !important; align-items: center; gap: 10px; flex-wrap: wrap;
+        }
+        .hint-flair {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 2px 9px; border-radius: 999px;
+            background: rgba(6,182,212,0.08); border: 1px solid rgba(6,182,212,0.2);
+            font-family: 'Outfit', sans-serif; font-size: 0.62rem; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.04em;
+            color: var(--cyan); cursor: pointer;
+            transition: all 0.25s;
+        }
+        .hint-flair svg { width: 10px; height: 10px; flex-shrink: 0; }
+        .hint-flair:hover {
+            background: rgba(6,182,212,0.15); border-color: rgba(6,182,212,0.35);
+            box-shadow: 0 0 12px rgba(6,182,212,0.1);
+        }
+
+        /* ═══ MODAL INFO ═══ */
+        .hint-modal-overlay {
+            position: fixed; inset: 0; z-index: 9999;
+            background: rgba(0,0,0,0);
+            backdrop-filter: blur(0px);
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; visibility: hidden;
+            transition: opacity 0.3s, backdrop-filter 0.3s, background 0.3s, visibility 0s 0.3s;
+        }
+        .hint-modal-overlay.show {
+            opacity: 1; visibility: visible;
+            background: rgba(0,0,0,0.55);
+            backdrop-filter: blur(8px);
+            transition: opacity 0.3s, backdrop-filter 0.3s, background 0.3s, visibility 0s 0s;
+        }
+        .hint-modal-box {
+            position: relative; width: 90%; max-width: 420px;
+            background: rgba(16,16,30,0.97);
+            border: 1px solid rgba(6,182,212,0.2);
+            border-radius: 20px; padding: 0; overflow: hidden;
+            box-shadow: 0 40px 100px rgba(0,0,0,0.6), 0 0 60px rgba(6,182,212,0.06);
+            transform: translateY(20px) scale(0.95);
+            transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1);
+        }
+        .hint-modal-overlay.show .hint-modal-box {
+            transform: translateY(0) scale(1);
+        }
+        .hint-modal-accent {
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent), var(--cyan), var(--accent));
+            background-size: 200% 100%;
+            animation: hintAccent 4s ease-in-out infinite;
+        }
+        @keyframes hintAccent {
+            0%,100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .hint-modal-body { padding: 28px 24px 24px; text-align: center; }
+        .hint-modal-icon {
+            width: 48px; height: 48px; border-radius: 14px; margin: 0 auto 16px;
+            background: linear-gradient(135deg, rgba(6,182,212,0.1), rgba(99,102,241,0.1));
+            border: 1px solid rgba(6,182,212,0.2);
+            display: flex; align-items: center; justify-content: center;
+            color: var(--cyan);
+            box-shadow: 0 0 24px rgba(6,182,212,0.08);
+        }
+        .hint-modal-icon svg { width: 22px; height: 22px; }
+        .hint-modal-title {
+            font-family: 'Sora', sans-serif; font-weight: 700; font-size: 1.05rem;
+            color: var(--text); margin-bottom: 12px;
+        }
+        .hint-modal-text {
+            font-size: 0.85rem; color: var(--text-dim); line-height: 1.7; margin-bottom: 0;
+            text-align: left;
+        }
+        .hint-modal-footer { text-align: center; margin-top: 20px; }
+        .hint-modal-btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            padding: 10px 28px; border-radius: 11px; border: none; cursor: pointer;
+            font-family: 'Sora', sans-serif; font-weight: 600; font-size: 0.85rem;
+            color: white;
+            background: linear-gradient(135deg, var(--accent), var(--cyan));
+            box-shadow: 0 4px 16px rgba(6,182,212,0.2);
+            transition: all 0.3s;
+        }
+        .hint-modal-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 24px rgba(6,182,212,0.3);
+        }
+        @media (max-width: 640px) {
+            .hint-modal-box { width: 94%; max-width: 360px; border-radius: 16px; }
+            .hint-modal-body { padding: 22px 18px 20px; }
+            .hint-modal-title { font-size: 0.95rem; }
+            .hint-modal-text { font-size: 0.8rem; }
+            .hint-flair { font-size: 0.58rem; padding: 2px 7px; }
+        }
+
+        div[id$="-fields"] .fi-group + .fi-group { margin-top: 14px; }
+
+        /* ═══ ICONE TOOLTIP ═══ */
+        .info-tip-wrap { position: relative; display: inline-flex; align-items: center; }
+        .info-tip-bubble {
+            position: absolute; top: calc(100% + 12px); left: 50%; transform: translateX(-50%) translateY(-6px);
+            width: 300px; padding: 14px 16px; border-radius: 12px;
+            background: rgba(10,10,25,0.97);
+            border: 1px solid rgba(99,102,241,0.25);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5), 0 0 30px rgba(99,102,241,0.06);
+            font-size: 0.78rem; font-weight: 400; color: var(--text-dim); line-height: 1.55;
+            text-transform: none; letter-spacing: 0;
+            opacity: 0; pointer-events: none; z-index: 50;
+            transition: opacity 0.3s, transform 0.3s;
+        }
+        .info-tip-bubble::after {
+            content: ''; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+            border: 7px solid transparent; border-bottom-color: rgba(99,102,241,0.25);
+        }
+        .info-tip-wrap:hover .info-tip-bubble {
+            opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0);
+        }
+        .info-tip-bubble strong { color: var(--text); font-weight: 600; }
+
+        .status-flair.info-tip-wrap { cursor: help; }
+
+        /* ═══ STATUS FLAIR (Actif / Inactif) ═══ */
+        .status-flair {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 10px; border-radius: 999px;
+            font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.06em;
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .status-flair .status-dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            transition: all 0.4s;
+        }
+        .status-flair.active {
+            background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.3);
+            color: #4ade80;
+        }
+        .status-flair.active .status-dot {
+            background: #4ade80; box-shadow: 0 0 8px rgba(34,197,94,0.5);
+        }
+        .status-flair.inactive {
+            background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25);
+            color: #f87171;
+        }
+        .status-flair.inactive .status-dot {
+            background: #f87171; box-shadow: 0 0 6px rgba(239,68,68,0.4);
+        }
+
+        .priority-select-wrap { position: relative; max-width: 320px; }
+        .priority-select-wrap select { display: none; }
+        .priority-select-label {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 0.75rem; font-weight: 600; color: var(--text-dim);
+            margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em;
+        }
+        .priority-select-label svg { width: 13px; height: 13px; color: var(--text-muted); }
+
+        .prio-trigger {
+            display: flex; align-items: center; gap: 10px;
+            width: 100%; padding: 10px 14px;
+            background: rgba(0,0,0,0.35);
+            border: 1px solid var(--border);
+            border-radius: 10px; color: var(--text);
+            font-family: 'Outfit', sans-serif; font-size: 0.82rem; font-weight: 500;
+            cursor: pointer; outline: none; user-select: none;
+            transition: border-color 0.3s, box-shadow 0.3s, background 0.3s;
+        }
+        .prio-trigger:hover {
+            border-color: var(--border-hover); background: rgba(0,0,0,0.45);
+        }
+        .prio-trigger.open {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow), 0 0 16px rgba(99,102,241,0.06);
+            border-radius: 10px 10px 0 0;
+        }
+        .prio-trigger .prio-dot {
+            width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+            transition: all 0.35s;
+        }
+        .prio-trigger .prio-arrow {
+            margin-left: auto; width: 16px; height: 16px; color: var(--text-muted);
+            transition: transform 0.3s, color 0.3s; flex-shrink: 0;
+        }
+        .prio-trigger.open .prio-arrow { transform: rotate(180deg); color: var(--accent-light); }
+        .prio-trigger .prio-label { flex: 1; }
+        .prio-trigger .prio-rank {
+            font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px;
+            flex-shrink: 0;
+        }
+
+        /* Dropdown */
+        .prio-dropdown {
+            position: absolute; top: 100%; left: 0; right: 0;
+            background: rgba(12,12,22,0.97);
+            border: 1px solid var(--accent);
+            border-top: none;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.5), 0 0 20px rgba(99,102,241,0.06);
+            z-index: 60; overflow: hidden;
+            max-height: 0; opacity: 0;
+            transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s;
+        }
+        .prio-dropdown.open {
+            max-height: 200px; opacity: 1;
+        }
+        .prio-option {
+            display: flex; align-items: center; gap: 10px;
+            padding: 11px 14px;
+            font-family: 'Outfit', sans-serif; font-size: 0.82rem; font-weight: 450;
+            color: var(--text-dim); cursor: pointer;
+            transition: all 0.2s; position: relative;
+        }
+        .prio-option:not(:last-child) {
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .prio-option:hover {
+            background: rgba(255,255,255,0.04); color: var(--text);
+        }
+        .prio-option.selected {
+            color: var(--text); font-weight: 500;
+        }
+        .prio-option.selected::before {
+            content: ''; position: absolute; left: 0; top: 4px; bottom: 4px; width: 3px;
+            border-radius: 0 2px 2px 0;
+        }
+        .prio-option .prio-dot {
+            width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+        }
+        .prio-option .prio-rank {
+            font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px;
+            flex-shrink: 0; margin-left: auto;
+        }
+        .prio-option .prio-desc {
+            font-size: 0.72rem; color: var(--text-muted); font-weight: 400;
+        }
+
+        /* COULEUR PRIORITAIRE */
+        .prio-priority .prio-dot { background: #4ade80; box-shadow: 0 0 8px rgba(34,197,94,0.5); }
+        .prio-priority .prio-rank { background: rgba(34,197,94,0.12); color: #4ade80; border: 1px solid rgba(34,197,94,0.25); }
+        .prio-option.prio-priority.selected::before { background: #4ade80; }
+        .prio-option.prio-priority:hover { background: rgba(34,197,94,0.06); }
+        /* COULEUR INTERMEDIAIRE */
+        .prio-intermediary .prio-dot { background: #fbbf24; box-shadow: 0 0 8px rgba(234,179,8,0.5); }
+        .prio-intermediary .prio-rank { background: rgba(234,179,8,0.12); color: #fbbf24; border: 1px solid rgba(234,179,8,0.25); }
+        .prio-option.prio-intermediary.selected::before { background: #fbbf24; }
+        .prio-option.prio-intermediary:hover { background: rgba(234,179,8,0.06); }
+        /* COULEUR FALLBACK */
+        .prio-fallback .prio-dot { background: #f87171; box-shadow: 0 0 8px rgba(239,68,68,0.5); }
+        .prio-fallback .prio-rank { background: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
+        .prio-option.prio-fallback.selected::before { background: #f87171; }
+        .prio-option.prio-fallback:hover { background: rgba(239,68,68,0.06); }
+
+        .priority-select-wrap[data-level="priority"] .prio-trigger {
+            border-color: rgba(34,197,94,0.25); background: rgba(34,197,94,0.04);
+        }
+        .priority-select-wrap[data-level="priority"] .prio-trigger:hover {
+            border-color: rgba(34,197,94,0.4);
+            box-shadow: 0 0 16px rgba(34,197,94,0.1), 0 0 4px rgba(34,197,94,0.08);
+        }
+        .priority-select-wrap[data-level="intermediary"] .prio-trigger {
+            border-color: rgba(234,179,8,0.25); background: rgba(234,179,8,0.04);
+        }
+        .priority-select-wrap[data-level="intermediary"] .prio-trigger:hover {
+            border-color: rgba(234,179,8,0.4);
+            box-shadow: 0 0 16px rgba(234,179,8,0.1), 0 0 4px rgba(234,179,8,0.08);
+        }
+        .priority-select-wrap[data-level="fallback"] .prio-trigger {
+            border-color: rgba(239,68,68,0.2); background: rgba(239,68,68,0.04);
+        }
+        .priority-select-wrap[data-level="fallback"] .prio-trigger:hover {
+            border-color: rgba(239,68,68,0.35);
+            box-shadow: 0 0 16px rgba(239,68,68,0.1), 0 0 4px rgba(239,68,68,0.08);
+        }
+
         /* ═══ API KEY VALIDATION INDICATOR ═══ */
         .api-key-wrap { position: relative; }
         .api-key-wrap .fi { padding-right: 48px; }
@@ -469,7 +769,7 @@
         }
 
         .slider-val {
-            min-width: 58px; padding: 8px 0; text-align: center;
+            width: 75px; padding: 8px 0; text-align: center;
             border-radius: 10px;
             background: rgba(0,0,0,0.3); border: 1px solid var(--border);
             font-family: 'JetBrains Mono', monospace;
@@ -479,7 +779,7 @@
         }
         .slider-val:focus-within { border-color: var(--accent); }
         .slider-val input {
-            width: 100%; text-align: center;
+            width: 120%; text-align: center;
             background: transparent; border: none; outline: none;
             color: var(--accent-light);
             font-family: 'JetBrains Mono', monospace;
@@ -693,45 +993,134 @@
         #debridOrderList {
             display: flex; flex-direction: column; gap: 6px;
             padding: 0; list-style: none;
+            position: relative;
         }
         #debridOrderList.hidden { display: none !important; }
         #debridOrderList li {
-            display: flex !important; align-items: center !important; gap: 12px !important;
-            padding: 13px 16px !important; border-radius: 12px !important; width: auto !important;
+            display: flex !important; align-items: center !important; gap: 0 !important;
+            padding: 0 !important; border-radius: 12px !important; width: auto !important;
             background: var(--surface-inner) !important; border: 1px solid var(--border) !important;
             color: var(--text) !important; font-family: 'Outfit', sans-serif;
             font-size: 0.88rem !important; font-weight: 450;
-            cursor: grab; transition: all 0.25s; position: relative; margin: 0 !important;
+            cursor: grab;
+            position: relative; margin: 0 !important;
             box-shadow: none !important;
+            -webkit-user-select: none; user-select: none;
         }
+        #debridOrderList li::before { display: none !important; }
         #debridOrderList li:hover {
             border-color: var(--border-hover) !important; background: rgba(255,255,255,0.04) !important;
         }
-        #debridOrderList li:active, #debridOrderList li.sortable-chosen {
-            cursor: grabbing; border-color: var(--accent) !important;
-            background: rgba(99,102,241,0.07) !important;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.3), 0 0 0 1px rgba(99,102,241,0.3) !important;
-            transform: scale(1.02);
+
+        /* Lifted item following cursor */
+        #debridOrderList li.dol-lifted {
+            position: fixed !important; z-index: 9999; pointer-events: none;
+            border-color: var(--accent) !important;
+            background: rgba(16,16,30,0.96) !important;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5), 0 0 30px rgba(99,102,241,0.12), 0 0 0 1px rgba(99,102,241,0.3) !important;
+            cursor: grabbing; transform: scale(1.03);
+            transition: box-shadow 0.2s, transform 0.15s !important;
         }
-        #debridOrderList li.sortable-ghost {
-            opacity: 0.3;
+        #debridOrderList li.dol-lifted .dol-handle { color: var(--accent-light); }
+        #debridOrderList li.dol-lifted .dol-arrows { opacity: 0; }
+
+        /* Placeholder gap */
+        .dol-placeholder {
+            border-radius: 12px;
+            background: rgba(99,102,241,0.04);
+            border: 2px dashed rgba(99,102,241,0.2);
+            transition: none;
+            pointer-events: none;
         }
-        #debridOrderList li > span:last-child {
-            margin-left: auto !important; color: var(--text-muted) !important;
-            font-size: 1.1rem; letter-spacing: 1px; opacity: 0.5;
-            transition: opacity 0.2s;
+
+        /* Items sliding around */
+        #debridOrderList li.dol-shifting {
+            transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1) !important;
         }
-        #debridOrderList li:hover > span:last-child { opacity: 0.8; }
-        #debridOrderList li > span:first-child {
-            display: flex; align-items: center; gap: 10px;
+        /* Snap back after drop */
+        #debridOrderList li.dol-snap {
+            transition: top 0.2s cubic-bezier(0.22, 1, 0.36, 1), left 0.2s cubic-bezier(0.22, 1, 0.36, 1), transform 0.2s cubic-bezier(0.22, 1, 0.36, 1) !important;
         }
-        #debridOrderList li::before {
-            content: '⠿'; font-size: 1.1rem; color: var(--text-muted); opacity: 0.4;
-            transition: opacity 0.2s; flex-shrink: 0;
+
+        /* Drag handle */
+        .dol-handle {
+            display: flex; align-items: center; justify-content: center;
+            width: 42px; align-self: stretch;
+            color: var(--text-muted);
+            transition: color 0.2s;
+            flex-shrink: 0;
         }
-        #debridOrderList li:hover::before { opacity: 0.7; }
-        #debridOrderList li:active::before, #debridOrderList li.sortable-chosen::before {
-            opacity: 1; color: var(--accent-light);
+        #debridOrderList li:hover .dol-handle { color: var(--accent-light); }
+        .dol-handle svg { width: 16px; height: 16px; }
+
+        /* Position badge */
+        .dol-pos {
+            width: 26px; height: 26px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 700;
+            flex-shrink: 0; transition: all 0.3s;
+        }
+        #debridOrderList li:nth-child(1) .dol-pos {
+            background: rgba(34,197,94,0.12); color: #4ade80; border: 1px solid rgba(34,197,94,0.25);
+        }
+        #debridOrderList li:nth-child(2) .dol-pos {
+            background: rgba(99,102,241,0.12); color: var(--accent-light); border: 1px solid rgba(99,102,241,0.25);
+        }
+        #debridOrderList li:nth-child(3) .dol-pos {
+            background: rgba(234,179,8,0.1); color: #fbbf24; border: 1px solid rgba(234,179,8,0.25);
+        }
+        #debridOrderList li:nth-child(n+4) .dol-pos {
+            background: rgba(255,255,255,0.05); color: var(--text-muted); border: 1px solid var(--border);
+        }
+
+        /* Content area */
+        .dol-content {
+            flex: 1; display: flex; align-items: center; gap: 10px;
+            padding: 12px 0; min-width: 0;
+        }
+        .dol-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* Up/down buttons */
+        .dol-arrows {
+            display: flex; flex-direction: column; gap: 2px;
+            padding: 4px 10px; flex-shrink: 0; align-self: stretch;
+            justify-content: center;
+        }
+        .dol-arrow {
+            display: flex; align-items: center; justify-content: center;
+            width: 26px; height: 20px; border-radius: 5px;
+            background: transparent; border: 1px solid transparent;
+            color: var(--text-muted); cursor: pointer;
+            transition: all 0.2s;
+        }
+        .dol-arrow:hover {
+            background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.25);
+            color: var(--accent-light);
+        }
+        .dol-arrow:active { transform: scale(0.9); }
+        .dol-arrow.disabled { opacity: 0.15; pointer-events: none; }
+        .dol-arrow svg { width: 12px; height: 12px; }
+
+        /* Landing glow */
+        #debridOrderList li.dol-landing {
+            border-color: var(--accent) !important;
+            box-shadow: 0 0 20px rgba(99,102,241,0.15), 0 0 0 1px rgba(99,102,241,0.2) !important;
+        }
+        .dol-pos.dol-pos-pop {
+            animation: dolPosPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes dolPosPop {
+            0% { transform: scale(1); }
+            40% { transform: scale(1.3); }
+            100% { transform: scale(1); }
+        }
+
+        @media (max-width: 640px) {
+            .dol-handle { width: 36px; }
+            .dol-pos { width: 22px; height: 22px; font-size: 0.65rem; border-radius: 6px; }
+            .dol-content { padding: 10px 0; gap: 8px; font-size: 0.82rem; }
+            .dol-arrows { padding: 4px 6px; }
+            .dol-arrow { width: 28px; height: 22px; }
         }
 
         #debridDownloaderOptions:empty::after {
@@ -1158,7 +1547,8 @@
             .tog-name { font-size: 0.85rem; }
             .tog-name img { width: 20px; height: 20px; }
             .tog-sub { font-size: 0.75rem; }
-            .api-tag { font-size: 0.6rem; padding: 2px 8px; }
+            .api-key-indicator { width: 28px; height: 28px; border-radius: 8px; }
+            .api-key-indicator svg { width: 14px; height: 14px; }
 
             /* Form inputs */
             .fi { padding: 10px 12px; font-size: 0.84rem; border-radius: 10px; }
@@ -1183,7 +1573,7 @@
             #debridDownloaderOptions > div label { font-size: 0.82rem !important; }
 
             /* Debrid order list */
-            #debridOrderList li { padding: 10px 12px !important; font-size: 0.82rem !important; }
+            #debridOrderList li { font-size: 0.82rem !important; }
 
             /* Slider controls */
             .slider-grid { gap: 18px; }
@@ -1230,6 +1620,14 @@
 
             /* Error hints */
             .field-error-hint { padding: 6px 10px; font-size: 0.72rem; }
+
+            /* Info tooltip on mobile */
+            .info-tip-bubble { width: 240px; font-size: 0.72rem; padding: 10px 12px; }
+            .status-flair { font-size: 0.6rem; padding: 2px 8px; }
+            .priority-select-wrap { max-width: 100%; }
+            .prio-trigger { font-size: 0.78rem; padding: 9px 12px; }
+            .prio-option { font-size: 0.78rem; padding: 10px 12px; }
+            .prio-rank { font-size: 0.6rem !important; }
 
             /* Toast */
             .toast { bottom: 16px; padding: 10px 18px; font-size: 0.8rem; border-radius: 10px; }
@@ -1310,7 +1708,7 @@
                         <div class="wiz-line" data-line="4"></div>
                     </div>
                     <div class="wiz-step-item">
-                        <div class="wiz-dot" data-step="5" onclick="goToStep(5)" title="Langues & Limites"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></div>
+                        <div class="wiz-dot" data-step="5" onclick="goToStep(5)" title="Langues & Résultats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></div>
                         <div class="wiz-line" data-line="5"></div>
                     </div>
                     <div class="wiz-step-item">
@@ -1388,6 +1786,18 @@
                                     <p>Veuillez visiter <a id="verification-url" href="#" target="_blank">l'URL de vérification</a> et entrer le code : <strong id="user-code"></strong></p>
                                 </div>
                                 <input type="hidden" id="rd_token_info" name="rd_token_info">
+                                <div class="sep" style="margin:12px 0;"></div>
+                                <div class="slider-control">
+                                    <label>Seuil avant skip</label>
+                                    <div class="slider-row">
+                                        <div class="slider-track-wrap">
+                                            <div class="slider-fill" id="fill_rdMinCachedBeforeCheck"></div>
+                                            <input type="range" class="slider-range" id="range_rdMinCachedBeforeCheck" min="0" max="10" step="1" value="3">
+                                        </div>
+                                        <div class="slider-val"><input type="number" name="rdMinCachedBeforeCheck" id="rdMinCachedBeforeCheck" min="0" max="10" value="3"></div>
+                                    </div>
+                                    <p class="fi-hint">Sauter RD si déjà N résultats cachés par d'autres services. Recommandé : 1–3. (0 = toujours vérifier)</p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1613,25 +2023,19 @@
                     </div>
                     <div class="tog-row" style="margin-top:8px;padding-left:54px;">
                         <label class="tog"><input id="yggflixPriority" name="yggflixPriority" type="checkbox" checked><span class="tog-track"></span></label>
-                        <div>
-                            <div class="tog-name" style="font-size:0.85rem;">Recherche prioritaire</div>
-                            <div class="tog-sub">Coché : YGG Relay est interrogé en Phase 1 (en même temps que les indexeurs prioritaires). Décoché : interrogé en dernier, après tous les indexeurs privés.</div>
+                        <div style="flex:1;">
+                            <div class="tog-name" style="gap:10px;">
+                                Recherche prioritaire
+                                <span class="status-flair active info-tip-wrap" id="yggPriorityFlair"><span class="status-dot"></span><span class="flair-label">Actif</span><div class="info-tip-bubble"><strong>Recherche prioritaire activée</strong><br>YGG Relay est interrogé en <strong>Phase 1</strong>, en même temps que les indexeurs prioritaires.</div></span>
+                            </div>
                         </div>
                     </div>
                     <div class="sep"></div>
 
-                    <!-- ZILEAN -->
-                    <div class="tog-row">
-                        <label class="tog"><input id="zilean" name="zilean" type="checkbox" checked><span class="tog-track"></span></label>
-                        <div>
-                            <div class="tog-name">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                Zilean
-                            </div>
-                            <div class="tog-sub">Scraping DMM</div>
-                        </div>
+                    <!-- ZILEAN (hidden from UI, enabled by default) -->
+                    <div style="display:none;">
+                        <input id="zilean" name="zilean" type="checkbox" checked>
                     </div>
-                    <div class="sep"></div>
 
                     {% if jackett_enable %}
                     <!-- JACKETT -->
@@ -1655,26 +2059,28 @@
                             <div class="tog-name" style="flex-wrap:wrap;">
                                 <img src="https://i.ibb.co/W4DygFGm/c411.png" alt="" style="width:34px;height:18px;">
                                 Utiliser C411 API
-                                <span class="api-tag">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-                                    Clé API requise
-                                </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API C411 Torznab pour trouver plus de résultats.</div>
                             <div id="c411-category-row" class="indexer-category-row" style="display:none;">
-                                <label class="category-label">Phase de recherche</label>
-                                <select id="c411Category" class="fi category-select">
-                                    <option value="priority_private" selected>Prioritaire — toujours interrogé</option>
-                                    <option value="intermediary_private">Intermédiaire — si résultats insuffisants</option>
-                                    <option value="fallback_private">Fallback — dernier recours</option>
-                                </select>
+                                <div class="priority-select-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>Phase de recherche</div>
+                                <div class="priority-select-wrap" data-level="priority">
+                                    <select id="c411Category" class="fi" onchange="updatePriorityLevel(this)">
+                                        <option value="priority_private" selected>&#9650; Prioritaire — toujours interrogé</option>
+                                        <option value="intermediary_private">&#9644; Intermédiaire — si résultats insuffisants</option>
+                                        <option value="fallback_private">&#9660; Fallback — dernier recours</option>
+                                    </select>
+                                </div>
                             </div>
+                        </div>
+                    <div class="api-key-indicator">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                            <span class="api-key-tooltip">Cette option nécessite une clé API.</span>
                         </div>
                     </div>
                     {% if not c411_unique_account %}
                     <div id="c411-fields" style="display:none;">
-                        <div style="margin-left:60px;" class="fi-group"><label for="c411ApiKey">Clé API C411</label><input type="text" name="c411ApiKey" id="c411ApiKey" class="fi mono"><p class="fi-hint"><a href="https://c411.org/user/integrations" target="_blank">Obtenez une clé ici</a></p></div>
-                        <div style="margin-left:60px;" class="fi-group"><label for="c411Passkey">Passkey C411</label><input type="text" name="c411Passkey" id="c411Passkey" class="fi mono"><p class="fi-hint">Votre passkey pour l'URL d'annonce du tracker.</p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="c411ApiKey">Clé API C411</label><input type="text" name="c411ApiKey" id="c411ApiKey" class="fi mono" placeholder="Entrez votre clé API..."><p class="fi-hint"><a href="https://c411.org/user/integrations" target="_blank">Obtenez une clé ici</a></p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="c411Passkey">Passkey C411</label><input type="text" name="c411Passkey" id="c411Passkey" class="fi mono" placeholder="Passkey pour l'URL d'annonce du tracker (optionnel)"></div>
                     </div>
                     {% endif %}
                     <div class="sep"></div>
@@ -1686,25 +2092,27 @@
                             <div class="tog-name" style="flex-wrap:wrap;">
                                 <img src="https://i.ibb.co/7Nxg9xz7/torr9logo.png" alt="" style="width:26px;height:26px;">
                                 Utiliser Torr9 API
-                                <span class="api-tag">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-                                    Clé API requise
-                                </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API Torr9 Torznab pour trouver plus de résultats.</div>
                             <div id="torr9-category-row" class="indexer-category-row" style="display:none;">
-                                <label class="category-label">Phase de recherche</label>
-                                <select id="torr9Category" class="fi category-select">
-                                    <option value="priority_private" selected>Prioritaire — toujours interrogé</option>
-                                    <option value="intermediary_private">Intermédiaire — si résultats insuffisants</option>
-                                    <option value="fallback_private">Fallback — dernier recours</option>
-                                </select>
+                                <div class="priority-select-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>Phase de recherche</div>
+                                <div class="priority-select-wrap" data-level="priority">
+                                    <select id="torr9Category" class="fi" onchange="updatePriorityLevel(this)">
+                                        <option value="priority_private" selected>&#9650; Prioritaire — toujours interrogé</option>
+                                        <option value="intermediary_private">&#9644; Intermédiaire — si résultats insuffisants</option>
+                                        <option value="fallback_private">&#9660; Fallback — dernier recours</option>
+                                    </select>
+                                </div>
                             </div>
+                        </div>
+                    <div class="api-key-indicator">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                            <span class="api-key-tooltip">Cette option nécessite une clé API.</span>
                         </div>
                     </div>
                     {% if not torr9_unique_account %}
                     <div id="torr9-fields" style="display:none;">
-                        <div style="margin-left:60px;" class="fi-group"><label for="torr9ApiKey">Clé API Torr9</label><input type="text" name="torr9ApiKey" id="torr9ApiKey" class="fi mono"><p class="fi-hint"><a href="https://torr9.net/profile" target="_blank">Obtenez une clé ici</a></p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="torr9ApiKey">Clé API Torr9</label><input type="text" name="torr9ApiKey" id="torr9ApiKey" class="fi mono" placeholder="Entrez votre clé API..."><p class="fi-hint"><a href="https://torr9.net/profile" target="_blank">Obtenez une clé ici</a></p></div>
                     </div>
                     {% endif %}
                     <div class="sep"></div>
@@ -1716,25 +2124,27 @@
                             <div class="tog-name" style="flex-wrap:wrap;">
                                 <img src="https://i.ibb.co/ksw8TZw6/lacale.png" alt="" style="width:30px;height:30px;">
                                 Utiliser La-Cale API
-                                <span class="api-tag">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-                                    Clé API requise
-                                </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API LaCale Torznab pour trouver plus de résultats.</div>
                             <div id="lacale-category-row" class="indexer-category-row" style="display:none;">
-                                <label class="category-label">Phase de recherche</label>
-                                <select id="lacaleCategory" class="fi category-select">
-                                    <option value="priority_private">Prioritaire — toujours interrogé</option>
-                                    <option value="intermediary_private" selected>Intermédiaire — si résultats insuffisants</option>
-                                    <option value="fallback_private">Fallback — dernier recours</option>
-                                </select>
+                                <div class="priority-select-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>Phase de recherche</div>
+                                <div class="priority-select-wrap" data-level="intermediary">
+                                    <select id="lacaleCategory" class="fi" onchange="updatePriorityLevel(this)">
+                                        <option value="priority_private">&#9650; Prioritaire — toujours interrogé</option>
+                                        <option value="intermediary_private" selected>&#9644; Intermédiaire — si résultats insuffisants</option>
+                                        <option value="fallback_private">&#9660; Fallback — dernier recours</option>
+                                    </select>
+                                </div>
                             </div>
+                        </div>
+                    <div class="api-key-indicator">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                            <span class="api-key-tooltip">Cette option nécessite une clé API.</span>
                         </div>
                     </div>
                     {% if not lacale_unique_account %}
                     <div id="lacale-fields" style="display:none;">
-                        <div style="margin-left:60px;" class="fi-group"><label for="lacaleApiKey">Clé API La-Cale</label><input type="text" name="lacaleApiKey" id="lacaleApiKey" class="fi mono"><p class="fi-hint"><a href="https://la-cale.space/" target="_blank">Obtenez une clé ici</a></p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="lacaleApiKey">Clé API La-Cale</label><input type="text" name="lacaleApiKey" id="lacaleApiKey" class="fi mono" placeholder="Entrez votre clé API..."><p class="fi-hint"><a href="https://la-cale.space/" target="_blank">Obtenez une clé ici</a></p></div>
                     </div>
                     {% endif %}
 
@@ -1747,26 +2157,28 @@
                             <div class="tog-name" style="flex-wrap:wrap;">
 								<img src="https://i.ibb.co/7tTSCgPc/generationfree.png" alt="" style="width:30px;height:30px;">
                                 Utiliser Generation Free API
-                                <span class="api-tag">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-                                    Clé API requise
-                                </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API Generation Free UNIT3D pour trouver plus de résultats.</div>
                             <div id="generationfree-category-row" class="indexer-category-row" style="display:none;">
-                                <label class="category-label">Phase de recherche</label>
-                                <select id="generationfreeCategory" class="fi category-select">
-                                    <option value="priority_private">Prioritaire — toujours interrogé</option>
-                                    <option value="intermediary_private" selected>Intermédiaire — si résultats insuffisants</option>
-                                    <option value="fallback_private">Fallback — dernier recours</option>
-                                </select>
+                                <div class="priority-select-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>Phase de recherche</div>
+                                <div class="priority-select-wrap" data-level="intermediary">
+                                    <select id="generationfreeCategory" class="fi" onchange="updatePriorityLevel(this)">
+                                        <option value="priority_private">&#9650; Prioritaire — toujours interrogé</option>
+                                        <option value="intermediary_private" selected>&#9644; Intermédiaire — si résultats insuffisants</option>
+                                        <option value="fallback_private">&#9660; Fallback — dernier recours</option>
+                                    </select>
+                                </div>
                             </div>
+                        </div>
+                    <div class="api-key-indicator">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                            <span class="api-key-tooltip">Cette option nécessite une clé API.</span>
                         </div>
                     </div>
                     {% if not generationfree_unique_account %}
                     <div id="generationfree-fields" style="display:none;">
-                        <div style="margin-left:60px;" class="fi-group"><label for="generationfreeApiKey">Clé API Generation Free</label><input type="text" name="generationfreeApiKey" id="generationfreeApiKey" class="fi mono"><p class="fi-hint"><a href="https://generation-free.org/login" target="_blank">Obtenez une clé ici</a></p></div>
-                        <div style="margin-left:60px;" class="fi-group"><label for="generationfreePasskey">Passkey Generation Free</label><input type="text" name="generationfreePasskey" id="generationfreePasskey" class="fi mono"><p class="fi-hint">Votre passkey pour l'URL d'annonce du tracker.</p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="generationfreeApiKey">Clé API Generation Free</label><input type="text" name="generationfreeApiKey" id="generationfreeApiKey" class="fi mono" placeholder="Entrez votre clé API..."><p class="fi-hint"><a href="https://generation-free.org/login" target="_blank">Obtenez une clé ici</a></p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="generationfreePasskey">Passkey Generation Free</label><input type="text" name="generationfreePasskey" id="generationfreePasskey" class="fi mono" placeholder="Passkey pour l'URL d'annonce du tracker (optionnel)"></div>
                     </div>
                     {% endif %}
 
@@ -1778,27 +2190,30 @@
                         <label class="tog"><input id="abn" name="abn" type="checkbox" data-unique-account="{{ abn_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
                         <div style="flex:1;">
                             <div class="tog-name" style="flex-wrap:wrap;">
+                                <img src="https://i.ibb.co/Cs6yNPBW/abn.png" alt="" style="width:26px;height:26px;">
                                 Utiliser ABN API
-                                <span class="api-tag">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-                                    Clé API requise
-                                </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API ABN (Abnormal) pour trouver plus de résultats.</div>
                             <div id="abn-category-row" class="indexer-category-row" style="display:none;">
-                                <label class="category-label">Phase de recherche</label>
-                                <select id="abnCategory" class="fi category-select">
-                                    <option value="priority_private">Prioritaire — toujours interrogé</option>
-                                    <option value="intermediary_private">Intermédiaire — si résultats insuffisants</option>
-                                    <option value="fallback_private" selected>Fallback — dernier recours</option>
-                                </select>
+                                <div class="priority-select-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>Phase de recherche</div>
+                                <div class="priority-select-wrap" data-level="fallback">
+                                    <select id="abnCategory" class="fi" onchange="updatePriorityLevel(this)">
+                                        <option value="priority_private">&#9650; Prioritaire — toujours interrogé</option>
+                                        <option value="intermediary_private">&#9644; Intermédiaire — si résultats insuffisants</option>
+                                        <option value="fallback_private" selected>&#9660; Fallback — dernier recours</option>
+                                    </select>
+                                </div>
                             </div>
+                        </div>
+                    <div class="api-key-indicator">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                            <span class="api-key-tooltip">Cette option nécessite une clé API.</span>
                         </div>
                     </div>
                     {% if not abn_unique_account %}
                     <div id="abn-fields" style="display:none;">
-                        <div style="margin-left:60px;" class="fi-group"><label for="abnApiKey">Clé API ABN</label><input type="text" name="abnApiKey" id="abnApiKey" class="fi mono"><p class="fi-hint"><a href="https://abn.lol" target="_blank">Obtenez une clé ici</a></p></div>
-                        <div style="margin-left:60px;" class="fi-group"><label for="abnPasskey">Passkey ABN</label><input type="text" name="abnPasskey" id="abnPasskey" class="fi mono"><p class="fi-hint">Votre passkey pour l'URL d'annonce du tracker.</p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="abnApiKey">Clé API ABN</label><input type="text" name="abnApiKey" id="abnApiKey" class="fi mono" placeholder="Entrez votre clé API..."><p class="fi-hint"><a href="https://abn.lol" target="_blank">Obtenez une clé ici</a></p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="abnPasskey">Passkey ABN</label><input type="text" name="abnPasskey" id="abnPasskey" class="fi mono" placeholder="Passkey pour l'URL d'annonce du tracker (optionnel)"></div>
                     </div>
                     {% endif %}
                     <div class="sep"></div>
@@ -1810,27 +2225,30 @@
                         <label class="tog"><input id="g3mini" name="g3mini" type="checkbox" data-unique-account="{{ g3mini_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
                         <div style="flex:1;">
                             <div class="tog-name" style="flex-wrap:wrap;">
+                                <img src="https://i.ibb.co/CLKWKbG/g3mini.png" alt="" style="width:26px;height:26px;">
                                 Utiliser G3MINI API
-                                <span class="api-tag">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-                                    Clé API requise
-                                </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API Gemini Tracker (UNIT3D) pour trouver plus de résultats.</div>
                             <div id="g3mini-category-row" class="indexer-category-row" style="display:none;">
-                                <label class="category-label">Phase de recherche</label>
-                                <select id="g3miniCategory" class="fi category-select">
-                                    <option value="priority_private">Prioritaire — toujours interrogé</option>
-                                    <option value="intermediary_private" selected>Intermédiaire — si résultats insuffisants</option>
-                                    <option value="fallback_private">Fallback — dernier recours</option>
-                                </select>
+                                <div class="priority-select-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>Phase de recherche</div>
+                                <div class="priority-select-wrap" data-level="intermediary">
+                                    <select id="g3miniCategory" class="fi" onchange="updatePriorityLevel(this)">
+                                        <option value="priority_private">&#9650; Prioritaire — toujours interrogé</option>
+                                        <option value="intermediary_private" selected>&#9644; Intermédiaire — si résultats insuffisants</option>
+                                        <option value="fallback_private">&#9660; Fallback — dernier recours</option>
+                                    </select>
+                                </div>
                             </div>
+                        </div>
+                    <div class="api-key-indicator">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                            <span class="api-key-tooltip">Cette option nécessite une clé API.</span>
                         </div>
                     </div>
                     {% if not g3mini_unique_account %}
                     <div id="g3mini-fields" style="display:none;">
-                        <div style="margin-left:60px;" class="fi-group"><label for="g3miniApiKey">Clé API G3MINI</label><input type="text" name="g3miniApiKey" id="g3miniApiKey" class="fi mono"><p class="fi-hint"><a href="https://gemini-tracker.org" target="_blank">Obtenez une clé ici</a></p></div>
-                        <div style="margin-left:60px;" class="fi-group"><label for="g3miniPasskey">Passkey G3MINI</label><input type="text" name="g3miniPasskey" id="g3miniPasskey" class="fi mono"><p class="fi-hint">Votre passkey pour l'URL d'annonce du tracker.</p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="g3miniApiKey">Clé API G3MINI</label><input type="text" name="g3miniApiKey" id="g3miniApiKey" class="fi mono" placeholder="Entrez votre clé API..."><p class="fi-hint"><a href="https://gemini-tracker.org" target="_blank">Obtenez une clé ici</a></p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="g3miniPasskey">Passkey G3MINI</label><input type="text" name="g3miniPasskey" id="g3miniPasskey" class="fi mono" placeholder="Passkey pour l'URL d'annonce du tracker (optionnel)"></div>
                     </div>
                     {% endif %}
                     <div class="sep"></div>
@@ -1842,27 +2260,30 @@
                         <label class="tog"><input id="theoldschool" name="theoldschool" type="checkbox" data-unique-account="{{ theoldschool_unique_account|lower }}" onchange="updateProviderFields()"><span class="tog-track"></span></label>
                         <div style="flex:1;">
                             <div class="tog-name" style="flex-wrap:wrap;">
+                                <img src="https://i.ibb.co/s9H1BfNh/tos.png" alt="" style="width:26px;height:26px;">
                                 Utiliser TheOldSchool API
-                                <span class="api-tag">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-                                    Clé API requise
-                                </span>
                             </div>
                             <div class="tog-sub">Utilisez l'API TheOldSchool (UNIT3D) pour trouver plus de résultats.</div>
                             <div id="theoldschool-category-row" class="indexer-category-row" style="display:none;">
-                                <label class="category-label">Phase de recherche</label>
-                                <select id="theoldschoolCategory" class="fi category-select">
-                                    <option value="priority_private">Prioritaire — toujours interrogé</option>
-                                    <option value="intermediary_private" selected>Intermédiaire — si résultats insuffisants</option>
-                                    <option value="fallback_private">Fallback — dernier recours</option>
-                                </select>
+                                <div class="priority-select-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>Phase de recherche</div>
+                                <div class="priority-select-wrap" data-level="intermediary">
+                                    <select id="theoldschoolCategory" class="fi" onchange="updatePriorityLevel(this)">
+                                        <option value="priority_private">&#9650; Prioritaire — toujours interrogé</option>
+                                        <option value="intermediary_private" selected>&#9644; Intermédiaire — si résultats insuffisants</option>
+                                        <option value="fallback_private">&#9660; Fallback — dernier recours</option>
+                                    </select>
+                                </div>
                             </div>
+                        </div>
+                    <div class="api-key-indicator">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                            <span class="api-key-tooltip">Cette option nécessite une clé API.</span>
                         </div>
                     </div>
                     {% if not theoldschool_unique_account %}
                     <div id="theoldschool-fields" style="display:none;">
-                        <div style="margin-left:60px;" class="fi-group"><label for="theoldschoolApiKey">Clé API TheOldSchool</label><input type="text" name="theoldschoolApiKey" id="theoldschoolApiKey" class="fi mono"><p class="fi-hint"><a href="https://theoldschool.cc" target="_blank">Obtenez une clé ici</a></p></div>
-                        <div style="margin-left:60px;" class="fi-group"><label for="theoldschoolPasskey">Passkey TheOldSchool</label><input type="text" name="theoldschoolPasskey" id="theoldschoolPasskey" class="fi mono"><p class="fi-hint">Votre passkey pour l'URL d'annonce du tracker.</p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="theoldschoolApiKey">Clé API TheOldSchool</label><input type="text" name="theoldschoolApiKey" id="theoldschoolApiKey" class="fi mono" placeholder="Entrez votre clé API..."><p class="fi-hint"><a href="https://theoldschool.cc" target="_blank">Obtenez une clé ici</a></p></div>
+                        <div style="margin-left:60px;" class="fi-group"><label for="theoldschoolPasskey">Passkey TheOldSchool</label><input type="text" name="theoldschoolPasskey" id="theoldschoolPasskey" class="fi mono" placeholder="Passkey pour l'URL d'annonce du tracker (optionnel)"></div>
                     </div>
                     {% endif %}
                     {% endif %}
@@ -2093,8 +2514,19 @@
                             </div>
                         </div>
 
+                    </div>
+                </div>
+            </div>
+			
+			<!-- CACHE LOCAL -->
+            <div class="card anim" id="sec-cache-local" style="animation-delay:0.6s">
+                <div class="card-header" onclick="toggleCard(this)"><div class="card-icon" style="background:rgba(16,185,129,0.1);color:#34d399;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg></div><h2 class="card-title">Cache</h2><svg class="card-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></div>
+                <p class="card-desc">Paramètres de cache débrideur et cache local Postgres.</p>
+                <div style="padding:0 14px;">
+                    <div class="slider-grid">
+
                         <div class="slider-control">
-                            <label>Min. résultats en cache</label>
+                            <label class="slider-label-row">Min. résultats en cache <button type="button" class="hint-flair" data-hint-title="Résultats minimum en cache" data-hint-text="Représente les résultats obtenus d'une dernière recherche identique (même titre, même langue). Si ce cache contient au moins le nombre de résultats souhaité, les résultats sont retournés presque instantanément sans nouvelle requête. Ce cache REDIS persiste 7 jours et aide à soulager les requêtes API."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>En savoir plus</button></label>
                             <div class="slider-row">
                                 <div class="slider-track-wrap">
                                     <div class="slider-fill" id="fill_minCachedResults"></div>
@@ -2102,34 +2534,13 @@
                                 </div>
                                 <div class="slider-val"><input type="number" name="minCachedResults" id="minCachedResults" min="0" value="10"></div>
                             </div>
-                            <p class="fi-hint">Avant de lancer une nouvelle recherche.</p>
                         </div>
 
-                        <div class="slider-control">
-                            <label>RealDebrid — seuil avant skip</label>
-                            <div class="slider-row">
-                                <div class="slider-track-wrap">
-                                    <div class="slider-fill" id="fill_rdMinCachedBeforeCheck"></div>
-                                    <input type="range" class="slider-range" id="range_rdMinCachedBeforeCheck" min="0" max="10" step="1" value="3">
-                                </div>
-                                <div class="slider-val"><input type="number" name="rdMinCachedBeforeCheck" id="rdMinCachedBeforeCheck" min="0" max="10" value="3"></div>
-                            </div>
-                            <p class="fi-hint">Sauter RD si déjà N résultats cachés par d'autres services. API RD lente et restrictive — recommandé : 1–3. (0 = toujours vérifier)</p>
-                        </div>
-
-                    </div>
-                </div>
-            </div>
-
-            <!-- CACHE LOCAL -->
-            <div class="card anim" id="sec-cache-local" style="animation-delay:0.6s">
-                <div class="card-header" onclick="toggleCard(this)"><div class="card-icon" style="background:rgba(16,185,129,0.1);color:#34d399;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg></div><h2 class="card-title">Cache Local</h2><svg class="card-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></div>
-                <p class="card-desc">Exploitez le cache Postgres local avant de requêter les indexeurs — accélère les recherches répétées.</p>
-                <div style="padding:0 14px;">
-                    <div class="slider-grid">
+                        <div class="sep"></div>
+                        <div class="sec-label">Cache local (Postgres)</div>
 
                         <div class="slider-control">
-                            <label>Min. résultats cache local</label>
+                            <label class="slider-label-row">Min. résultats cache local <button type="button" class="hint-flair" data-hint-title="Résultats minimum en cache local" data-hint-text="Nombre minimum de résultats confirmés en cache local (Postgres) pour éviter entièrement la recherche en direct sur les indexeurs. Si le cache contient au moins N résultats valides et récents, les indexeurs ne sont pas interrogés — réponse quasi-instantanée. (0 = désactivé, toujours interroger les indexeurs)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>En savoir plus</button></label>
                             <div class="slider-row">
                                 <div class="slider-track-wrap">
                                     <div class="slider-fill" id="fill_minPostgresResults"></div>
@@ -2137,11 +2548,10 @@
                                 </div>
                                 <div class="slider-val"><input type="number" name="minPostgresResults" id="minPostgresResults" min="0" max="20" value="5"></div>
                             </div>
-                            <p class="fi-hint">Nombre minimum de résultats confirmés en cache local (Postgres) pour bypasser entièrement la recherche live sur les indexeurs. Si le cache contient au moins N résultats valides et récents, les indexeurs ne sont pas interrogés — réponse quasi-instantanée. (0 = désactivé, toujours interroger les indexeurs)</p>
                         </div>
 
                         <div class="slider-control">
-                            <label>Durée de validité du cache (jours)</label>
+                            <label class="slider-label-row">Durée de validité du cache (jours) <button type="button" class="hint-flair" data-hint-title="Durée de validité du cache" data-hint-text="Durée maximale (TTL) en jours pendant laquelle le cache local est considéré frais. Après N jours sans nouvelle recherche live, les indexeurs sont ré-interrogés pour récupérer les nouveaux torrents parus depuis. Le TTL est remis à zéro automatiquement après chaque recherche live. (0 = désactivé, cache toujours considéré frais)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>En savoir plus</button></label>
                             <div class="slider-row">
                                 <div class="slider-track-wrap">
                                     <div class="slider-fill" id="fill_postgresMaxAgeDays"></div>
@@ -2149,13 +2559,12 @@
                                 </div>
                                 <div class="slider-val"><input type="number" name="postgresMaxAgeDays" id="postgresMaxAgeDays" min="0" max="30" value="7"></div>
                             </div>
-                            <p class="fi-hint">Durée maximale (TTL) en jours pendant laquelle le cache local est considéré frais. Après N jours sans nouvelle recherche live, les indexeurs sont ré-interrogés pour récupérer les nouveaux torrents parus depuis. Le TTL est remis à zéro automatiquement après chaque recherche live. (0 = désactivé, cache toujours considéré frais)</p>
                         </div>
 
                     </div>
                 </div>
             </div>
-
+			
             </div>
 
             <!-- ÉTAPE 6: INSTALLATION -->
@@ -2234,6 +2643,21 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
         </span>
         <span id="toastMsg">Copié !</span>
+    </div>
+
+    <!-- MODAL INFO HINT -->
+    <div class="hint-modal-overlay" id="hint-modal">
+        <div class="hint-modal-box">
+            <div class="hint-modal-accent"></div>
+            <div class="hint-modal-body">
+                <div class="hint-modal-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                </div>
+                <div class="hint-modal-title" id="hint-modal-title"></div>
+                <p class="hint-modal-text" id="hint-modal-text"></p>
+                <div class="hint-modal-footer"><button type="button" class="hint-modal-btn" id="hint-modal-close">Compris</button></div>
+            </div>
+        </div>
     </div>
 
 	<!-- JAVASCRIPT -->  
