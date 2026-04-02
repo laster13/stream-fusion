@@ -1,3 +1,6 @@
+// JAVASCRIPT POUR PAGE PRINCIPALE
+// app.js
+
 // ═══ DROPDOWN POUR PRIORITÉ INDEXEURS ═══
 var _prioMeta = {
     'priority_private': { label: 'Prioritaire', desc: 'toujours interrogé', rank: 'P1', css: 'prio-priority' },
@@ -121,9 +124,6 @@ function updateYggPriorityFlair() {
         bubble.innerHTML = '<strong>Recherche prioritaire désactivée</strong><br>YGG Relay sera interrogé <strong>en dernier</strong>, après tous les indexeurs privés.';
     }
 }
-
-// JAVASCRIPT POUR PAGE PRINCIPALE
-// app.js
 
 // ═══ CARTES ═══
 function toggleCard(headerEl) {
