@@ -13,7 +13,7 @@ class CatalogItem(BaseModel):
 
 class ManifestResponse(BaseModel):
     id: str
-    icon: str
+    logo: str
     version: str
     catalogs: List[CatalogItem] = Field(default_factory=list)
     resources: List[Union[str, ResourceItem]]

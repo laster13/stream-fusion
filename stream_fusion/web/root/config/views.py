@@ -66,7 +66,7 @@ async def get_manifest():
     logger.info("Serving manifest.json")
     return ManifestResponse(
         id="community.limedrive.streamfusion",
-        icon="https://i.imgur.com/q2VSdSp.png",
+        logo="https://i.ibb.co/ZRZcVBLd/SF-modern.png",
         version=str(get_version()),
         resources=[
             'catalog',
@@ -164,7 +164,7 @@ async def get_manifest(config: str, apikey_dao: APIKeyDAO = Depends()):
     logger.info("Serving manifest.json")
     return ManifestResponse(
         id="community.limedrive.streamfusion",
-        icon="https://i.imgur.com/q2VSdSp.png",
+        logo="https://i.ibb.co/ZRZcVBLd/SF-modern.png",
         version=str(get_version()),
         resources=[
             'catalog',
