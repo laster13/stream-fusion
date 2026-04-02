@@ -177,14 +177,9 @@ const JOB_DOCS = {
         detail: "Ces entrées s'accumulent après chaque vérification de disponibilité torrent (Real-Debrid, AllDebrid, TorBox, Premiumize). Sans ce job, la table grossit indéfiniment.",
         param: null,
     },
-    torrent_old_cleanup: {
-        desc: "Supprime les <code>torrent_items</code> non mis à jour depuis plus de N jours.",
-        detail: "Évite l'accumulation de résultats de recherche obsolètes. Seuls les torrents encore actifs (refresh récent) sont conservés.",
-        param: "SCHEDULER_TORRENT_MAX_AGE_DAYS (défaut : 90j)",
-    },
     torrent_orphan_cleanup: {
         desc: "Supprime les <code>torrent_items</code> sans <code>tmdb_id</code> (non résolus) plus vieux que N jours.",
-        detail: "Ces entrées ne seront jamais rattachées à un média et n'apparaîtront donc jamais dans les résultats utilisateurs.",
+        detail: "Ces entrées ne seront jamais rattachées à un média et n'apparaîtront donc jamais dans les résultats utilisateurs. Les torrents matchés (avec tmdb_id) sont conservés indéfiniment.",
         param: "SCHEDULER_TORRENT_ORPHAN_MAX_AGE_DAYS (défaut : 30j)",
     },
     torrent_dedup: {
@@ -211,6 +206,11 @@ const JOB_DOCS = {
         desc: "Passe <code>is_active = false</code> sur les peer keys dont <code>expires_at</code> est dépassé.",
         detail: "Non destructif : les clés restent en base. Complément automatique de l'action manuelle disponible dans la page Maintenance.",
         param: null,
+    },
+    tmdb_orphan_matching: {
+        desc: "Recherche un <code>tmdb_id</code> pour les <code>torrent_items</code> orphelins (sans TMDB ID) via l'API de recherche TMDB.",
+        detail: "Parse le titre brut, regroupe les items par titre normalisé, puis effectue une recherche TMDB par titre (+ année si présente). N'assigne que les matchs à haute confiance (exact ou sous-ensemble ordonné + validation d'année). L'historique détaillé est consultable dans la page TMDB Matcher.",
+        param: "SCHEDULER_TMDB_MATCH_BATCH_SIZE (défaut : 100 items/run)",
     },
 };
 

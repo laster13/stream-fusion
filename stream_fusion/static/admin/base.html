@@ -281,6 +281,10 @@
            href="{{ url_for('scheduler_page')(request) }}">
             <i class="bi bi-clock-history"></i> Tâches planifiées
         </a>
+        <a class="sidebar-link {% if '/tmdb-matcher' in request.url.path %}active{% endif %}"
+           href="{{ url_for('tmdb_matcher_page')(request) }}">
+            <i class="bi bi-link-45deg"></i> TMDB Matcher
+        </a>
         <a class="sidebar-link {% if '/config' in request.url.path %}active{% endif %}"
            href="{{ url_for('config_page')(request) }}">
             <i class="bi bi-sliders"></i> Configuration

@@ -2081,3 +2081,82 @@ async def search_groups_page(
         "results": results,
         "error": error,
     })
+
+
+# ── TMDB Orphan Matcher ───────────────────────────────────────────────────────
+
+@router.get("/tmdb-matcher", response_class=HTMLResponse)
+async def tmdb_matcher_page(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+    return templates.TemplateResponse("tmdb_matcher.html", {"request": request})
+
+
+@router.get("/tmdb-matcher/history")
+async def tmdb_matcher_history(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    run_id: str = None,
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    scheduler = getattr(request.app.state, "scheduler", None)
+    tracker = getattr(scheduler, "_history_tracker", None) if scheduler else None
+
+    if tracker is None:
+        # Tracker not yet initialised (no run has occurred); build one on the fly
+        from stream_fusion.services.tmdb_matcher.history import MatchHistoryTracker
+        redis_pool = getattr(request.app.state, "redis_pool", None)
+        if redis_pool is None:
+            return JSONResponse({"error": "Redis non disponible"}, status_code=503)
+        tracker = MatchHistoryTracker(redis_pool)
+
+    if run_id:
+        detail = tracker.get_run(run_id)
+        if detail is None:
+            return JSONResponse({"error": "Run introuvable"}, status_code=404)
+        from dataclasses import asdict
+        return JSONResponse(asdict(detail))
+
+    from dataclasses import asdict
+    summaries = tracker.list_runs()
+    return JSONResponse([asdict(s) for s in summaries])
+
+
+@router.post("/tmdb-matcher/revert")
+async def tmdb_matcher_revert(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+    info_hash: str = Form(...),
+    tmdb_id: int = Form(...),
+    raw_title: str = Form(""),
+    indexer: str = Form(""),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    from stream_fusion.services.postgresql.dao.mismatch_dao import TmdbMismatchDAO
+    dao = TmdbMismatchDAO(db)
+    mismatch = await dao.create(
+        info_hash=info_hash,
+        tmdb_id=tmdb_id,
+        raw_title=raw_title or info_hash,
+        indexer=indexer or "auto_match",
+        notes="Revert depuis l'historique TMDB matcher",
+    )
+    if mismatch:
+        logger.warning(
+            f"Admin: reverted TMDB match ({info_hash[:8]}…, tmdb_id={tmdb_id}) "
+            f"via tmdb_matcher history"
+        )
+        return JSONResponse({"success": True, "message": "Match revert avec succès"})
+    return JSONResponse(
+        {"success": False, "message": "Revert échoué (déjà revert ou erreur DB)"},
+        status_code=400,
+    )

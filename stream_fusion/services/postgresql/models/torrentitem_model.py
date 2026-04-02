@@ -48,6 +48,12 @@ class TorrentItemModel(Base):
         index=True,
     )
 
+    # Timestamp of the last TMDB auto-matching attempt (NULL = never attempted).
+    # Set by the background orphan-matching job to avoid re-processing indefinitely.
+    tmdb_match_attempted_at: Mapped[Optional[int]] = mapped_column(
+        BigInteger, nullable=True, index=True
+    )
+
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 

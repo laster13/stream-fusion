@@ -11,6 +11,9 @@ _CACHE_KEY = "title_rules"
 
 # Fixed patterns (not configurable — always applied)
 _APOSTROPHE_RE = re.compile(r"[''`ʼ\u2019\u2018]")
+# Possessive/contraction with 's — remove both apostrophe and the s
+# ("world's" → "world", "journey's" → "journey")
+_POSSESSIVE_S_RE = re.compile(r"[''`ʼ\u2019\u2018]s\b", re.IGNORECASE)
 _SPACES_RE = re.compile(r"\s+")
 _YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
 _COLON_BEFORE_WORD_RE = re.compile(r":(\S)")
@@ -22,6 +25,26 @@ _TMDB_FILTER_RE = re.compile(
 )
 _INTEGRALE_RE = re.compile(r"\b(INTEGRALE|COMPLET|COMPLETE|INTEGRAL)\b", re.IGNORECASE)
 _DOT_SEP_RE = re.compile(r"[._]")
+
+# Brackets/parentheses wrapping purely technical content: a year alone, or a strong
+# boundary tag (resolution, language, source…).  These are stripped before boundary
+# detection so that e.g. "Film.Title.(2010).FRENCH" is handled correctly.
+# Note: we build a simplified pattern that matches the key technical tokens without
+# relying on the full _STRONG_BOUNDARY_RE internals.
+_BRACKET_YEAR_RE = re.compile(
+    r"[\(\[]\s*((?:19|20)\d{2})\s*[\)\]]",
+    re.IGNORECASE,
+)
+_BRACKET_TECH_RE = re.compile(
+    r"[\(\[]\s*(?:"
+    r"MULTi|MULTI|FRENCH|TRUEFRENCH|VFF|VF2|VFQ|VFI|VOF|VQ|VOQ|VOSTFR|SUBFRENCH"
+    r"|(?:480|576|720|1080|2160|4320)[ip]|4K|UHD"
+    r"|BluRay|BLU-RAY|BLURAY|HDDVD"
+    r"|WEB-DL|WEBDL|WEBRIP|WEB\.RIP"
+    r"|HDTV|UHDTV|DVDRIP|DVDSCR|REMUX"
+    r")\s*[\)\]]",
+    re.IGNORECASE,
+)
 
 # Strong boundary: tags that signal the START of the technical section.
 # Format: TITRE.YEAR.LANG.RES.SOURCE.CODEC-TEAM
@@ -177,7 +200,9 @@ class TitleNormalizer:
         # 2. Ligatures
         if self._ligature_map:
             text = text.translate(self._ligature_map)
-        # 3. Apostrophes → space
+        # 3. Possessive 's → remove entirely ("world's" → "world")
+        #    Other apostrophes → space ("l'homme" → "l homme")
+        text = _POSSESSIVE_S_RE.sub("", text)
         text = _APOSTROPHE_RE.sub(" ", text)
         # 4. NFD + strip combining characters (accents)
         text = unicodedata.normalize("NFD", text)
@@ -264,6 +289,14 @@ class TitleNormalizer:
 
         # Step 1 — separators to spaces
         result = _DOT_SEP_RE.sub(" ", raw)
+        result = _SPACES_RE.sub(" ", result).strip()
+
+        # Step 1b — strip brackets/parens containing purely technical content.
+        # "(2010)" → "2010", "[BluRay]" → "", keeping brackets with title words intact.
+        # Year brackets are replaced with the bare year so the boundary detector can
+        # still use it (e.g. "Film Title (2010) FRENCH" → "Film Title 2010 FRENCH").
+        result = _BRACKET_YEAR_RE.sub(r" \1 ", result)
+        result = _BRACKET_TECH_RE.sub(" ", result)
         result = _SPACES_RE.sub(" ", result).strip()
 
         title = self._find_title_boundary(result)

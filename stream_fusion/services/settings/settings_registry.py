@@ -227,18 +227,6 @@ SETTINGS_REGISTRY: list[SettingDef] = [
         ),
     ),
     SettingDef(
-        "scheduler_torrent_max_age_days", "int",
-        "Âge maximum des torrents en base (jours)", "scheduler",
-        description=(
-            "Les entrées de la table torrent_items qui n'ont pas été mises à jour depuis "
-            "plus de N jours sont supprimées automatiquement. "
-            "Ces entrées correspondent à des torrents qui n'ont plus été vus dans les résultats "
-            "des indexeurs et sont probablement obsolètes (hors ligne, supprimés). "
-            "Une valeur plus élevée conserve plus d'historique mais augmente la taille de la base. "
-            "Valeur par défaut : 90 jours."
-        ),
-    ),
-    SettingDef(
         "scheduler_torrent_orphan_max_age_days", "int",
         "Âge max des torrents sans TMDB (jours)", "scheduler",
         description=(
