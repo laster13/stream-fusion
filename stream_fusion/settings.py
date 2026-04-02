@@ -166,7 +166,7 @@ class Settings(BaseSettings):
 
     # SCHEDULER — nettoyage automatique de la base de données
     scheduler_enabled: bool = True
-    scheduler_torrent_orphan_max_age_days: int = 30   # supprime torrent_items sans tmdb_id depuis N jours
+    scheduler_torrent_orphan_max_age_days: int = 7    # supprime torrent_items sans tmdb_id depuis N jours
     scheduler_debrid_cleanup_interval_hours: int = 6  # fréquence purge debrid_cache expiré
     scheduler_torrent_cleanup_interval_hours: int = 24 # fréquence purge + dédup torrent_items
     scheduler_keys_cleanup_interval_hours: int = 6    # fréquence désactivation api_keys/peer_keys expirées

@@ -230,13 +230,12 @@ SETTINGS_REGISTRY: list[SettingDef] = [
         "scheduler_torrent_orphan_max_age_days", "int",
         "Âge max des torrents sans TMDB (jours)", "scheduler",
         description=(
-            "Les torrents sans identifiant TMDB (non identifiés, orphelins) créés il y a plus "
-            "de N jours sont supprimés automatiquement. "
-            "Ces entrées n'ont jamais pu être associées à un film ou une série dans TMDB, "
-            "ce qui les rend inutilisables pour Stremio. "
-            "Valeur plus courte que l'âge max général car les orphelins consomment de l'espace "
-            "sans apporter de valeur. "
-            "Valeur par défaut : 30 jours."
+            "Les torrents sans identifiant TMDB (non identifiés) créés il y a plus de N jours "
+            "sont supprimés automatiquement. "
+            "Après ce délai, le job de matching automatique et les recherches utilisateurs ont eu "
+            "suffisamment d'opportunités de les résoudre — s'ils restent orphelins, ils ne seront "
+            "probablement jamais matchés et sont inutilisables pour Stremio. "
+            "Valeur par défaut : 7 jours."
         ),
     ),
     SettingDef(

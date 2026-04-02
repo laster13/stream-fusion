@@ -178,9 +178,9 @@ const JOB_DOCS = {
         param: null,
     },
     torrent_orphan_cleanup: {
-        desc: "Supprime les <code>torrent_items</code> sans <code>tmdb_id</code> (non résolus) plus vieux que N jours.",
-        detail: "Ces entrées ne seront jamais rattachées à un média et n'apparaîtront donc jamais dans les résultats utilisateurs. Les torrents matchés (avec tmdb_id) sont conservés indéfiniment.",
-        param: "SCHEDULER_TORRENT_ORPHAN_MAX_AGE_DAYS (défaut : 30j)",
+        desc: "Supprime les <code>torrent_items</code> sans <code>tmdb_id</code> plus vieux que N jours.",
+        detail: "Après ce délai, le job de matching automatique et les recherches utilisateurs ont eu suffisamment d'opportunités de les résoudre. S'ils restent orphelins, ils ne seront probablement jamais matchés. Les torrents avec un tmdb_id sont conservés indéfiniment.",
+        param: "SCHEDULER_TORRENT_ORPHAN_MAX_AGE_DAYS (défaut : 7j)",
     },
     torrent_dedup: {
         desc: "Déduplique <code>torrent_items</code> par <code>(info_hash, indexer)</code>, conserve l'entrée avec le plus de seeders.",
@@ -210,7 +210,7 @@ const JOB_DOCS = {
     tmdb_orphan_matching: {
         desc: "Recherche un <code>tmdb_id</code> pour les <code>torrent_items</code> orphelins (sans TMDB ID) via l'API de recherche TMDB.",
         detail: "Parse le titre brut, regroupe les items par titre normalisé, puis effectue une recherche TMDB par titre (+ année si présente). N'assigne que les matchs à haute confiance (exact ou sous-ensemble ordonné + validation d'année). L'historique détaillé est consultable dans la page TMDB Matcher.",
-        param: "SCHEDULER_TMDB_MATCH_BATCH_SIZE (défaut : 100 items/run)",
+        param: "SCHEDULER_TMDB_MATCH_BATCH_SIZE (défaut : 500 items/run)",
     },
 };
 

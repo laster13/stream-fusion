@@ -125,7 +125,7 @@ class OrphanMatcher:
                 result.processed = len(rows)
 
                 # 2. Parse titles + detect type, build groups
-                groups: dict[tuple[str, str | None], list[TorrentItemModel]] = {}
+                groups: dict[tuple[str, str | None, Optional[int]], list[TorrentItemModel]] = {}
                 item_meta: dict[str, tuple[str, Optional[int], Optional[str]]] = {}
                 # item_meta[item.id] = (normalized_title, year, detected_type)
 
@@ -137,7 +137,9 @@ class OrphanMatcher:
                     year = _extract_year(item.raw_title)
                     detected_type = _detect_type(item)
                     item_meta[item.id] = (normalized, year, detected_type)
-                    key = (normalized, detected_type)
+                    # Year is part of the key to avoid cross-year mismatches
+                    # (e.g. "Ballerina 2016" and "Ballerina 2025" must not share a group)
+                    key = (normalized, detected_type, year)
                     groups.setdefault(key, []).append(item)
 
                 # 3. Collect known mismatches (single query)
@@ -154,16 +156,11 @@ class OrphanMatcher:
                 now_ts = int(time.time())
                 matched_item_ids: set[str] = set()
 
-                for (normalized_title, group_type), group_items in groups.items():
+                for (normalized_title, group_type, year), group_items in groups.items():
                     if not normalized_title:
-                        # Mark attempted even if no title
                         await _mark_attempted(session, [i.id for i in group_items], now_ts)
                         result.unmatched += len(group_items)
                         continue
-
-                    # Representative item for year extraction
-                    rep = group_items[0]
-                    _, year, _ = item_meta[rep.id]
 
                     # 4a. Search TMDB (one or both endpoints)
                     best = await _find_best_candidate(
