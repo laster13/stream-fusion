@@ -253,6 +253,10 @@
            href="{{ url_for('list_mappings')(request) }}">
             <i class="bi bi-arrow-left-right"></i> Mappings méta
         </a>
+        <a class="sidebar-link {% if '/search/groups' in request.url.path %}active{% endif %}"
+           href="{{ url_for('search_groups_page')(request) }}">
+            <i class="bi bi-collection"></i> Groupes torrents
+        </a>
 
         <div class="sidebar-section">Matching</div>
         <a class="sidebar-link {% if '/matching/title-rules' in request.url.path %}active{% endif %}"

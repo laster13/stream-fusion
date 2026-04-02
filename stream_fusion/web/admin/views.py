@@ -16,6 +16,7 @@ from stream_fusion.utils.security.security_secret import SecretManager
 from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
 from stream_fusion.services.postgresql.dao.peerkey_dao import PeerKeyDAO
 from stream_fusion.services.postgresql.dao.debridcache_dao import DebridCacheDAO
+from stream_fusion.services.postgresql.dao.torrentgroup_dao import TorrentGroupDAO
 from stream_fusion.web.api.auth.schemas import UsageLogs, UsageLog
 from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
@@ -878,6 +879,107 @@ async def clean_orphan_torrents(
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
 
+@router.post("/maintenance/group-by-infohash")
+async def group_torrents_by_infohash(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Create/extend groups for all torrent_items that share the same info_hash."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        group_dao = TorrentGroupDAO(db)
+        result = await group_dao.batch_group_by_info_hash()
+        await db.commit()
+        msg = (
+            f"{result['groups_created']} groupe(s) créé(s), "
+            f"{result['items_grouped']} torrent(s) groupé(s) par info_hash"
+        )
+        logger.info(f"Admin maintenance: group-by-infohash — {msg}")
+        return JSONResponse({"success": True, **result, "message": msg})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: group-by-infohash failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/group-by-title-size")
+async def group_torrents_by_title_size(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Create/extend groups for torrents with matching normalized title and similar size."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        group_dao = TorrentGroupDAO(db)
+        result = await group_dao.batch_group_by_title_size()
+        await db.commit()
+        msg = (
+            f"{result['groups_created']} groupe(s) créé(s), "
+            f"{result['items_grouped']} torrent(s) groupé(s) par titre+taille"
+        )
+        logger.info(f"Admin maintenance: group-by-title-size — {msg}")
+        return JSONResponse({"success": True, **result, "message": msg})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: group-by-title-size failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/propagate-tmdb-groups")
+async def propagate_tmdb_to_groups(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Propagate TMDB IDs to all members of every existing group."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        group_dao = TorrentGroupDAO(db)
+        result = await group_dao.propagate_tmdb_all_groups()
+        await db.commit()
+        msg = (
+            f"{result['groups_updated']} groupe(s) mis à jour, "
+            f"{result['items_updated']} torrent(s) avec TMDB ID propagé"
+        )
+        logger.info(f"Admin maintenance: propagate-tmdb-groups — {msg}")
+        return JSONResponse({"success": True, **result, "message": msg})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: propagate-tmdb-groups failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/cleanup-empty-groups")
+async def cleanup_empty_groups(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Delete torrent groups that have no members."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        group_dao = TorrentGroupDAO(db)
+        count = await group_dao.delete_empty_groups()
+        await db.commit()
+        msg = f"{count} groupe(s) vide(s) supprimé(s)"
+        logger.info(f"Admin maintenance: cleanup-empty-groups — {msg}")
+        return JSONResponse({"success": True, "deleted": count, "message": msg})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: cleanup-empty-groups failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
 @router.get("/maintenance/stats")
 async def maintenance_stats(
     request: Request,
@@ -964,6 +1066,29 @@ async def maintenance_stats(
         pg_stats["metadata_mappings"] = r.scalar() or 0
     except Exception:
         pg_stats["metadata_mappings"] = "?"
+
+    try:
+        r = await db.execute(text("""
+            SELECT
+                (SELECT COUNT(*) FROM torrent_groups) AS total_groups,
+                (SELECT COUNT(*) FROM torrent_items WHERE group_id IS NOT NULL) AS grouped_items,
+                (SELECT COUNT(*) FROM torrent_items WHERE group_id IS NULL) AS ungrouped_items,
+                (SELECT COUNT(*) FROM torrent_groups WHERE tmdb_id IS NOT NULL) AS groups_with_tmdb
+        """))
+        row = r.fetchone()
+        pg_stats["torrent_groups"] = {
+            "total_groups": row[0] or 0,
+            "grouped_items": row[1] or 0,
+            "ungrouped_items": row[2] or 0,
+            "groups_with_tmdb": row[3] or 0,
+        }
+    except Exception:
+        pg_stats["torrent_groups"] = {
+            "total_groups": "?",
+            "grouped_items": "?",
+            "ungrouped_items": "?",
+            "groups_with_tmdb": "?",
+        }
 
     redis_stats = {}
     try:
@@ -1908,3 +2033,51 @@ async def assign_tmdb_to_selection(
     updated = await dao.assign_tmdb_by_info_hashes(info_hashes, int(tmdb_id_raw))
     logger.info(f"Admin: assigned tmdb_id={tmdb_id_raw} to {updated} torrents")
     return JSONResponse({"success": True, "updated": updated})
+
+
+# ── Torrent Groups Browser ────────────────────────────────────────────────────
+
+@router.get("/search/groups", response_class=HTMLResponse)
+async def search_groups_page(
+    request: Request,
+    q: str = "",
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Admin page to browse torrent groups — search by TMDB ID, info_hash, or title."""
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    results = []
+    error = None
+    query = q.strip()
+    search_type = None
+
+    if query:
+        try:
+            from stream_fusion.services.postgresql.dao.torrentgroup_dao import TorrentGroupDAO
+            group_dao = TorrentGroupDAO(db)
+
+            if query.isdigit():
+                # TMDB ID
+                search_type = "tmdb"
+                results = await group_dao.search_groups_by_tmdb_id(int(query))
+            elif len(query) == 40 and all(c in "0123456789abcdefABCDEF" for c in query):
+                # info_hash
+                search_type = "hash"
+                results = await group_dao.search_groups_by_info_hash(query)
+            else:
+                # Titre libre
+                search_type = "title"
+                results = await group_dao.search_groups_by_title(query)
+        except Exception as e:
+            logger.error(f"Admin search_groups_page: {e}")
+            error = str(e)
+
+    return templates.TemplateResponse("search_groups.html", {
+        "request": request,
+        "query": query,
+        "search_type": search_type,
+        "results": results,
+        "error": error,
+    })

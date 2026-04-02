@@ -18,12 +18,14 @@ RENEW_EVERY = 60    # secondes — intervalle de renouvellement du lock
 
 # Métadonnées des jobs pour l'affichage dans l'interface admin
 JOB_META: dict[str, dict] = {
-    "debrid_cache_cleanup":   {"name": "Purge cache debrid expiré",         "icon": "bi-database-x"},
-    "torrent_old_cleanup":    {"name": "Suppression torrents anciens",       "icon": "bi-trash3"},
-    "torrent_orphan_cleanup": {"name": "Suppression torrents orphelins",     "icon": "bi-file-earmark-x"},
-    "torrent_dedup":          {"name": "Déduplication torrents",             "icon": "bi-copy"},
-    "api_keys_cleanup":       {"name": "Désactivation clés API expirées",    "icon": "bi-key"},
-    "peer_keys_cleanup":      {"name": "Désactivation peer keys expirées",   "icon": "bi-diagram-3"},
+    "debrid_cache_cleanup":    {"name": "Purge cache debrid expiré",          "icon": "bi-database-x"},
+    "torrent_old_cleanup":     {"name": "Suppression torrents anciens",        "icon": "bi-trash3"},
+    "torrent_orphan_cleanup":  {"name": "Suppression torrents orphelins",      "icon": "bi-file-earmark-x"},
+    "torrent_dedup":           {"name": "Déduplication torrents",              "icon": "bi-copy"},
+    "torrent_group_hash":      {"name": "Groupement par info_hash",            "icon": "bi-diagram-3"},
+    "torrent_group_title_size":{"name": "Groupement par titre + taille",       "icon": "bi-diagram-2"},
+    "api_keys_cleanup":        {"name": "Désactivation clés API expirées",     "icon": "bi-key"},
+    "peer_keys_cleanup":       {"name": "Désactivation peer keys expirées",    "icon": "bi-diagram-3"},
 }
 
 
@@ -48,12 +50,14 @@ class StreamFusionScheduler:
         self._is_leader = False
         self._renew_task: Optional[asyncio.Task] = None
         self._job_funcs = {
-            "debrid_cache_cleanup":   self._cleanup_debrid_cache,
-            "torrent_old_cleanup":    self._cleanup_old_torrents,
-            "torrent_orphan_cleanup": self._cleanup_orphan_torrents,
-            "torrent_dedup":          self._dedup_torrents,
-            "api_keys_cleanup":       self._cleanup_api_keys,
-            "peer_keys_cleanup":      self._cleanup_peer_keys,
+            "debrid_cache_cleanup":     self._cleanup_debrid_cache,
+            "torrent_old_cleanup":      self._cleanup_old_torrents,
+            "torrent_orphan_cleanup":   self._cleanup_orphan_torrents,
+            "torrent_dedup":            self._dedup_torrents,
+            "torrent_group_hash":       self._group_by_info_hash,
+            "torrent_group_title_size": self._group_by_title_size,
+            "api_keys_cleanup":         self._cleanup_api_keys,
+            "peer_keys_cleanup":        self._cleanup_peer_keys,
         }
 
     def _redis(self) -> Redis:
@@ -107,12 +111,14 @@ class StreamFusionScheduler:
         kh = settings.scheduler_keys_cleanup_interval_hours
 
         jobs = [
-            (self._cleanup_debrid_cache,   "debrid_cache_cleanup",   dh),
-            (self._cleanup_old_torrents,   "torrent_old_cleanup",    th),
-            (self._cleanup_orphan_torrents,"torrent_orphan_cleanup", th),
-            (self._dedup_torrents,         "torrent_dedup",          th),
-            (self._cleanup_api_keys,       "api_keys_cleanup",       kh),
-            (self._cleanup_peer_keys,      "peer_keys_cleanup",      kh),
+            (self._cleanup_debrid_cache,    "debrid_cache_cleanup",     dh),
+            (self._cleanup_old_torrents,    "torrent_old_cleanup",      th),
+            (self._cleanup_orphan_torrents, "torrent_orphan_cleanup",   th),
+            (self._dedup_torrents,          "torrent_dedup",            th),
+            (self._group_by_info_hash,      "torrent_group_hash",       th),
+            (self._group_by_title_size,     "torrent_group_title_size", th),
+            (self._cleanup_api_keys,        "api_keys_cleanup",         kh),
+            (self._cleanup_peer_keys,       "peer_keys_cleanup",        kh),
         ]
         for i, (func, job_id, interval_hours) in enumerate(jobs):
             start_date = now + timedelta(minutes=5) + stagger * i
@@ -142,6 +148,48 @@ class StreamFusionScheduler:
                 count = result.rowcount
             duration_ms = int((time.monotonic() - t0) * 1000)
             logger.warning(f"[scheduler] {job_id}: {count} rows affected in {duration_ms}ms")
+            r.hset(_job_redis_key(job_id), mapping={
+                "last_run_at":        int(time.time()),
+                "last_duration_ms":   duration_ms,
+                "last_rows_affected": count,
+                "last_status":        "ok",
+                "last_error":         "",
+            })
+            return count
+        except Exception as exc:
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            logger.error(f"[scheduler] {job_id} failed after {duration_ms}ms: {exc}")
+            r.hset(_job_redis_key(job_id), mapping={
+                "last_run_at":        int(time.time()),
+                "last_duration_ms":   duration_ms,
+                "last_rows_affected": 0,
+                "last_status":        "error",
+                "last_error":         str(exc)[:500],
+            })
+            return 0
+
+    async def _run_dao_job(self, job_id: str, dao_coro) -> int:
+        """Execute a DAO-based coroutine, commit, and record metrics in Redis.
+
+        `dao_coro` is a coroutine that already has the session bound — it is
+        created inside this method via a factory callable that receives the DAO.
+        """
+        from stream_fusion.services.postgresql.dao.torrentgroup_dao import TorrentGroupDAO
+
+        r = self._redis()
+        t0 = time.monotonic()
+        try:
+            async with self._session_factory() as session:
+                dao = TorrentGroupDAO(session)
+                result = await dao_coro(dao)
+                await session.commit()
+            # result is expected to be a dict with "groups_created" and "items_grouped"
+            count = result.get("groups_created", 0) + result.get("items_grouped", 0)
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            logger.warning(
+                f"[scheduler] {job_id}: groups_created={result.get('groups_created', 0)}, "
+                f"items_grouped={result.get('items_grouped', 0)} in {duration_ms}ms"
+            )
             r.hset(_job_redis_key(job_id), mapping={
                 "last_run_at":        int(time.time()),
                 "last_duration_ms":   duration_ms,
@@ -205,6 +253,20 @@ class StreamFusionScheduler:
             """,
         )
 
+    async def _group_by_info_hash(self) -> None:
+        """Create/extend torrent groups for all items sharing the same info_hash."""
+        await self._run_dao_job(
+            "torrent_group_hash",
+            lambda dao: dao.batch_group_by_info_hash(),
+        )
+
+    async def _group_by_title_size(self) -> None:
+        """Create/extend torrent groups for items with the same normalized title and similar size."""
+        await self._run_dao_job(
+            "torrent_group_title_size",
+            lambda dao: dao.batch_group_by_title_size(),
+        )
+
     async def _cleanup_api_keys(self) -> None:
         await self._run_job(
             "api_keys_cleanup",
@@ -245,12 +307,14 @@ class StreamFusionScheduler:
         leader_pid = int(leader_raw) if leader_raw else None
 
         job_intervals = {
-            "debrid_cache_cleanup":   settings.scheduler_debrid_cleanup_interval_hours,
-            "torrent_old_cleanup":    settings.scheduler_torrent_cleanup_interval_hours,
-            "torrent_orphan_cleanup": settings.scheduler_torrent_cleanup_interval_hours,
-            "torrent_dedup":          settings.scheduler_torrent_cleanup_interval_hours,
-            "api_keys_cleanup":       settings.scheduler_keys_cleanup_interval_hours,
-            "peer_keys_cleanup":      settings.scheduler_keys_cleanup_interval_hours,
+            "debrid_cache_cleanup":     settings.scheduler_debrid_cleanup_interval_hours,
+            "torrent_old_cleanup":      settings.scheduler_torrent_cleanup_interval_hours,
+            "torrent_orphan_cleanup":   settings.scheduler_torrent_cleanup_interval_hours,
+            "torrent_dedup":            settings.scheduler_torrent_cleanup_interval_hours,
+            "torrent_group_hash":       settings.scheduler_torrent_cleanup_interval_hours,
+            "torrent_group_title_size": settings.scheduler_torrent_cleanup_interval_hours,
+            "api_keys_cleanup":         settings.scheduler_keys_cleanup_interval_hours,
+            "peer_keys_cleanup":        settings.scheduler_keys_cleanup_interval_hours,
         }
 
         jobs = []

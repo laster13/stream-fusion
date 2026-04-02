@@ -10,6 +10,11 @@ from stream_fusion.services.postgresql.models.mismatch_model import TmdbMismatch
 from stream_fusion.logging_config import logger
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
 
+# Lazy import to avoid circular dependencies — only imported when propagation is needed
+def _get_group_dao_class():
+    from stream_fusion.services.postgresql.dao.torrentgroup_dao import TorrentGroupDAO
+    return TorrentGroupDAO
+
 class TorrentItemDAO:
 
     def __init__(self, session: AsyncSession = Depends(get_db_session)) -> None:
@@ -114,6 +119,21 @@ class TorrentItemDAO:
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error retrieving TorrentItems by info_hash {info_hash}: {str(e)}")
                 return None
+
+    async def get_group_ids_by_ids(self, item_ids: List[str]) -> dict:
+        """Return {item_id: group_id} for the given item IDs (single batch query)."""
+        if not item_ids:
+            return {}
+        async with self.session.begin():
+            try:
+                result = await self.session.execute(
+                    select(TorrentItemModel.id, TorrentItemModel.group_id)
+                    .where(TorrentItemModel.id.in_(item_ids))
+                )
+                return {row[0]: row[1] for row in result.fetchall()}
+            except Exception as e:
+                logger.error(f"TorrentItemDAO: Error in get_group_ids_by_ids: {e}")
+                return {}
 
     async def get_torrent_items_by_indexer(self, indexer: str) -> List[TorrentItemModel]:
         async with self.session.begin():
@@ -299,6 +319,8 @@ class TorrentItemDAO:
             row_count = result.rowcount
             if row_count:
                 logger.debug(f"TorrentItemDAO: Updated {row_count} torrents with info_hash '{info_hash}' to tmdb_id {tmdb_id}")
+                # Propagate the new tmdb_id to all members of the group (if any)
+                await self._propagate_tmdb_to_groups_by_hash(info_hash, tmdb_id)
             else:
                 logger.debug(f"TorrentItemDAO: Skipped tmdb_id assignment for '{info_hash}' (already set or known mismatch)")
             return row_count
@@ -376,6 +398,9 @@ class TorrentItemDAO:
                     f"TorrentItemDAO: Updated {total_rows} torrents with raw_title '{raw_title}'"
                     f" (indexer={indexer}{sibling_info}) to tmdb_id {tmdb_id}"
                 )
+                # Propagate tmdb_id to group members for all affected hashes
+                for info_hash in (safe_hashes if matched_hashes else []):
+                    await self._propagate_tmdb_to_groups_by_hash(info_hash, tmdb_id)
             else:
                 logger.debug(
                     f"TorrentItemDAO: Skipped tmdb_id for raw_title '{raw_title}'"
@@ -689,3 +714,65 @@ class TorrentItemDAO:
         except Exception as e:
             logger.error(f"TorrentItemDAO: Error in assign_tmdb_by_info_hashes: {str(e)}")
             return 0
+
+    # ------------------------------------------------------------------
+    # Similarity search (used by auto-grouping in TorrentService)
+    # ------------------------------------------------------------------
+
+    async def find_similar_by_size(
+        self,
+        size: int,
+        max_diff: int = 524288,  # 512 KB absolute tolerance
+        exclude_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[TorrentItemModel]:
+        """Return items whose size is within *max_diff* bytes of *size*.
+
+        Default tolerance is 512 KB — enough to cover the presence/absence of
+        an NFO file while being far too small to confuse different encodes.
+        """
+        if size <= 0:
+            return []
+        min_size = max(0, size - max_diff)
+        max_size = size + max_diff
+        async with self.session.begin():
+            try:
+                conditions = [
+                    TorrentItemModel.size.between(min_size, max_size),
+                    TorrentItemModel.size > 0,
+                ]
+                if exclude_id:
+                    conditions.append(TorrentItemModel.id != exclude_id)
+                query = select(TorrentItemModel).where(*conditions).limit(limit)
+                result = await self.session.execute(query)
+                items = list(result.scalars().all())
+                logger.trace(
+                    f"TorrentItemDAO: find_similar_by_size({size}, ±{max_diff} bytes) "
+                    f"→ {len(items)} candidates"
+                )
+                return items
+            except Exception as e:
+                logger.error(f"TorrentItemDAO: Error in find_similar_by_size: {e}")
+                return []
+
+    # ------------------------------------------------------------------
+    # Group-aware TMDB propagation helpers
+    # ------------------------------------------------------------------
+
+    async def _propagate_tmdb_to_groups_by_hash(self, info_hash: str, tmdb_id: int) -> None:
+        """If the item(s) with info_hash belong to a group, propagate tmdb_id to the group."""
+        try:
+            rows = await self.session.execute(
+                select(TorrentItemModel.group_id)
+                .where(TorrentItemModel.info_hash == info_hash)
+                .where(TorrentItemModel.group_id.isnot(None))
+            )
+            group_ids = list({r[0] for r in rows.fetchall()})
+            if not group_ids:
+                return
+            GroupDAO = _get_group_dao_class()
+            group_dao = GroupDAO(self.session)
+            for gid in group_ids:
+                await group_dao.propagate_tmdb_within_group(gid)
+        except Exception as e:
+            logger.warning(f"TorrentItemDAO: _propagate_tmdb_to_groups_by_hash error: {e}")

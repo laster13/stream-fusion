@@ -6,7 +6,7 @@ from stream_fusion.utils.filter.language_priority_filter import LanguagePriority
 from stream_fusion.utils.filter.max_size_filter import MaxSizeFilter
 from stream_fusion.utils.filter.quality_exclusion_filter import QualityExclusionFilter
 from stream_fusion.utils.filter.title_exclusion_filter import TitleExclusionFilter
-from stream_fusion.utils.filter.title_matching import get_matcher
+from stream_fusion.utils.filter.title_matching import get_matcher, get_normalizer
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
 from stream_fusion.logging_config import logger
 
@@ -269,14 +269,116 @@ def sort_items(items, config):
 def merge_items(
     cache_items: List[TorrentItem], search_items: List[TorrentItem]
 ) -> List[TorrentItem]:
-    """Merge two item lists, deduplicating by (raw_title, size, privacy) and keeping the highest-priority source."""
+    """Merge two item lists, deduplicating across four identity dimensions.
+
+    Deduplication priority (first match wins, with cross-referencing):
+      1. info_hash  — same hash = same torrent (100% certainty)
+      2. group_id   — same DB group = same content
+      3. normalized title + size (512-KB bucket, absolute tolerance)
+                   — covers different hashes for the same file across trackers;
+                     this catches the most duplicates in practice
+      4. (raw_title, size, privacy)  — legacy fallback
+
+    Cross-referencing: when an item matches via one dimension its other dimensions
+    are registered under the same key, so subsequent items with a different hash but
+    the same normalized title+size will resolve to the same bucket.
+
+    The best representative per bucket is kept (lower indexer priority score,
+    then highest seeder count).
+    """
     logger.trace(
         f"Filters: Merging cached items ({len(cache_items)}) and search items ({len(search_items)})"
     )
+    # Absolute size tolerance: 512 KB.  Covers presence/absence of an NFO file
+    # (<10 KB) while being far too small to confuse different encodes (which
+    # differ by megabytes).
+    _SIZE_BUCKET = 524288  # 512 * 1024 bytes
+
     merged_dict: dict[tuple, TorrentItem] = {}
+    hash_to_key: dict[str, tuple] = {}        # normalized info_hash → assigned dedup key
+    group_to_key: dict[int, tuple] = {}        # group_id            → assigned dedup key
+    title_size_to_key: dict[tuple, tuple] = {} # (norm_title, size_bucket) → assigned dedup key
+
+    # TitleNormalizer singleton — may be None during cold-start before initialization
+    try:
+        _normalizer = get_normalizer()
+    except Exception:
+        _normalizer = None
+
+    def _norm_title(raw_title: str):
+        """Return the pipeline-normalized title string, or None on failure."""
+        if _normalizer is None or not raw_title:
+            return None
+        try:
+            clean = _normalizer.extract_clean_title(raw_title)
+            return _normalizer.normalize(clean)
+        except Exception:
+            return None
+
+    def _register(key: tuple, norm_hash, gid, ts_keys: list):
+        """Register all identity dimensions under the given key for future cross-refs.
+
+        ts_keys is a list of up to two adjacent bucket keys so that items at a
+        512-KB bucket boundary are still matched against each other.
+        """
+        if norm_hash and norm_hash not in hash_to_key:
+            hash_to_key[norm_hash] = key
+        if gid is not None and gid not in group_to_key:
+            group_to_key[gid] = key
+        for tsk in ts_keys:
+            if tsk not in title_size_to_key:
+                title_size_to_key[tsk] = key
+
+    def _dedup_key(item: TorrentItem) -> tuple:
+        norm_hash = item.info_hash.lower().strip() if item.info_hash else None
+        gid = getattr(item, "group_id", None)
+        norm_title = _norm_title(item.raw_title)
+        try:
+            _size = int(item.size) if item.size else 0
+        except (ValueError, TypeError):
+            _size = 0
+
+        # Build TWO adjacent bucket keys so items that straddle a 512-KB boundary
+        # are still treated as duplicates (cross-boundary matching).
+        ts_keys: list = []
+        if norm_title and _size > 0:
+            bucket = _size // _SIZE_BUCKET
+            ts_keys = [(norm_title, bucket), (norm_title, bucket - 1)]
+
+        # ── 1. info_hash already seen ──────────────────────────────────────────
+        if norm_hash and norm_hash in hash_to_key:
+            key = hash_to_key[norm_hash]
+            _register(key, norm_hash, gid, ts_keys)
+            return key
+
+        # ── 2. group_id already seen ───────────────────────────────────────────
+        if gid is not None and gid in group_to_key:
+            key = group_to_key[gid]
+            _register(key, norm_hash, gid, ts_keys)
+            return key
+
+        # ── 3. normalized title + size already seen (check both adjacent buckets)
+        for tsk in ts_keys:
+            if tsk in title_size_to_key:
+                key = title_size_to_key[tsk]
+                _register(key, norm_hash, gid, ts_keys)
+                return key
+
+        # ── 4. Brand new item — create a key (hash > group > title_size > legacy)
+        if norm_hash:
+            key = ("hash", norm_hash)
+        elif gid is not None:
+            key = ("group", gid)
+        elif ts_keys:
+            key = ("title_size", ts_keys[0])
+        else:
+            key = ("legacy", item.raw_title, item.size, item.privacy)
+
+        _register(key, norm_hash, gid, ts_keys)
+        return key
 
     def add_to_merged(item: TorrentItem):
-        key = (item.raw_title, item.size, item.privacy)
+        key = _dedup_key(item)
         existing = merged_dict.get(key)
         if existing is None:
             merged_dict[key] = item

@@ -34,7 +34,8 @@ _TORBOX_PREFERRED_INDEXERS = {
 
 class TorrentItem:
     def __init__(self, raw_title, size, magnet, info_hash, link, seeders, languages, indexer,
-                 privacy, type=None, parsed_data=None, torrent_download=None, tmdb_id=None):
+                 privacy, type=None, parsed_data=None, torrent_download=None, tmdb_id=None,
+                 group_id=None):
         self.logger = logger
 
         self.raw_title = raw_title
@@ -48,6 +49,8 @@ class TorrentItem:
         self.type = type
         self.privacy = privacy
         self.tmdb_id = tmdb_id
+        # Group relationship — None for items not yet grouped
+        self.group_id = group_id
 
         self.file_name = None
         self.files = None
@@ -243,6 +246,7 @@ class TorrentItem:
             'type': self.type,
             'privacy': self.privacy,
             'tmdb_id': self.tmdb_id,
+            'group_id': self.group_id,
             'file_name': self.file_name,
             'files': self.files,
             'torrent_download': self.torrent_download,
@@ -270,7 +274,8 @@ class TorrentItem:
             indexer=data['indexer'],
             privacy=data['privacy'],
             type=data['type'],
-            tmdb_id=data.get('tmdb_id')
+            tmdb_id=data.get('tmdb_id'),
+            group_id=data.get('group_id'),
         )
 
         instance.file_name = data['file_name']

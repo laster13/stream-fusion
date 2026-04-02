@@ -6,6 +6,7 @@ import asyncio
 
 from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
 from stream_fusion.services.postgresql.dao.torrentitem_dao import TorrentItemDAO
+from stream_fusion.services.postgresql.dao.torrentgroup_dao import TorrentGroupDAO
 from stream_fusion.services.postgresql.dependencies import get_db_session
 from stream_fusion.services.redis.redis_config import get_redis_cache_dependency
 from stream_fusion.utils.cache.local_redis import RedisCache
@@ -162,7 +163,7 @@ async def full_prefetch_from_cache(
             background_session = request.app.state.db_session_factory()
             try:
                 background_torrent_dao = TorrentItemDAO(background_session)
-                torrent_service = TorrentService(config, background_torrent_dao)
+                torrent_service = TorrentService(config, background_torrent_dao, TorrentGroupDAO(background_session))
 
                 # Pre-fetch goes directly to live indexers — no Postgres cache check.
                 # The user is not impacted by latency here, and a fresh live search
@@ -623,7 +624,7 @@ async def get_results(
 
     async def get_search_results(media, config):
         search_results = []
-        torrent_service = TorrentService(config, torrent_dao)
+        torrent_service = TorrentService(config, torrent_dao, TorrentGroupDAO(torrent_dao.session))
         categories = config.get("indexerCategories", {})
 
         def _get_cat(key):
@@ -893,7 +894,7 @@ async def get_results(
             bg_session = request.app.state.db_session_factory()
             try:
                 bg_torrent_dao = TorrentItemDAO(bg_session)
-                bg_torrent_service = TorrentService(config, bg_torrent_dao)
+                bg_torrent_service = TorrentService(config, bg_torrent_dao, TorrentGroupDAO(bg_session))
                 _avail_redis = await RedisCache(config).get_redis_client()
                 http_session_bg = getattr(request.app.state, "http_session", None)
 

@@ -322,6 +322,75 @@
                 </button>
             </div>
 
+            <!-- Groupement de torrents -->
+            <div class="maint-group-label mt-3">Groupement de torrents (déduplication)</div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">
+                        Grouper par info_hash identique
+                        <span class="badge bg-secondary ms-1" id="groupedItemsBadge">—</span>
+                    </div>
+                    <div class="maint-action-desc">
+                        Relie les <code>torrent_items</code> qui partagent exactement le même <code>info_hash</code>
+                        (certitude 100% — même torrent repris par plusieurs indexeurs). Propagation automatique du TMDB ID.
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-info flex-shrink-0 maint-btn"
+                        data-action="group-by-infohash"
+                        data-confirm-title="Grouper par info_hash ?"
+                        data-confirm-body="Les torrents partageant le même info_hash seront reliés dans la table torrent_groups. Aucune suppression.">
+                    <i class="bi bi-diagram-3 me-1"></i>Grouper
+                </button>
+            </div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">Grouper par titre normalisé + taille similaire</div>
+                    <div class="maint-action-desc">
+                        Détecte les torrents identiques publiés sous des titres légèrement différents (normalisation)
+                        et avec une taille quasi-identique (±0,5 %). Couvre les cas où des trackers recalculent l'hash.
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-info flex-shrink-0 maint-btn"
+                        data-action="group-by-title-size"
+                        data-confirm-title="Grouper par titre + taille ?"
+                        data-confirm-body="Les torrents avec le même titre normalisé et une taille similaire (±0,5 %) seront groupés. Aucune suppression.">
+                    <i class="bi bi-diagram-2 me-1"></i>Grouper
+                </button>
+            </div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">Propager les TMDB IDs dans les groupes</div>
+                    <div class="maint-action-desc">
+                        Pour chaque groupe existant, propage le <code>tmdb_id</code> consensuel
+                        aux membres qui n'en ont pas encore un.
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-success flex-shrink-0 maint-btn"
+                        data-action="propagate-tmdb-groups"
+                        data-confirm-title="Propager les TMDB IDs ?"
+                        data-confirm-body="Le tmdb_id le plus fréquent au sein de chaque groupe sera assigné aux membres qui n'en ont pas. Les mismatches connus sont respectés.">
+                    <i class="bi bi-arrow-repeat me-1"></i>Propager
+                </button>
+            </div>
+
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">Nettoyer les groupes vides</div>
+                    <div class="maint-action-desc">
+                        Supprime les entrées <code>torrent_groups</code> qui n'ont plus aucun membre.
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary flex-shrink-0 maint-btn"
+                        data-action="cleanup-empty-groups"
+                        data-confirm-title="Supprimer les groupes vides ?"
+                        data-confirm-body="Les groupes sans aucun torrent_item associé seront supprimés définitivement.">
+                    <i class="bi bi-trash3 me-1"></i>Nettoyer
+                </button>
+            </div>
+
         </div>
     </div>
 
@@ -632,6 +701,9 @@ async function loadStats() {
             document.getElementById('expiredDebridCount').textContent = fmt(dCache.expired);
         if (typeof tItems.orphans === 'number')
             document.getElementById('orphanTorrentCount').textContent = fmt(tItems.orphans);
+        const tGroups = pg.torrent_groups || {};
+        if (typeof tGroups.grouped_items === 'number')
+            document.getElementById('groupedItemsBadge').textContent = fmt(tGroups.grouped_items) + ' groupé(s)';
 
         // Update Redis key count badges
         const keyCounts = rd.key_counts || {};
@@ -652,6 +724,12 @@ async function loadStats() {
               sub: [
                 tItems.orphans > 0 ? `${fmt(tItems.orphans)} orphelins` : null,
                 tItems.old_90d > 0 ? `${fmt(tItems.old_90d)} >90j` : null,
+              ].filter(Boolean).join(' · ') || null },
+            { label: 'Groupes torrents',    value: fmt(tGroups.total_groups),  color: 'text-info',
+              sub: [
+                tGroups.grouped_items > 0   ? `${fmt(tGroups.grouped_items)} groupé(s)` : null,
+                tGroups.ungrouped_items > 0 ? `${fmt(tGroups.ungrouped_items)} non groupé(s)` : null,
+                tGroups.groups_with_tmdb > 0 ? `${fmt(tGroups.groups_with_tmdb)} avec TMDB` : null,
               ].filter(Boolean).join(' · ') || null },
             { label: 'Mappings méta',       value: fmt(pg.metadata_mappings),color: 'text-secondary', sub: null },
         ];

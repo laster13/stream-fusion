@@ -12,6 +12,7 @@ from RTN import parse
 from RTN.models import ParsedData
 
 from stream_fusion.services.postgresql.dao.torrentitem_dao import TorrentItemDAO
+from stream_fusion.services.postgresql.dao.torrentgroup_dao import TorrentGroupDAO
 from stream_fusion.utils.jackett.jackett_result import JackettResult
 from stream_fusion.utils.zilean.zilean_result import ZileanResult
 from stream_fusion.utils.yggfilx.yggflix_result import YggflixResult
@@ -39,9 +40,10 @@ _UNIT3D_CREDENTIAL_INDEXERS = frozenset({
 class TorrentService:
     TORRENT_CACHE_DIR = pathlib.Path("/var/cache/torrents")
 
-    def __init__(self, config, torrent_dao: TorrentItemDAO):
+    def __init__(self, config, torrent_dao: TorrentItemDAO, group_dao: TorrentGroupDAO = None):
         self.config = config
         self.torrent_dao = torrent_dao
+        self.group_dao = group_dao
         self.logger = logger
         self.__session = requests.Session()
         self.TORRENT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -103,6 +105,7 @@ class TorrentService:
             )
             return
 
+        newly_created = False
         try:
             existing = await self.torrent_dao.get_torrent_item_by_id(unique_id)
             if existing:
@@ -110,11 +113,118 @@ class TorrentService:
             else:
                 await self.torrent_dao.create_torrent_item(torrent_item, unique_id)
                 self.logger.trace(f"TorrentService: Created new cached torrent: {unique_id}")
+                newly_created = True
         except Exception as e:
             if "duplicate key value violates unique constraint" in str(e):
                 self.logger.trace(f"TorrentService: Race condition, torrent already exists: {unique_id}")
             else:
                 self.logger.error(f"TorrentService: Error caching torrent {unique_id}: {str(e)}")
+
+        # Auto-group newly inserted items so duplicates are linked incrementally
+        if newly_created and self.group_dao is not None:
+            await self._auto_group_item(torrent_item, unique_id)
+
+    async def _auto_group_item(self, item: TorrentItem, item_id: str) -> None:
+        """Try to assign a newly inserted item to an existing group or create one.
+
+        Two-pass strategy:
+        1. Exact info_hash match → guaranteed duplicate, group immediately.
+        2. Size ±0.5% + normalized title → high-confidence soft duplicate.
+
+        Any failure is silently swallowed — grouping must never block caching.
+        """
+        try:
+            from stream_fusion.utils.filter.title_matching import get_normalizer
+
+            # ── pass 1: info_hash siblings ─────────────────────────────────────
+            if item.info_hash:
+                siblings = await self.torrent_dao.get_torrent_items_by_info_hash(item.info_hash)
+                siblings = [s for s in (siblings or []) if s.id != item_id]
+
+                if siblings:
+                    # Find if any sibling already has a group
+                    grouped = next((s for s in siblings if s.group_id is not None), None)
+                    if grouped:
+                        group_id = grouped.group_id
+                        await self.group_dao.assign_item_to_group(group_id, item_id)
+                    else:
+                        # Create a new group for all of them including the new item
+                        all_ids = [item_id] + [s.id for s in siblings]
+                        canonical_title = item.raw_title
+                        tmdb_id = item.tmdb_id or next((s.tmdb_id for s in siblings if s.tmdb_id), None)
+                        group = await self.group_dao.create_group(
+                            canonical_info_hash=item.info_hash.lower(),
+                            canonical_title=canonical_title,
+                            tmdb_id=tmdb_id,
+                        )
+                        group_id = group.id
+                        await self.group_dao.assign_items_to_group(group_id, all_ids)
+
+                    await self.group_dao.propagate_tmdb_within_group(group_id)
+                    await self.group_dao.session.commit()
+                    item.group_id = group_id  # propagate to in-memory object (fixes merge_items + Redis serialisation)
+                    self.logger.trace(
+                        f"TorrentService: Auto-grouped {item_id} by info_hash → group {group_id}"
+                    )
+                    return  # Done — no need for title+size pass
+
+            # ── pass 2: size ±0.5% + normalized title ─────────────────────────
+            normalizer = get_normalizer()
+
+            # Defensively cast size to int — some indexers return it as a string
+            try:
+                safe_size = int(item.size) if item.size else 0
+            except (ValueError, TypeError):
+                safe_size = 0
+
+            if normalizer is None or not safe_size:
+                return
+
+            try:
+                clean = normalizer.extract_clean_title(item.raw_title)
+                norm = normalizer.normalize(clean)
+            except Exception:
+                norm = item.raw_title.lower()
+
+            candidates = await self.torrent_dao.find_similar_by_size(
+                size=safe_size, max_diff=524288, exclude_id=item_id, limit=50
+            )
+
+            for candidate in candidates:
+                try:
+                    cand_clean = normalizer.extract_clean_title(candidate.raw_title)
+                    cand_norm = normalizer.normalize(cand_clean)
+                except Exception:
+                    cand_norm = candidate.raw_title.lower()
+
+                if cand_norm != norm:
+                    continue
+
+                # Match found — join or create group
+                if candidate.group_id is not None:
+                    group_id = candidate.group_id
+                    await self.group_dao.assign_item_to_group(group_id, item_id)
+                else:
+                    canonical_hash = item.info_hash or candidate.info_hash
+                    tmdb_id = item.tmdb_id or candidate.tmdb_id
+                    group = await self.group_dao.create_group(
+                        canonical_info_hash=canonical_hash.lower() if canonical_hash else None,
+                        canonical_title=norm,
+                        tmdb_id=tmdb_id,
+                    )
+                    group_id = group.id
+                    await self.group_dao.assign_items_to_group(group_id, [item_id, candidate.id])
+
+                await self.group_dao.propagate_tmdb_within_group(group_id)
+                await self.group_dao.session.commit()
+                item.group_id = group_id  # propagate to in-memory object (fixes merge_items + Redis serialisation)
+                self.logger.trace(
+                    f"TorrentService: Auto-grouped {item_id} by title+size → group {group_id}"
+                )
+                return  # Grouped with the first matching candidate
+
+        except Exception as e:
+            self.logger.warning(f"TorrentService: _auto_group_item({item_id}) failed: {e}")
 
     async def _update_cached_item(self, cached_item: TorrentItem, new_item: TorrentItem):
         try:
@@ -183,6 +293,23 @@ class TorrentService:
             self._strip_private_credentials(processed_torrent_item)
             await self.cache_torrent(processed_torrent_item)
             torrent_items_result.append(processed_torrent_item)
+
+        # Refresh group_id for all items in one batch query so that the very
+        # first item in a newly-created group (which had group_id=None when it
+        # was processed) gets its group_id before merge_items runs.
+        if self.group_dao is not None and torrent_items_result:
+            try:
+                id_map = {
+                    self.__generate_unique_id(item.raw_title, item.indexer): item
+                    for item in torrent_items_result
+                }
+                group_id_map = await self.torrent_dao.get_group_ids_by_ids(list(id_map.keys()))
+                for uid, item in id_map.items():
+                    db_group_id = group_id_map.get(uid)
+                    if db_group_id is not None:
+                        item.group_id = db_group_id
+            except Exception as e:
+                self.logger.warning(f"TorrentService: group_id refresh failed: {e}")
 
         return torrent_items_result
 

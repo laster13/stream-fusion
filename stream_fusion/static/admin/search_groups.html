@@ -1,0 +1,423 @@
+{% extends "base.html" %}
+{% block title %}Groupes de torrents — StreamFusion Admin{% endblock %}
+{% block page_title %}Groupes de torrents{% endblock %}
+
+{% block extra_head %}
+<style>
+    .lang-badge {
+        font-size: 0.72rem;
+        background: rgba(13,110,253,0.12);
+        color: #6ea8fe;
+        border: 1px solid rgba(13,110,253,0.25);
+        border-radius: 4px;
+        padding: 1px 6px;
+    }
+    code.hash-code {
+        font-size: 0.78rem;
+        color: var(--bs-secondary-color);
+        letter-spacing: 0.01em;
+    }
+    .raw-title-cell { font-size: 0.875rem; max-width: 320px; word-break: break-word; line-height: 1.35; }
+    /* Group section — each torrent_group is a card-like section */
+    .tgroup-header {
+        background: rgba(13,110,253,0.06);
+        border-left: 3px solid rgba(13,110,253,0.4);
+        font-size: 0.82rem;
+        user-select: none;
+        cursor: pointer;
+    }
+    .tgroup-header:hover { background: rgba(13,110,253,0.10); }
+    [data-bs-theme="light"] .tgroup-header { background: rgba(13,110,253,0.05); }
+    [data-bs-theme="light"] .tgroup-header:hover { background: rgba(13,110,253,0.09); }
+    /* Indexer sub-grouping (within a torrent group) */
+    .igroup-header {
+        background: rgba(255,255,255,0.03);
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--bs-secondary-color);
+        user-select: none;
+        cursor: pointer;
+    }
+    .igroup-header:hover { background: rgba(255,255,255,0.06); }
+    [data-bs-theme="light"] .igroup-header { background: rgba(0,0,0,0.03); }
+    [data-bs-theme="light"] .igroup-header:hover { background: rgba(0,0,0,0.06); }
+    .group-toggle i { font-size: 0.7rem; }
+    .tmdb-pill {
+        font-size: 0.72rem;
+        background: rgba(1,180,120,0.12);
+        color: #20c997;
+        border: 1px solid rgba(1,180,120,0.3);
+        border-radius: 4px;
+        padding: 1px 7px;
+        text-decoration: none;
+    }
+    .tmdb-pill:hover { background: rgba(1,180,120,0.2); }
+    .group-meta { font-size: 0.78rem; color: var(--bs-secondary-color); }
+    .virtual-group-banner {
+        background: rgba(255,193,7,0.08);
+        border-left: 3px solid rgba(255,193,7,0.5);
+        font-size: 0.82rem;
+        padding: 10px 16px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Search bar -->
+<form method="get" action="{{ url_for('search_groups_page')(request) }}" class="d-flex gap-2 mb-3" style="max-width:520px;">
+    <input type="text" name="q" value="{{ query }}"
+           class="form-control"
+           placeholder="TMDB ID (ex: 272565)  ·  info_hash (40 hex)  ·  titre libre"
+           autocomplete="off" autofocus>
+    <button type="submit" class="btn btn-primary flex-shrink-0">
+        <i class="bi bi-search me-1"></i>Rechercher
+    </button>
+</form>
+<p class="text-secondary mb-4" style="font-size:0.8rem;">
+    <i class="bi bi-info-circle me-1"></i>
+    La recherche détecte automatiquement le type : <strong>TMDB ID</strong> (chiffres),
+    <strong>info_hash</strong> (40 caractères hex), ou <strong>titre</strong> (recherche partielle).
+</p>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+{% if query and not error %}
+    {% if not results %}
+    <div class="text-center text-secondary py-5">
+        <i class="bi bi-collection fs-2 d-block mb-2"></i>
+        Aucun groupe trouvé pour <code class="text-primary">{{ query }}</code>
+    </div>
+    {% else %}
+
+    <!-- Summary bar -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <span class="text-secondary" style="font-size:0.85rem;">
+            {% set total_items = results | sum(attribute='members', start=[]) | list | length %}
+            <strong>{{ results | length }}</strong> groupe(s)
+            · <strong>{{ total_items }}</strong> torrent(s) au total
+            {% if search_type == 'tmdb' %}
+              pour TMDB ID <a href="{{ url_for('search_tmdb_page')(request) }}?q={{ query }}" class="text-primary">{{ query }}</a>
+            {% elif search_type == 'hash' %}
+              pour hash <code class="text-primary">{{ query[:20] }}…</code>
+            {% else %}
+              pour le titre « <em>{{ query }}</em> »
+            {% endif %}
+        </span>
+        <!-- Filter controls -->
+        <div class="d-flex align-items-center gap-2">
+            <input type="text" id="filterText" class="form-control form-control-sm"
+                   style="width:180px;font-size:0.83rem;" placeholder="Filtrer par titre, hash…">
+            <select id="filterIndexer" class="form-select form-select-sm" style="width:auto;min-width:140px;font-size:0.83rem;">
+                <option value="">Tous les indexeurs</option>
+            </select>
+            <button id="clearFilters" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-x-lg"></i>
+            </button>
+            <span id="filteredCount" class="text-secondary ms-1" style="font-size:0.8rem;"></span>
+        </div>
+    </div>
+
+    <!-- Groups -->
+    <div id="groupsContainer">
+    {% for entry in results %}
+        {% set g = entry.group %}
+        {% set items = entry.members %}
+        {% set gid = g.id if g else 'virtual' %}
+
+        {% if g %}
+        <!-- ── Torrent Group header ── -->
+        <div class="tgroup-header rounded-top d-flex align-items-center gap-3 px-3 py-2 mb-0 mt-3"
+             data-tgroup="{{ gid }}" style="border-radius:6px 6px 0 0 !important;">
+            <button class="btn btn-link btn-sm p-0 tgroup-toggle text-secondary" data-tgroup="{{ gid }}" tabindex="-1">
+                <i class="bi bi-chevron-down"></i>
+            </button>
+            <i class="bi bi-collection text-info"></i>
+            <span style="font-weight:600;">
+                Groupe #{{ g.id }}
+                {% if g.canonical_title %}&nbsp;·&nbsp;<span style="font-weight:400;">{{ g.canonical_title }}</span>{% endif %}
+            </span>
+            {% if g.tmdb_id %}
+            <a href="{{ url_for('search_tmdb_page')(request) }}?q={{ g.tmdb_id }}" class="tmdb-pill" target="_blank">
+                <i class="bi bi-film me-1"></i>TMDB {{ g.tmdb_id }}
+            </a>
+            {% endif %}
+            <span class="group-meta ms-auto">
+                <i class="bi bi-files me-1"></i>{{ g.item_count }} item(s)
+                {% if g.canonical_info_hash %}
+                &nbsp;·&nbsp;<code class="hash-code">{{ g.canonical_info_hash[:12] }}…</code>
+                {% endif %}
+            </span>
+        </div>
+        {% else %}
+        <!-- Virtual group (ungrouped items matching the hash) -->
+        <div class="virtual-group-banner rounded-top mt-3" style="border-radius:6px 6px 0 0 !important;">
+            <i class="bi bi-exclamation-triangle text-warning me-2"></i>
+            <strong>Items non groupés</strong> — ces torrents ont l'info_hash recherché mais ne sont pas encore dans un groupe.
+        </div>
+        {% endif %}
+
+        <!-- Items table (collapsible by group) -->
+        <div class="tgroup-body table-responsive border border-top-0 rounded-bottom mb-0"
+             id="tgroup-body-{{ gid }}" style="border-radius:0 0 6px 6px !important;">
+            <table class="table table-hover align-middle mb-0" style="font-size:0.85rem;">
+                <thead>
+                    <tr style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--bs-secondary-color);">
+                        <th class="ps-3">Titre brut</th>
+                        <th>Indexeur</th>
+                        <th>Hash</th>
+                        <th>Taille</th>
+                        <th style="text-align:right;">Seeders</th>
+                        <th>Langues</th>
+                        <th>Mis à jour</th>
+                        <th>Liens</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for indexer_name, igroup in items | groupby('indexer') %}
+                    <!-- Indexer sub-header -->
+                    <tr class="igroup-header" data-igroup-header="{{ gid }}-{{ indexer_name }}">
+                        <td colspan="8" class="py-1 px-3">
+                            <div class="d-flex align-items-center gap-2">
+                                <button class="btn btn-link btn-sm p-0 igroup-toggle text-secondary"
+                                        data-igroup="{{ gid }}-{{ indexer_name }}" tabindex="-1">
+                                    <i class="bi bi-chevron-down"></i>
+                                </button>
+                                <i class="bi bi-server" style="font-size:0.75rem;"></i>
+                                {{ indexer_name }}
+                                <span style="font-size:0.68rem;opacity:0.6;">({{ igroup | list | length }})</span>
+                            </div>
+                        </td>
+                    </tr>
+                    {% for r in igroup %}
+                    <tr data-tgroup-item="{{ gid }}"
+                        data-igroup="{{ gid }}-{{ indexer_name }}"
+                        data-search="{{ r.raw_title }} {{ r.info_hash }}"
+                        data-indexer="{{ r.indexer }}">
+                        <td class="raw-title-cell ps-3">
+                            {% if r.type == 'series' %}
+                            <span class="badge me-1" style="font-size:0.63rem;background:rgba(13,202,240,0.15);color:#0dcaf0;border:1px solid rgba(13,202,240,0.3);">S</span>
+                            {% elif r.type == 'movie' %}
+                            <span class="badge me-1" style="font-size:0.63rem;background:rgba(13,110,253,0.15);color:#6ea8fe;border:1px solid rgba(13,110,253,0.3);">M</span>
+                            {% endif %}
+                            {{ r.raw_title }}
+                            {% if r.tmdb_id and (not g or r.tmdb_id != g.tmdb_id) %}
+                            <span class="ms-1" style="font-size:0.68rem;color:var(--bs-secondary-color);">TMDB {{ r.tmdb_id }}</span>
+                            {% endif %}
+                        </td>
+                        <td style="font-size:0.78rem;white-space:nowrap;">{{ r.indexer }}</td>
+                        <td>
+                            <div class="d-flex align-items-center gap-1">
+                                <code class="hash-code">{{ (r.info_hash or '')[:10] }}{% if r.info_hash %}…{% endif %}</code>
+                                {% if r.info_hash %}
+                                <button class="btn btn-link btn-sm p-0 copy-btn text-secondary"
+                                        title="Copier le hash" data-value="{{ r.info_hash }}">
+                                    <i class="bi bi-clipboard" style="font-size:0.78rem;"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td style="white-space:nowrap;font-size:0.8rem;">{{ r.size | fmt_size }}</td>
+                        <td style="text-align:right;font-size:0.8rem;font-variant-numeric:tabular-nums;">
+                            {{ r.seeders if r.seeders is not none else '—' }}
+                        </td>
+                        <td>
+                            <div class="d-flex flex-wrap gap-1">
+                                {% for lang in (r.languages or []) %}
+                                <span class="lang-badge">{{ lang }}</span>
+                                {% endfor %}
+                            </div>
+                        </td>
+                        <td style="white-space:nowrap;">
+                            <div style="font-size:0.79rem;">{{ r.updated_at | fmt_relative }}</div>
+                            <div style="font-size:0.7rem;color:var(--bs-secondary-color);">{{ r.updated_at | fmt_date }}</div>
+                        </td>
+                        <td>
+                            <div class="d-flex gap-1">
+                                {% if r.info_hash %}
+                                <a href="{{ url_for('search_hash_page')(request) }}?q={{ r.info_hash }}"
+                                   class="btn btn-sm btn-outline-info" title="Détail par hash">
+                                    <i class="bi bi-hash"></i>
+                                </a>
+                                {% endif %}
+                                {% if r.tmdb_id %}
+                                <a href="{{ url_for('search_tmdb_page')(request) }}?q={{ r.tmdb_id }}"
+                                   class="btn btn-sm btn-outline-secondary" title="Voir par TMDB">
+                                    <i class="bi bi-film"></i>
+                                </a>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+    {% endfor %}
+    </div><!-- /groupsContainer -->
+
+    {% endif %}
+{% endif %}
+
+{% endblock %}
+
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+    <div id="toast" class="toast align-items-center border-0" role="alert">
+        <div class="d-flex">
+            <div class="toast-body" id="toastMsg"></div>
+            <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+</div>
+
+{% block extra_scripts %}
+<script>
+// ── Collapse state ──────────────────────────────────────────────────────────
+const collapsedTGroups  = new Set();  // torrent_group ids
+const collapsedIGroups  = new Set();  // indexer sub-group ids
+
+function toggleTGroup(gid) {
+    collapsedTGroups.has(gid) ? collapsedTGroups.delete(gid) : collapsedTGroups.add(gid);
+    updateVisibility();
+}
+
+function toggleIGroup(igid) {
+    collapsedIGroups.has(igid) ? collapsedIGroups.delete(igid) : collapsedIGroups.add(igid);
+    updateVisibility();
+}
+
+// ── Filters ─────────────────────────────────────────────────────────────────
+function applyFilters() {
+    const text    = (document.getElementById('filterText')?.value || '').toLowerCase();
+    const indexer = document.getElementById('filterIndexer')?.value || '';
+
+    document.querySelectorAll('[data-tgroup-item]').forEach(row => {
+        const passesText    = !text    || (row.dataset.search  || '').toLowerCase().includes(text);
+        const passesIndexer = !indexer || (row.dataset.indexer || '') === indexer;
+        row.dataset.filteredOut = (passesText && passesIndexer) ? 'false' : 'true';
+    });
+
+    updateVisibility();
+}
+
+function updateVisibility() {
+    const text    = (document.getElementById('filterText')?.value || '').toLowerCase();
+    const filterIndexer = document.getElementById('filterIndexer')?.value || '';
+    let totalVisible = 0;
+
+    // Process each torrent group
+    document.querySelectorAll('[data-tgroup]').forEach(header => {
+        const gid = header.dataset.tgroup;
+        const body = document.getElementById(`tgroup-body-${gid}`);
+        if (!body) return;
+
+        const allRows = body.querySelectorAll('[data-tgroup-item]');
+        const isCollapsed = collapsedTGroups.has(gid);
+
+        // Toggle body visibility
+        body.style.display = isCollapsed ? 'none' : '';
+
+        // Toggle header chevron
+        const icon = header.querySelector('.tgroup-toggle i');
+        if (icon) icon.className = isCollapsed ? 'bi bi-chevron-right' : 'bi bi-chevron-down';
+
+        if (!isCollapsed) {
+            // Process indexer sub-groups within this torrent group
+            body.querySelectorAll('.igroup-header').forEach(iHeader => {
+                const igid = iHeader.dataset.igroupHeader;
+                const iRows = body.querySelectorAll(`[data-igroup="${CSS.escape(igid)}"]:not(.igroup-header)`);
+                const iCollapsed = collapsedIGroups.has(igid);
+
+                let anyPassesFilter = false;
+                iRows.forEach(row => {
+                    const filtered = row.dataset.filteredOut === 'true';
+                    if (!filtered) anyPassesFilter = true;
+                    row.style.display = (filtered || iCollapsed) ? 'none' : '';
+                    if (!filtered && !iCollapsed) totalVisible++;
+                });
+
+                // Keep the header visible as long as rows pass the filter,
+                // even when the sub-group is collapsed — so the user can re-expand it.
+                iHeader.style.display = anyPassesFilter ? '' : 'none';
+                const iIcon = iHeader.querySelector('.igroup-toggle i');
+                if (iIcon) iIcon.className = iCollapsed ? 'bi bi-chevron-right' : 'bi bi-chevron-down';
+            });
+        }
+    });
+
+    const fc = document.getElementById('filteredCount');
+    const total = document.querySelectorAll('[data-tgroup-item]').length;
+    if (fc) fc.textContent = totalVisible < total ? `${totalVisible} / ${total}` : '';
+}
+
+// ── Build indexer filter dropdown ────────────────────────────────────────────
+function buildIndexerFilter() {
+    const indexers = new Set();
+    document.querySelectorAll('[data-tgroup-item]').forEach(row => {
+        if (row.dataset.indexer) indexers.add(row.dataset.indexer);
+    });
+    const sel = document.getElementById('filterIndexer');
+    if (sel) {
+        [...indexers].sort().forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name;
+            sel.appendChild(opt);
+        });
+    }
+}
+
+// ── Event wiring ─────────────────────────────────────────────────────────────
+document.querySelectorAll('[data-tgroup]').forEach(header => {
+    header.addEventListener('click', e => {
+        if (e.target.closest('a') || e.target.closest('.copy-btn')) return;
+        toggleTGroup(header.dataset.tgroup);
+    });
+});
+
+document.querySelectorAll('.tgroup-toggle').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); toggleTGroup(btn.dataset.tgroup); });
+});
+
+document.querySelectorAll('.igroup-header').forEach(header => {
+    header.addEventListener('click', e => {
+        if (e.target.closest('button') && !e.target.closest('.igroup-toggle')) return;
+        toggleIGroup(header.dataset.igroupHeader);
+    });
+});
+
+document.querySelectorAll('.igroup-toggle').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); toggleIGroup(btn.dataset.igroup); });
+});
+
+document.getElementById('filterText')?.addEventListener('input', applyFilters);
+document.getElementById('filterIndexer')?.addEventListener('change', applyFilters);
+document.getElementById('clearFilters')?.addEventListener('click', () => {
+    const ft = document.getElementById('filterText');
+    const fi = document.getElementById('filterIndexer');
+    if (ft) ft.value = '';
+    if (fi) fi.value = '';
+    applyFilters();
+});
+
+// ── Copy hash buttons ─────────────────────────────────────────────────────────
+document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.value).then(() => {
+            const icon = btn.querySelector('i');
+            icon.className = 'bi bi-clipboard-check text-success';
+            setTimeout(() => { icon.className = 'bi bi-clipboard'; }, 1500);
+        });
+    });
+});
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+buildIndexerFilter();
+applyFilters();
+</script>
+{% endblock %}

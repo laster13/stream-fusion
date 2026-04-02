@@ -192,6 +192,16 @@ const JOB_DOCS = {
         detail: "Le même torrent peut être stocké plusieurs fois si un indexer renvoie un titre légèrement différent entre deux recherches (nouvelle ligne car l'ID est basé sur le titre). Ce job nettoie ces doublons.",
         param: null,
     },
+    torrent_group_hash: {
+        desc: "Crée ou étend des <code>torrent_groups</code> pour tous les <code>torrent_items</code> qui partagent exactement le même <code>info_hash</code>.",
+        detail: "Certitude 100% : même hash = même torrent. Liaison des doublons cross-indexeurs sans les supprimer. Propage également le <code>tmdb_id</code> aux membres du groupe qui n'en ont pas encore. Non destructif.",
+        param: null,
+    },
+    torrent_group_title_size: {
+        desc: "Crée ou étend des <code>torrent_groups</code> pour les <code>torrent_items</code> avec un titre normalisé identique et une taille similaire (±0,5%).",
+        detail: "Couvre le cas où des trackers recalculent le hash pour le même fichier. La normalisation de titre utilise le <code>TitleNormalizer</code> configuré dans l'admin (règles de titres). La tolérance de taille (~0,5%) couvre les fichiers NFO présents ou non. Non destructif.",
+        param: null,
+    },
     api_keys_cleanup: {
         desc: "Passe <code>is_active = false</code> sur les clés API dont <code>expiration_date</code> est dépassée.",
         detail: "Non destructif : les clés restent en base et sont réactivables manuellement. Empêche uniquement leur utilisation.",
