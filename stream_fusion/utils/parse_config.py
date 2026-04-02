@@ -74,4 +74,14 @@ def parse_config(config_token):
     if "rdMinCachedBeforeCheck" not in config:
         config["rdMinCachedBeforeCheck"] = 3
 
+    # Cache-first: minimum confirmed Postgres results to skip live indexer search entirely.
+    # 0 = disabled (always query live indexers)
+    if "minPostgresResults" not in config:
+        config["minPostgresResults"] = 5
+
+    # Cache-first TTL: max age in days of Postgres results before forcing a live search refresh.
+    # 0 = disabled (always trust Postgres cache if minPostgresResults is met)
+    if "postgresMaxAgeDays" not in config:
+        config["postgresMaxAgeDays"] = 7
+
     return config

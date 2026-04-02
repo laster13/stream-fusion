@@ -1,0 +1,410 @@
+{% extends "base.html" %}
+{% block title %}Torrents non-matchés — StreamFusion Admin{% endblock %}
+{% block page_title %}Torrents non-matchés{% endblock %}
+
+{% block extra_head %}
+<style>
+    .lang-badge {
+        font-size: 0.72rem;
+        background: rgba(13,110,253,0.12);
+        color: #6ea8fe;
+        border: 1px solid rgba(13,110,253,0.25);
+        border-radius: 4px;
+        padding: 1px 6px;
+    }
+    code.hash-code { font-size: 0.78rem; color: var(--bs-secondary-color); letter-spacing: 0.01em; }
+    .group-header {
+        background: rgba(255,255,255,0.04);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--bs-secondary-color);
+        user-select: none;
+        cursor: pointer;
+    }
+    .group-header:hover { background: rgba(255,255,255,0.07); }
+    [data-bs-theme="light"] .group-header { background: rgba(0,0,0,0.04); }
+    [data-bs-theme="light"] .group-header:hover { background: rgba(0,0,0,0.07); }
+    .group-toggle i { font-size: 0.7rem; }
+    .action-bar {
+        position: fixed;
+        bottom: 0;
+        left: var(--sidebar-width);
+        right: 0;
+        background: var(--bs-body-bg);
+        border-top: 1px solid rgba(255,255,255,0.1);
+        padding: 12px 28px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        z-index: 100;
+    }
+    [data-bs-theme="light"] .action-bar { border-top-color: rgba(0,0,0,0.1); }
+    #main-content { padding-bottom: 80px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Search form -->
+<form method="get" action="{{ url_for('search_unmatched_page')(request) }}"
+      class="d-flex gap-2 mb-4" style="max-width:500px;">
+    <input type="text" name="q" value="{{ query }}"
+           class="form-control" placeholder="Mots-clés (ex : walking dead, naruto, avatar…)"
+           autocomplete="off" autofocus>
+    <button type="submit" class="btn btn-primary flex-shrink-0">
+        <i class="bi bi-search me-1"></i>Rechercher
+    </button>
+</form>
+
+{% if not query %}
+<div class="text-center text-secondary py-5">
+    <i class="bi bi-database fs-2 d-block mb-2"></i>
+    Saisissez des mots-clés pour rechercher les torrents sans TMDB ID.
+</div>
+
+{% elif not items %}
+<div class="text-center text-secondary py-5">
+    <i class="bi bi-inbox fs-2 d-block mb-2"></i>
+    Aucun torrent non-matché pour <strong>{{ query }}</strong>.
+</div>
+
+{% else %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <span class="text-secondary" style="font-size:0.85rem;" id="countLabel">
+        {{ items|length }} torrent(s) non-matché(s)
+    </span>
+    <div class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" id="selectAll">
+        <label class="form-check-label text-secondary" for="selectAll" style="font-size:0.85rem;">
+            Tout sélectionner (visible)
+        </label>
+    </div>
+</div>
+
+<!-- Filter bar -->
+<div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+    <select id="filterLang" class="form-select form-select-sm" style="width:auto;min-width:130px;font-size:0.83rem;">
+        <option value="">Toutes les langues</option>
+    </select>
+    <select id="filterType" class="form-select form-select-sm" style="width:auto;min-width:110px;font-size:0.83rem;">
+        <option value="">Tous les types</option>
+        <option value="movie">Film</option>
+        <option value="series">Série</option>
+    </select>
+    <button id="clearFilters" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-x-lg me-1"></i>Effacer
+    </button>
+    <span class="text-secondary ms-2" style="font-size:0.8rem;" id="filteredCount"></span>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-hover align-middle" id="unmatchedTable">
+        <thead>
+            <tr style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--bs-secondary-color);">
+                <th style="width:32px;"></th>
+                <th>Titre brut</th>
+                <th>Taille</th>
+                <th>Hash</th>
+                <th>Langues</th>
+                <th>Ajouté le</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+            {% set ns = namespace(current_indexer=None) %}
+            {% for item in items %}
+                {% if item.indexer != ns.current_indexer %}
+                    {% set ns.current_indexer = item.indexer %}
+                    <tr class="group-header" data-group-header="{{ item.indexer }}">
+                        <td colspan="6" class="py-2 px-3">
+                            <div class="d-flex align-items-center justify-content-between">
+                                <span class="d-flex align-items-center gap-2">
+                                    <button class="btn btn-link btn-sm p-0 group-toggle text-secondary"
+                                            data-group="{{ item.indexer }}" tabindex="-1">
+                                        <i class="bi bi-chevron-down"></i>
+                                    </button>
+                                    <i class="bi bi-server"></i>
+                                    {{ item.indexer }}
+                                </span>
+                                <label class="form-check-label d-flex align-items-center gap-1"
+                                       style="font-size:0.75rem;cursor:pointer;" onclick="event.stopPropagation()">
+                                    <input type="checkbox" class="form-check-input group-check"
+                                           data-group="{{ item.indexer }}" style="margin:0;">
+                                    Tout le groupe
+                                </label>
+                            </div>
+                        </td>
+                    </tr>
+                {% endif %}
+                <tr data-group="{{ item.indexer }}"
+                    data-type="{{ item.type or '' }}"
+                    data-langs="{{ (item.languages or []) | join(',') }}">
+                    <td>
+                        <input class="form-check-input item-check" type="checkbox"
+                               value="{{ item.info_hash }}" data-group="{{ item.indexer }}">
+                    </td>
+                    <td style="font-size:0.875rem;max-width:380px;word-break:break-word;line-height:1.35;">
+                        {% if item.type == 'series' %}
+                        <span class="badge me-1" style="font-size:0.65rem;background:rgba(13,202,240,0.15);color:#0dcaf0;border:1px solid rgba(13,202,240,0.3);">S</span>
+                        {% elif item.type == 'movie' %}
+                        <span class="badge me-1" style="font-size:0.65rem;background:rgba(13,110,253,0.15);color:#6ea8fe;border:1px solid rgba(13,110,253,0.3);">M</span>
+                        {% endif %}
+                        {{ item.raw_title }}
+                    </td>
+                    <td style="white-space:nowrap;font-size:0.83rem;">{{ item.size | fmt_size }}</td>
+                    <td>
+                        <div class="d-flex align-items-center gap-1">
+                            <code class="hash-code">{{ item.info_hash[:10] }}…</code>
+                            <button class="btn btn-link btn-sm p-0 copy-btn text-secondary"
+                                    data-value="{{ item.info_hash }}" title="Copier le hash">
+                                <i class="bi bi-clipboard" style="font-size:0.8rem;"></i>
+                            </button>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="d-flex flex-wrap gap-1">
+                            {% for lang in (item.languages or []) %}
+                            <span class="lang-badge">{{ lang }}</span>
+                            {% endfor %}
+                        </div>
+                    </td>
+                    <td style="white-space:nowrap;font-size:0.8rem;">{{ item.created_at | fmt_date }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div id="emptyMsg" class="text-center text-secondary py-3 d-none" style="font-size:0.85rem;">
+        <i class="bi bi-search me-1"></i>Aucun résultat ne correspond aux filtres.
+    </div>
+</div>
+{% endif %}
+
+<!-- Sticky action bar -->
+<div class="action-bar" id="actionBar">
+    <span class="text-secondary" style="font-size:0.85rem;" id="selectionCount">0 sélectionné(s)</span>
+    <input type="number" id="tmdbIdInput" class="form-control form-control-sm"
+           style="width:160px;" placeholder="TMDB ID" min="1" autocomplete="off">
+    <button class="btn btn-primary btn-sm" id="assignBtn" disabled>
+        <i class="bi bi-link-45deg me-1"></i>Assigner la sélection
+    </button>
+    <button class="btn btn-outline-secondary btn-sm" id="clearBtn">
+        <i class="bi bi-x-lg me-1"></i>Tout désélectionner
+    </button>
+</div>
+
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+    <div id="toast" class="toast align-items-center border-0" role="alert">
+        <div class="d-flex">
+            <div class="toast-body" id="toastMsg"></div>
+            <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const CSRF = "{{ csrf_token_gen() }}";
+
+// ── State ──
+const collapsedGroups = new Set();
+
+// ── Build language filter from DOM ──
+function buildFilters() {
+    const langs = new Set();
+    document.querySelectorAll('#tableBody tr[data-group]:not(.group-header)').forEach(row => {
+        (row.dataset.langs || '').split(',').filter(Boolean).forEach(l => langs.add(l));
+    });
+    const langSel = document.getElementById('filterLang');
+    [...langs].sort().forEach(lang => {
+        const opt = document.createElement('option');
+        opt.value = lang; opt.textContent = lang;
+        langSel.appendChild(opt);
+    });
+}
+
+// ── Apply filters + update visibility ──
+function applyFilters() {
+    const filterLang = document.getElementById('filterLang')?.value || '';
+    const filterType = document.getElementById('filterType')?.value || '';
+
+    document.querySelectorAll('#tableBody tr[data-group]:not(.group-header)').forEach(row => {
+        const passesLang = !filterLang || (row.dataset.langs || '').split(',').includes(filterLang);
+        const passesType = !filterType || row.dataset.type === filterType;
+        row.dataset.filteredOut = (passesLang && passesType) ? 'false' : 'true';
+    });
+
+    updateVisibility();
+}
+
+function updateVisibility() {
+    const total = document.querySelectorAll('#tableBody tr[data-group]:not(.group-header)').length;
+    let totalVisible = 0;
+
+    document.querySelectorAll('.group-header').forEach(header => {
+        const group = header.dataset.groupHeader;
+        // Use CSS.escape() so that special characters in group names don't break the [data-group="..."] selector.
+        const rows = document.querySelectorAll(`#tableBody tr[data-group="${CSS.escape(group)}"]:not(.group-header)`);
+        const isCollapsed = collapsedGroups.has(group);
+        let anyPassesFilter = false;
+
+        rows.forEach(row => {
+            const filtered = row.dataset.filteredOut === 'true';
+            if (!filtered) anyPassesFilter = true;
+            row.style.display = (filtered || isCollapsed) ? 'none' : '';
+            if (!filtered && !isCollapsed) totalVisible++;
+        });
+
+        header.style.display = anyPassesFilter ? '' : 'none';
+
+        const icon = header.querySelector('.group-toggle i');
+        if (icon) icon.className = isCollapsed ? 'bi bi-chevron-right' : 'bi bi-chevron-down';
+    });
+
+    const filteredCount = document.getElementById('filteredCount');
+    if (filteredCount) {
+        filteredCount.textContent = totalVisible < total ? `${totalVisible} / ${total} affichés` : '';
+    }
+
+    document.getElementById('emptyMsg')?.classList.toggle('d-none', totalVisible > 0);
+}
+
+// ── Group toggle ──
+function toggleGroup(group) {
+    collapsedGroups.has(group) ? collapsedGroups.delete(group) : collapsedGroups.add(group);
+    updateVisibility();
+}
+
+document.querySelectorAll('.group-header').forEach(header => {
+    header.addEventListener('click', function (e) {
+        if (e.target.closest('label') || e.target.closest('.form-check-input')) return;
+        toggleGroup(this.dataset.groupHeader);
+    });
+});
+
+document.querySelectorAll('.group-toggle').forEach(btn => {
+    btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleGroup(this.dataset.group);
+    });
+});
+
+// ── Filters ──
+document.getElementById('filterLang')?.addEventListener('change', applyFilters);
+document.getElementById('filterType')?.addEventListener('change', applyFilters);
+document.getElementById('clearFilters')?.addEventListener('click', () => {
+    document.getElementById('filterLang').value = '';
+    document.getElementById('filterType').value = '';
+    applyFilters();
+});
+
+// ── Copy buttons ──
+document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.value).then(() => {
+            const icon = btn.querySelector('i');
+            icon.className = 'bi bi-clipboard-check text-success';
+            setTimeout(() => { icon.className = 'bi bi-clipboard'; }, 1500);
+        });
+    });
+});
+
+// ── Selection ──
+function getChecked() {
+    return [...document.querySelectorAll('.item-check:checked')];
+}
+
+function updateBar() {
+    const n = getChecked().length;
+    document.getElementById('selectionCount').textContent = `${n} sélectionné(s)`;
+    const hasId = document.getElementById('tmdbIdInput').value.trim() !== '';
+    document.getElementById('assignBtn').disabled = n === 0 || !hasId;
+}
+
+document.querySelectorAll('.item-check').forEach(cb => cb.addEventListener('change', updateBar));
+document.getElementById('tmdbIdInput')?.addEventListener('input', updateBar);
+
+document.getElementById('selectAll')?.addEventListener('change', function () {
+    document.querySelectorAll('.item-check').forEach(cb => {
+        if (cb.closest('tr')?.style.display !== 'none') cb.checked = this.checked;
+    });
+    updateBar();
+});
+
+document.querySelectorAll('.group-check').forEach(gcb => {
+    gcb.addEventListener('change', function () {
+        const group = this.dataset.group;
+        document.querySelectorAll(`.item-check[data-group="${CSS.escape(group)}"]`).forEach(cb => {
+            if (cb.closest('tr')?.style.display !== 'none') cb.checked = this.checked;
+        });
+        updateBar();
+    });
+});
+
+document.getElementById('clearBtn')?.addEventListener('click', () => {
+    document.querySelectorAll('.item-check, .group-check, #selectAll').forEach(cb => { cb.checked = false; });
+    updateBar();
+});
+
+// ── Toast ──
+function showToast(msg, isError = false) {
+    const toast = document.getElementById('toast');
+    toast.className = `toast align-items-center border-0 text-bg-${isError ? 'danger' : 'success'}`;
+    document.getElementById('toastMsg').textContent = msg;
+    new bootstrap.Toast(toast, { delay: 3500 }).show();
+}
+
+// ── Assign ──
+document.getElementById('assignBtn')?.addEventListener('click', async () => {
+    const hashes = getChecked().map(cb => cb.value);
+    const tmdbId = document.getElementById('tmdbIdInput').value.trim();
+    if (!hashes.length || !tmdbId) return;
+
+    const fd = new FormData();
+    fd.append('csrf_token', CSRF);
+    fd.append('tmdb_id', tmdbId);
+    hashes.forEach(h => fd.append('info_hashes', h));
+
+    const btn = document.getElementById('assignBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>En cours…';
+
+    try {
+        const resp = await fetch('{{ url_for("assign_tmdb_to_selection")(request) }}',
+                                 { method: 'POST', body: fd });
+        const data = await resp.json();
+        if (resp.ok) {
+            showToast(`✓ ${data.updated} torrent(s) assigné(s) au TMDB ID ${tmdbId}`);
+            hashes.forEach(h => {
+                document.querySelector(`.item-check[value="${h}"]`)?.closest('tr').remove();
+            });
+            // Remove group headers with no remaining rows
+            document.querySelectorAll('.group-header').forEach(header => {
+                const group = header.dataset.groupHeader;
+                const remaining = document.querySelectorAll(
+                    `#tableBody tr[data-group="${CSS.escape(group)}"]:not(.group-header)`
+                ).length;
+                if (remaining === 0) header.remove();
+            });
+            document.querySelectorAll('.item-check, .group-check, #selectAll').forEach(cb => { cb.checked = false; });
+            document.getElementById('tmdbIdInput').value = '';
+            updateBar();
+            applyFilters();
+        } else {
+            showToast(data.error || "Erreur lors de l'assignation.", true);
+        }
+    } catch {
+        showToast('Erreur réseau.', true);
+    } finally {
+        btn.innerHTML = '<i class="bi bi-link-45deg me-1"></i>Assigner la sélection';
+        updateBar();
+    }
+});
+
+// ── Init ──
+buildFilters();
+applyFilters();
+</script>
+{% endblock %}

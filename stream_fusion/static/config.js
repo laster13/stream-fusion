@@ -211,7 +211,7 @@ function pollForADCredentials(check, pin, expiresIn) {
                     document.getElementById('ad-auth-status').style.display = 'block';
                     document.getElementById('ad-auth-instructions').style.display = 'none';
                     document.getElementById('ad-auth-button').disabled = true;
-                    document.getElementById('ad-auth-button').textContent = "Connection successful";
+                    document.getElementById('ad-auth-button').textContent = "Connexion établie.";
                     console.log('AllDebrid authentication successful');
                 } else {
                     console.log('Waiting for user authorization...');
@@ -348,32 +348,40 @@ function updateDebridOrderList() {
         addDebridToList('PikPak');
     }
 
-    Sortable.create(debridOrderList, {
-        animation: 150,
-        ghostClass: 'bg-gray-100',
-        onEnd: function () {
-            const newOrder = Array.from(debridOrderList.children).map(li => li.dataset.serviceName);
-            console.log("Nouvel ordre des débrideurs:", newOrder);
-        }
-    });
+    if (typeof window._updateDolPositions === 'function') window._updateDolPositions();
+    if (typeof window._updateDolArrows === 'function') window._updateDolArrows();
 }
 
 
 function addDebridToList(serviceName) {
     const debridOrderList = document.getElementById('debridOrderList');
     const li = document.createElement('li');
-    li.className = 'bg-gray-700 text-white text-sm p-1.5 rounded shadow cursor-move flex items-center justify-between w-64 mb-2';
 
-    const text = document.createElement('span');
-    text.textContent = serviceName;
-    text.className = 'flex-grow truncate';
+    const handle = document.createElement('div');
+    handle.className = 'dol-handle';
+    handle.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg>';
 
-    const icon = document.createElement('span');
-    icon.innerHTML = '&#8942;';
-    icon.className = 'text-gray-400 ml-2 flex-shrink-0';
+    const content = document.createElement('div');
+    content.className = 'dol-content';
 
-    li.appendChild(text);
-    li.appendChild(icon);
+    const pos = document.createElement('span');
+    pos.className = 'dol-pos';
+
+    const name = document.createElement('span');
+    name.className = 'dol-name';
+    name.textContent = serviceName;
+
+    content.appendChild(pos);
+    content.appendChild(name);
+
+    const arrows = document.createElement('div');
+    arrows.className = 'dol-arrows';
+    arrows.innerHTML = '<button type="button" class="dol-arrow dol-up" aria-label="Monter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg></button>'
+        + '<button type="button" class="dol-arrow dol-down" aria-label="Descendre"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>';
+
+    li.appendChild(handle);
+    li.appendChild(content);
+    li.appendChild(arrows);
     li.dataset.serviceName = serviceName;
     debridOrderList.appendChild(li);
 }
@@ -722,7 +730,7 @@ function loadData() {
         maxResults: '30',
         minCachedResults: '10',
         torrenting: false,
-        ctg_yggtorrent: true,
+        ctg_yggtorrent: false,
         ctg_yggflix: false,
         metadataProvider: 'tmdb',
         sort: 'quality',
@@ -735,15 +743,17 @@ function loadData() {
         tb_usenet: false,
         tb_search: false,
         debrid_order: false,
-        c411: true,
-        torr9: true,
-        lacale: true,
+        c411: false,
+        torr9: false,
+        lacale: false,
         generationfree: false,
         abn: false,
         g3mini: false,
         theoldschool: false,
         yggflixPriority: true,
         rdMinCachedBeforeCheck: 3,
+        minPostgresResults: 20,
+        postgresMaxAgeDays: 7,
     };
 
     Object.keys(defaultConfig).forEach(key => {
@@ -965,6 +975,8 @@ async function getLink(method) {
         maxResults: parseInt(document.getElementById('maxResults').value) || 5,
         minCachedResults: parseInt(document.getElementById('minCachedResults').value) || 5,
         rdMinCachedBeforeCheck: parseInt(document.getElementById('rdMinCachedBeforeCheck').value) ?? 3,
+        minPostgresResults: parseInt(document.getElementById('minPostgresResults').value) ?? 5,
+        postgresMaxAgeDays: parseInt(document.getElementById('postgresMaxAgeDays').value) ?? 7,
         exclusion: qualityExclusions.filter(quality => document.getElementById(quality).checked),
         jackett: document.getElementById('jackett')?.checked,
         zilean: document.getElementById('zilean')?.checked,

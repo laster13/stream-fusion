@@ -14,6 +14,10 @@ from stream_fusion.utils.yggfilx.yggflix_api import YggflixAPI
 class YggflixService:
     # Minimum delay between consecutive API calls to avoid triggering 429 rate limits.
     _REQUEST_DELAY = 0.3  # seconds
+    # If the title pre-filter keeps >= this ratio of results, a page 2 fetch is worthwhile.
+    _PAGE2_TITLE_KEEP_THRESHOLD = 0.8
+    # If the title pre-filter keeps < this ratio, retry with t=search (broader search).
+    _SEARCH_FALLBACK_RATIO = 0.5
 
     def __init__(self, config: dict):
         self.yggflix = YggflixAPI()
@@ -64,15 +68,47 @@ class YggflixService:
                 seen_hashes.add(info_hash)
             merged.append(item)
 
+    def __normalize_text(self, text: str) -> str:
+        """Normalize text for pre-filtering (uses title_matching module if available)."""
+        try:
+            from stream_fusion.utils.filter.title_matching import get_normalizer
+            return get_normalizer().normalize(text)
+        except RuntimeError:
+            import unicodedata, re
+            text = unicodedata.normalize("NFD", text)
+            text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+            return re.sub(r"\s+", " ", text.lower()).strip()
+
+    def __normalize_for_search(self, title: str) -> str:
+        """Light normalization for indexer search queries (uses title_matching module if available)."""
+        try:
+            from stream_fusion.utils.filter.title_matching import get_normalizer
+            return get_normalizer().normalize_for_search(title)
+        except RuntimeError:
+            return " ".join((title or "").split()).strip()
+
+    def __pre_filter_by_title(self, results: List[dict], normalized_titles: List[str]) -> List[dict]:
+        """Keep results whose torrent name contains at least one normalized media title."""
+        if not normalized_titles:
+            return results
+        filtered = []
+        for result in results:
+            name = self.__normalize_text(result.get("name", ""))
+            if any(t in name for t in normalized_titles):
+                filtered.append(result)
+        return filtered
+
     def __search_movie(self, media: Movie) -> List[dict]:
         titles = self.__unique_titles(getattr(media, "titles", []) or [])
         year = getattr(media, "year", None)
+        normalized_titles = [self.__normalize_text(t) for t in titles]
 
         logger.info(f"Searching YGG Relay for movie: {media.titles[0] if media.titles else 'unknown'}")
 
         queries = []
         for title in titles:
-            q = f"{title} {year}".strip() if year else title
+            normalized = self.__normalize_for_search(title)
+            q = f"{normalized} {year}".strip() if year else normalized
             if q:
                 queries.append(q)
 
@@ -88,7 +124,42 @@ class YggflixService:
             except Exception as e:
                 logger.warning(f"YGG Relay movie query failed '{query}': {e}")
                 continue
+
+            if not raw_results:
+                continue
+
             self.__merge_results(raw_results, merged_results, seen_hashes)
+
+            # Decide whether a page 2 fetch is worthwhile based on title pre-filter ratio.
+            pre_filtered = self.__pre_filter_by_title(raw_results, normalized_titles)
+            keep_ratio = len(pre_filtered) / len(raw_results)
+            logger.debug(
+                f"YGG Relay: pre-filter '{query}' kept {len(pre_filtered)}/{len(raw_results)} "
+                f"(ratio={keep_ratio:.2f})"
+            )
+
+            if keep_ratio < self._SEARCH_FALLBACK_RATIO:
+                time.sleep(self._REQUEST_DELAY)
+                logger.debug(
+                    f"YGG Relay: ratio {keep_ratio:.2f} too low for '{query}', "
+                    f"falling back to t=search"
+                )
+                try:
+                    fallback_results = self.yggflix.search_movie(title=query, force_type="search")
+                    logger.debug(
+                        f"YGG Relay t=search fallback '{query}' -> {len(fallback_results)} results"
+                    )
+                    self.__merge_results(fallback_results, merged_results, seen_hashes)
+                except Exception as e:
+                    logger.warning(f"YGG Relay t=search fallback failed '{query}': {e}")
+            elif keep_ratio >= self._PAGE2_TITLE_KEEP_THRESHOLD and len(raw_results) >= 20:
+                time.sleep(self._REQUEST_DELAY)
+                try:
+                    raw_p2 = self.yggflix.search_movie(title=query, offset=100)
+                    logger.debug(f"YGG Relay movie page2 '{query}' -> {len(raw_p2)} results")
+                    self.__merge_results(raw_p2, merged_results, seen_hashes)
+                except Exception as e:
+                    logger.warning(f"YGG Relay movie page2 failed '{query}': {e}")
 
         return merged_results
 
@@ -167,7 +238,7 @@ class YggflixService:
         if isinstance(media, Series):
             results = self.__filter_series_results(results, media)
 
-        results = sorted(results, key=lambda r: r.get("seeders", 0), reverse=True)[:50]
+        results = sorted(results, key=lambda r: r.get("seeders", 0), reverse=True)[:100]
         logger.debug(f"{len(results)} results to process from YGG Relay for: {media.titles[0]}")
 
         items = []
@@ -188,7 +259,8 @@ class YggflixService:
             item.languages = detect_languages(item.raw_title, default_language="fr")
             item.type = media.type
             item.parsed_data = parse(item.raw_title)
-            item.tmdb_id = getattr(media, "tmdb_id", None)
+            # tmdb_id intentionally left None for keyword-based tracker.
+            # It will be assigned retroactively after title-match filtering.
             items.append(item)
 
         return items

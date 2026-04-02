@@ -1,6 +1,130 @@
 // JAVASCRIPT POUR PAGE PRINCIPALE
 // app.js
 
+// ═══ DROPDOWN POUR PRIORITÉ INDEXEURS ═══
+var _prioMeta = {
+    'priority_private': { label: 'Prioritaire', desc: 'toujours interrogé', rank: 'P1', css: 'prio-priority' },
+    'intermediary_private': { label: 'Intermédiaire', desc: 'si résultats insuffisants', rank: 'P2', css: 'prio-intermediary' },
+    'fallback_private': { label: 'Fallback', desc: 'dernier recours', rank: 'P3', css: 'prio-fallback' }
+};
+
+function updatePriorityLevel(selectEl) {
+    var wrap = selectEl.closest('.priority-select-wrap');
+    if (!wrap) return;
+    var val = selectEl.value;
+    if (val.indexOf('priority') === 0) wrap.setAttribute('data-level', 'priority');
+    else if (val.indexOf('intermediary') === 0) wrap.setAttribute('data-level', 'intermediary');
+    else wrap.setAttribute('data-level', 'fallback');
+}
+
+function initPriorityDropdowns() {
+    document.querySelectorAll('.priority-select-wrap select').forEach(function(sel) {
+        var wrap = sel.closest('.priority-select-wrap');
+        if (wrap.querySelector('.prio-trigger')) return; // already initialized
+
+        var trigger = document.createElement('div');
+        trigger.className = 'prio-trigger';
+        trigger.setAttribute('tabindex', '0');
+
+        var dropdown = document.createElement('div');
+        dropdown.className = 'prio-dropdown';
+
+        Array.from(sel.options).forEach(function(opt) {
+            var meta = _prioMeta[opt.value];
+            if (!meta) return;
+            var optEl = document.createElement('div');
+            optEl.className = 'prio-option ' + meta.css;
+            optEl.setAttribute('data-value', opt.value);
+            optEl.innerHTML = '<span class="prio-dot"></span>'
+                + '<span><span class="prio-label">' + meta.label + '</span> <span class="prio-desc">— ' + meta.desc + '</span></span>'
+                + '<span class="prio-rank">' + meta.rank + '</span>';
+            if (opt.selected) optEl.classList.add('selected');
+            optEl.addEventListener('click', function(e) {
+                e.stopPropagation();
+                sel.value = opt.value;
+                sel.dispatchEvent(new Event('change', { bubbles: true }));
+                updateTrigger(wrap, opt.value);
+                dropdown.querySelectorAll('.prio-option').forEach(function(o) { o.classList.remove('selected'); });
+                optEl.classList.add('selected');
+                closeDropdown(wrap);
+            });
+            dropdown.appendChild(optEl);
+        });
+
+        wrap.appendChild(trigger);
+        wrap.appendChild(dropdown);
+
+        var activeValue = sel.value;
+        if (!activeValue || !_prioMeta[activeValue]) {
+            var defaultOpt = sel.querySelector('option[selected]') || sel.options[0];
+            if (defaultOpt) {
+                sel.value = defaultOpt.value;
+                activeValue = defaultOpt.value;
+            }
+        }
+        dropdown.querySelectorAll('.prio-option').forEach(function(o) {
+            o.classList.toggle('selected', o.getAttribute('data-value') === activeValue);
+        });
+        updateTrigger(wrap, activeValue);
+        updatePriorityLevel(sel);
+
+        trigger.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var isOpen = trigger.classList.contains('open');
+            closeAllDropdowns();
+            if (!isOpen) {
+                trigger.classList.add('open');
+                dropdown.classList.add('open');
+            }
+        });
+    });
+}
+
+function updateTrigger(wrap, value) {
+    var trigger = wrap.querySelector('.prio-trigger');
+    var meta = _prioMeta[value];
+    if (!trigger || !meta) return;
+    trigger.innerHTML = '<span class="prio-dot"></span>'
+        + '<span class="prio-label">' + meta.label + ' <span style="color:var(--text-muted);font-weight:400;">— ' + meta.desc + '</span></span>'
+        + '<span class="prio-rank">' + meta.rank + '</span>'
+        + '<svg class="prio-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+    // couleur
+    trigger.className = 'prio-trigger ' + meta.css;
+    if (wrap.querySelector('.prio-dropdown.open')) trigger.classList.add('open');
+}
+
+function closeDropdown(wrap) {
+    var t = wrap.querySelector('.prio-trigger');
+    var d = wrap.querySelector('.prio-dropdown');
+    if (t) t.classList.remove('open');
+    if (d) d.classList.remove('open');
+}
+
+function closeAllDropdowns() {
+    document.querySelectorAll('.priority-select-wrap').forEach(function(w) { closeDropdown(w); });
+}
+
+document.addEventListener('click', function() { closeAllDropdowns(); });
+
+// ═══ YGG PRIORITY FLAIR ═══
+function updateYggPriorityFlair() {
+    var cb = document.getElementById('yggflixPriority');
+    var flair = document.getElementById('yggPriorityFlair');
+    if (!cb || !flair) return;
+    var label = flair.querySelector('.flair-label');
+    var bubble = flair.querySelector('.info-tip-bubble');
+    if (!label || !bubble) return;
+    if (cb.checked) {
+        flair.className = 'status-flair active info-tip-wrap';
+        label.textContent = 'Actif';
+        bubble.innerHTML = '<strong>Recherche prioritaire activée</strong><br>YGG Relay est interrogé en <strong>Phase 1</strong>, en même temps que les indexeurs prioritaires.';
+    } else {
+        flair.className = 'status-flair inactive info-tip-wrap';
+        label.textContent = 'Inactif';
+        bubble.innerHTML = '<strong>Recherche prioritaire désactivée</strong><br>YGG Relay sera interrogé <strong>en dernier</strong>, après tous les indexeurs privés.';
+    }
+}
+
 // ═══ CARTES ═══
 function toggleCard(headerEl) {
     var card = headerEl.closest('.card');
@@ -449,7 +573,7 @@ document.addEventListener('DOMContentLoaded', function() {
         _wizNext.style.display = _currentStep === _totalSteps - 1 ? 'none' : '';
         // COMPTEUR
         _wizCounter.textContent = (_currentStep + 1) + ' / ' + _totalSteps;
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        if (!skipAnim) window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     window.goToStep = function(n) {
@@ -578,6 +702,273 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(_enforceOrderState, 200);
     }
 
+    // ═══ LISTE ORDRE DEBRID ═══
+    var _dolAnimating = false;
+    var _dolDrag = null;
+
+    window._updateDolPositions = function() {
+        if (!_debridOrderList) return;
+        Array.from(_debridOrderList.querySelectorAll(':scope > li')).forEach(function(li, i) {
+            var pos = li.querySelector('.dol-pos');
+            if (pos) pos.textContent = i + 1;
+        });
+    };
+
+    window._updateDolArrows = function() {
+        if (!_debridOrderList) return;
+        var items = Array.from(_debridOrderList.querySelectorAll(':scope > li'));
+        items.forEach(function(li, i) {
+            var up = li.querySelector('.dol-up');
+            var down = li.querySelector('.dol-down');
+            if (up) up.classList.toggle('disabled', i === 0);
+            if (down) down.classList.toggle('disabled', i === items.length - 1);
+        });
+    };
+
+    function _dolGetY(e) {
+        return e.touches ? e.touches[0].clientY : e.clientY;
+    }
+
+    function _dolGetItems() {
+        return Array.from(_debridOrderList.querySelectorAll(':scope > li:not(.dol-lifted)'));
+    }
+
+    function _dolRecordRects(items) {
+        var rects = new Map();
+        items.forEach(function(el) { rects.set(el, el.getBoundingClientRect()); });
+        return rects;
+    }
+
+    function _dolFlipAnimate(items, oldRects) {
+        items.forEach(function(el) {
+            var oldR = oldRects.get(el);
+            if (!oldR) return;
+            var newR = el.getBoundingClientRect();
+            var dy = oldR.top - newR.top;
+            if (Math.abs(dy) < 1) return;
+            el.classList.remove('dol-shifting');
+            el.style.transform = 'translateY(' + dy + 'px)';
+            el.offsetHeight;
+            el.classList.add('dol-shifting');
+            el.style.transform = '';
+        });
+    }
+
+    function _dolStartDrag(e) {
+        if (_dolAnimating || _dolDrag) return;
+        var li = e.target.closest('#debridOrderList > li');
+        if (!li || e.target.closest('.dol-arrow')) return;
+
+        e.preventDefault();
+        var rect = li.getBoundingClientRect();
+        var clientY = _dolGetY(e);
+
+        // Create placeholder
+        var ph = document.createElement('div');
+        ph.className = 'dol-placeholder';
+        ph.style.height = rect.height + 'px';
+        _debridOrderList.insertBefore(ph, li);
+
+        li.classList.add('dol-lifted');
+        li.style.width = rect.width + 'px';
+        li.style.top = '0px';
+        li.style.left = '0px';
+        var fixedRect = li.getBoundingClientRect();
+        var compX = fixedRect.left;
+        var compY = fixedRect.top;
+        li.style.left = (rect.left - compX) + 'px';
+        li.style.top = (rect.top - compY) + 'px';
+
+        _dolDrag = {
+            li: li,
+            ph: ph,
+            offsetY: clientY - rect.top,
+            compX: compX,
+            compY: compY,
+            itemH: rect.height + 6,
+            lastIdx: Array.from(_debridOrderList.children).indexOf(ph)
+        };
+    }
+
+    function _dolMoveDrag(e) {
+        if (!_dolDrag) return;
+        e.preventDefault();
+        var clientY = _dolGetY(e);
+        var d = _dolDrag;
+
+        d.li.style.top = (clientY - d.offsetY - d.compY) + 'px';
+
+        // Determine target index from cursor position
+        var siblings = _dolGetItems();
+        var targetIdx = siblings.length;
+
+        for (var i = 0; i < siblings.length; i++) {
+            var r = siblings[i].getBoundingClientRect();
+            if (clientY < r.top + r.height / 2) {
+                targetIdx = i;
+                break;
+            }
+        }
+
+        var children = Array.from(_debridOrderList.children).filter(function(c) { return !c.classList.contains('dol-lifted'); });
+        var curIdx = children.indexOf(d.ph);
+
+        if (targetIdx !== curIdx) {
+            var allMovable = _dolGetItems();
+            var oldRects = _dolRecordRects(allMovable);
+
+            if (targetIdx >= siblings.length) {
+                _debridOrderList.appendChild(d.ph);
+            } else {
+                _debridOrderList.insertBefore(d.ph, siblings[targetIdx]);
+            }
+
+            _dolFlipAnimate(allMovable, oldRects);
+            d.lastIdx = targetIdx;
+
+            window._updateDolPositions();
+        }
+    }
+
+    function _dolEndDrag() {
+        if (!_dolDrag) return;
+        var d = _dolDrag;
+        _dolDrag = null;
+
+        var phRect = d.ph.getBoundingClientRect();
+
+        // Animate the lifted item to the placeholder position
+        d.li.classList.add('dol-snap');
+        d.li.style.top = (phRect.top - d.compY) + 'px';
+        d.li.style.left = (phRect.left - d.compX) + 'px';
+        d.li.style.transform = 'scale(1)';
+
+        setTimeout(function() {
+            // Remove lifting state
+            d.li.classList.remove('dol-lifted', 'dol-snap');
+            d.li.style.width = '';
+            d.li.style.left = '';
+            d.li.style.top = '';
+            d.li.style.transform = '';
+
+            // Put item where placeholder is
+            _debridOrderList.insertBefore(d.li, d.ph);
+            d.ph.remove();
+
+            // Clean shifting classes
+            _dolGetItems().forEach(function(el) {
+                el.classList.remove('dol-shifting');
+                el.style.transform = '';
+            });
+
+            // Landing glow
+            d.li.classList.add('dol-landing');
+            var posBadge = d.li.querySelector('.dol-pos');
+            if (posBadge) posBadge.classList.add('dol-pos-pop');
+            setTimeout(function() {
+                d.li.classList.remove('dol-landing');
+                if (posBadge) posBadge.classList.remove('dol-pos-pop');
+            }, 350);
+
+            window._updateDolPositions();
+            window._updateDolArrows();
+        }, 220);
+    }
+
+    if (_debridOrderList) {
+        _debridOrderList.addEventListener('mousedown', _dolStartDrag);
+        document.addEventListener('mousemove', _dolMoveDrag);
+        document.addEventListener('mouseup', _dolEndDrag);
+        _debridOrderList.addEventListener('touchstart', _dolStartDrag, { passive: false });
+        document.addEventListener('touchmove', _dolMoveDrag, { passive: false });
+        document.addEventListener('touchend', _dolEndDrag);
+
+        // Arrow buttons (FLIP animation)
+        _debridOrderList.addEventListener('click', function(e) {
+            var btn = e.target.closest('.dol-arrow');
+            if (!btn || _dolAnimating) return;
+            var li = btn.closest('li');
+            if (!li) return;
+            var isUp = btn.classList.contains('dol-up');
+            var sibling = isUp ? li.previousElementSibling : li.nextElementSibling;
+            if (!sibling || sibling.tagName !== 'LI') return;
+
+            _dolAnimating = true;
+
+            var liFirst = li.getBoundingClientRect();
+            var sibFirst = sibling.getBoundingClientRect();
+
+            if (isUp) {
+                _debridOrderList.insertBefore(li, sibling);
+            } else {
+                _debridOrderList.insertBefore(sibling, li);
+            }
+
+            window._updateDolPositions();
+            window._updateDolArrows();
+
+            var liLast = li.getBoundingClientRect();
+            var sibLast = sibling.getBoundingClientRect();
+
+            li.style.transition = 'none';
+            sibling.style.transition = 'none';
+            li.style.transform = 'translateY(' + (liFirst.top - liLast.top) + 'px)';
+            sibling.style.transform = 'translateY(' + (sibFirst.top - sibLast.top) + 'px)';
+            li.style.zIndex = '5';
+            li.offsetHeight;
+
+            li.style.transition = 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)';
+            sibling.style.transition = 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)';
+            li.style.transform = '';
+            sibling.style.transform = '';
+
+            li.classList.add('dol-landing');
+            var posBadge = li.querySelector('.dol-pos');
+            if (posBadge) posBadge.classList.add('dol-pos-pop');
+
+            setTimeout(function() {
+                li.style.transition = ''; li.style.zIndex = '';
+                sibling.style.transition = '';
+                li.classList.remove('dol-landing');
+                if (posBadge) posBadge.classList.remove('dol-pos-pop');
+                _dolAnimating = false;
+            }, 320);
+        });
+
+        var _dolObserver = new MutationObserver(function() {
+            window._updateDolPositions();
+            window._updateDolArrows();
+        });
+        _dolObserver.observe(_debridOrderList, { childList: true });
+    }
+
+    // ═══ HINT INFO MODAL ═══
+    var _hintModal = document.getElementById('hint-modal');
+    var _hintTitle = document.getElementById('hint-modal-title');
+    var _hintText = document.getElementById('hint-modal-text');
+    var _hintClose = document.getElementById('hint-modal-close');
+
+    if (_hintModal) {
+        document.addEventListener('click', function(e) {
+            var flair = e.target.closest('.hint-flair');
+            if (!flair) return;
+            e.preventDefault();
+            e.stopPropagation();
+            _hintTitle.textContent = flair.getAttribute('data-hint-title') || '';
+            _hintText.textContent = flair.getAttribute('data-hint-text') || '';
+            _hintModal.classList.add('show');
+        });
+
+        if (_hintClose) {
+            _hintClose.addEventListener('click', function() {
+                _hintModal.classList.remove('show');
+            });
+        }
+        _hintModal.addEventListener('click', function(e) {
+            if (e.target === _hintModal) _hintModal.classList.remove('show');
+        });
+    }
+
     document.addEventListener('keydown', function(e) {
         var tag = document.activeElement.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -589,6 +980,23 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     updateWizard(true);
+
+    // YGG PRIORITY FLAIR
+    var _yggPriCb = document.getElementById('yggflixPriority');
+    if (_yggPriCb) {
+        _yggPriCb.addEventListener('change', updateYggPriorityFlair);
+        updateYggPriorityFlair();
+    }
+
+    // INIT PRIORITY DROPDOWNS
+    initPriorityDropdowns();
+
+    // Re-init when provider fields become visible (toggled on)
+    document.querySelectorAll('.tog-row input[type="checkbox"]').forEach(function(cb) {
+        cb.addEventListener('change', function() {
+            setTimeout(initPriorityDropdowns, 50);
+        });
+    });
 
     // EXCLUSIONS MOTS CLÉS
     var hiddenInput = document.getElementById('exclusion-keywords');
@@ -683,7 +1091,10 @@ document.addEventListener('DOMContentLoaded', function() {
         { range: 'range_maxSize', input: 'maxSize', fill: 'fill_maxSize', max: 500 },
         { range: 'range_resultsPerQuality', input: 'resultsPerQuality', fill: 'fill_resultsPerQuality', max: 50 },
         { range: 'range_maxResults', input: 'maxResults', fill: 'fill_maxResults', max: 100 },
-        { range: 'range_minCachedResults', input: 'minCachedResults', fill: 'fill_minCachedResults', max: 50 }
+        { range: 'range_minCachedResults', input: 'minCachedResults', fill: 'fill_minCachedResults', max: 50 },
+        { range: 'range_minPostgresResults', input: 'minPostgresResults', fill: 'fill_minPostgresResults', max: 20 },
+        { range: 'range_postgresMaxAgeDays', input: 'postgresMaxAgeDays', fill: 'fill_postgresMaxAgeDays', max: 30 },
+        { range: 'range_rdMinCachedBeforeCheck', input: 'rdMinCachedBeforeCheck', fill: 'fill_rdMinCachedBeforeCheck', max: 10 }
     ];
 
     sliders.forEach(function(s) {
@@ -721,6 +1132,41 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
+        // Initial sync: config.js may have already set the number input before app.js loaded
+        var initVal = parseFloat(input.value);
+        if (!isNaN(initVal)) {
+            range.value = Math.min(Math.max(initVal, parseFloat(range.min) || 0), parseFloat(range.max) || s.max);
+        }
         updateFill();
+
+        // Override value setter so future programmatic changes auto-sync
+        var _desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+        Object.defineProperty(input, 'value', {
+            get: function() { return _desc.get.call(this); },
+            set: function(val) {
+                _desc.set.call(this, val);
+                var v = parseFloat(val);
+                if (!isNaN(v)) {
+                    range.value = Math.min(Math.max(v, parseFloat(range.min) || 0), parseFloat(range.max) || s.max);
+                }
+                updateFill();
+            },
+            configurable: true
+        });
     });
+
+    var _rdToggle = document.getElementById('debrid_rd');
+    if (_rdToggle) {
+        _rdToggle.addEventListener('change', function() {
+            setTimeout(function() {
+                var rdRange = document.getElementById('range_rdMinCachedBeforeCheck');
+                var rdInput = document.getElementById('rdMinCachedBeforeCheck');
+                var rdFill = document.getElementById('fill_rdMinCachedBeforeCheck');
+                if (rdRange && rdInput && rdFill) {
+                    var pct = ((parseFloat(rdRange.value) - 0) / (10 - 0)) * 100;
+                    rdFill.style.width = pct + '%';
+                }
+            }, 100);
+        });
+    }
 });

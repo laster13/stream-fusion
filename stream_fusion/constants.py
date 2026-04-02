@@ -1,16 +1,3 @@
-from typing import Any
-
-
-NO_CONFIG = {'streams': [{'url': "#", 'title': "No configuration found"}]}
-JACKETT_ERROR = {'streams': [{'url': "#", 'title': "An error occured"}]}
-
-NO_CACHE_HEADERS = {
-    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    "Pragma": "no-cache",
-    "Expires": "0",
-}
-
-
 FR_RELEASE_GROUPS = [
             r"(?<=[.\s\-\[])(BlackAngel|Choco|Sicario|Tezcat74|TyrellCorp|Zapax)(?=[.\s\-$$]|$)",
             r"(?<=[.\s\-\[])(FtLi|Goldenyann|MUSTANG|Obi|PEPiTE|QUEBEC63|QC63|ROMKENT|R3MiX)(?=[.\s\-$$]|$)",
@@ -43,8 +30,3 @@ FRENCH_PATTERNS = {
     "FRENCH": r"\b(?:FRENCH|FR)\b",
     "MULTI": r"\b(?:MULTI)\b",
 }
-
-class CustomException(Exception):
-    def __init__(self, status_code: int, message: Any):
-        self.status_code = status_code
-        self.message = message

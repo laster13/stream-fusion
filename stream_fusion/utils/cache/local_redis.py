@@ -75,7 +75,7 @@ class RedisCache(CacheBase):
             key_string = f"{func_name}:{str(args)}:{str(kwargs)}"
         
         hashed_key = hashlib.sha256(key_string.encode("utf-8")).hexdigest()
-        return hashed_key[:16]
+        return "search:" + hashed_key[:16]
 
     async def clear(self) -> None:
         try:

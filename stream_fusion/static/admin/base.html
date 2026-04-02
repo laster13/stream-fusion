@@ -232,28 +232,54 @@
             <i class="bi bi-diagram-3"></i> Peer Keys
         </a>
 
-        <div class="sidebar-section">Données</div>
-        <a class="sidebar-link {% if '/mappings' in request.url.path %}active{% endif %}"
-           href="{{ url_for('list_mappings')(request) }}">
-            <i class="bi bi-arrow-left-right"></i> Mappings méta
+        <div class="sidebar-section">Base de données</div>
+        <a class="sidebar-link {% if '/search/tmdb' in request.url.path %}active{% endif %}"
+           href="{{ url_for('search_tmdb_page')(request) }}">
+            <i class="bi bi-film"></i> Par TMDB ID
         </a>
-        <a class="sidebar-link {% if '/maintenance' in request.url.path %}active{% endif %}"
-           href="{{ url_for('maintenance_page')(request) }}">
-            <i class="bi bi-tools"></i> Maintenance
-        </a>
-        <a class="sidebar-link {% if '/config' in request.url.path %}active{% endif %}"
-           href="{{ url_for('config_page')(request) }}">
-            <i class="bi bi-sliders"></i> Configuration
-        </a>
-
-        <div class="sidebar-section">Recherche</div>
         <a class="sidebar-link {% if '/search/hash' in request.url.path %}active{% endif %}"
            href="{{ url_for('search_hash_page')(request) }}">
             <i class="bi bi-hash"></i> Par hash
         </a>
-        <a class="sidebar-link {% if '/search/tmdb' in request.url.path %}active{% endif %}"
-           href="{{ url_for('search_tmdb_page')(request) }}">
-            <i class="bi bi-film"></i> Par TMDB ID
+        <a class="sidebar-link {% if '/search/unmatched' in request.url.path %}active{% endif %}"
+           href="{{ url_for('search_unmatched_page')(request) }}">
+            <i class="bi bi-question-circle"></i> Non-matchés
+        </a>
+        <a class="sidebar-link {% if '/mismatches' in request.url.path %}active{% endif %}"
+           href="{{ url_for('list_mismatches')(request) }}">
+            <i class="bi bi-exclamation-triangle"></i> Mismatches TMDB
+        </a>
+        <a class="sidebar-link {% if '/mappings' in request.url.path %}active{% endif %}"
+           href="{{ url_for('list_mappings')(request) }}">
+            <i class="bi bi-arrow-left-right"></i> Mappings méta
+        </a>
+
+        <div class="sidebar-section">Matching</div>
+        <a class="sidebar-link {% if '/matching/title-rules' in request.url.path %}active{% endif %}"
+           href="{{ url_for('matching_title_rules')(request) }}">
+            <i class="bi bi-type"></i> Règles titres
+        </a>
+        <a class="sidebar-link {% if '/matching/language-rules' in request.url.path %}active{% endif %}"
+           href="{{ url_for('matching_language_rules')(request) }}">
+            <i class="bi bi-translate"></i> Règles langue
+        </a>
+        <a class="sidebar-link {% if '/matching/test' in request.url.path %}active{% endif %}"
+           href="{{ url_for('matching_test_page')(request) }}">
+            <i class="bi bi-flask"></i> Test matching
+        </a>
+
+        <div class="sidebar-section">Système</div>
+        <a class="sidebar-link {% if '/maintenance' in request.url.path %}active{% endif %}"
+           href="{{ url_for('maintenance_page')(request) }}">
+            <i class="bi bi-tools"></i> Maintenance
+        </a>
+        <a class="sidebar-link {% if '/scheduler' in request.url.path %}active{% endif %}"
+           href="{{ url_for('scheduler_page')(request) }}">
+            <i class="bi bi-clock-history"></i> Tâches planifiées
+        </a>
+        <a class="sidebar-link {% if '/config' in request.url.path %}active{% endif %}"
+           href="{{ url_for('config_page')(request) }}">
+            <i class="bi bi-sliders"></i> Configuration
         </a>
     </div>
 
@@ -306,7 +332,6 @@
         applyTheme(html.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark');
     });
 </script>
-{% block extra_scripts %}{% endblock %}
 <script>
 // Server-generated CSRF token — automatically injected into all POST forms
 window.__ADMIN_CSRF__ = "{{ csrf_token }}";
@@ -323,5 +348,6 @@ document.addEventListener('submit', function(e) {
     }
 });
 </script>
+{% block extra_scripts %}{% endblock %}
 </body>
 </html>

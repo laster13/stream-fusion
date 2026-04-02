@@ -124,19 +124,30 @@ class YggflixAPI:
 
         return normalized
 
-    def search_movie(self, tmdb_id: Optional[int] = None, title: Optional[str] = None) -> List[dict]:
-        params = {"t": "movie"}
-        if tmdb_id:
-            params["tmdbid"] = tmdb_id
-        elif title:
-            params["q"] = title
-        else:
+    def search_movie(
+        self,
+        title: Optional[str] = None,
+        offset: int = 0,
+        force_type: Optional[str] = None,
+    ) -> List[dict]:
+        if not title:
             return []
 
+        search_type = force_type or "movie"
+        params: dict = {"t": search_type, "q": title}
+        if offset:
+            params["offset"] = offset
+
         xml_text = self._make_request(params=params)
-        if xml_text is None:
-            return []
-        return self._parse_xml(xml_text)
+        results = self._parse_xml(xml_text) if xml_text else []
+
+        if results or force_type:
+            return results
+
+        logger.debug(f"YGG Relay: t=movie returned 0 results for '{title}', retrying with t=search")
+        params["t"] = "search"
+        xml_text = self._make_request(params=params)
+        return self._parse_xml(xml_text) if xml_text else []
 
     def search_series(
         self,
