@@ -85,17 +85,17 @@
 <div class="row g-3">
     <div class="col-md-4 col-sm-6">
         <a href="{{ url_for('config_general_get')(request) }}" class="config-nav-card">
-            <i class="bi bi-gear-fill text-primary card-icon"></i>
-            <span class="card-title">Général</span>
-            <span class="card-desc">Feature flags, service debrid, log level, timeouts HTTP.</span>
+            <i class="bi bi-toggles text-primary card-icon"></i>
+            <span class="card-title">Application</span>
+            <span class="card-desc">Accès public, HTTPS, niveau de logs, affichage.</span>
             <span class="card-count"><i class="bi bi-sliders me-1"></i>{{ page_counts.get('general', 0) }} paramètres</span>
         </a>
     </div>
     <div class="col-md-4 col-sm-6">
         <a href="{{ url_for('config_proxy_get')(request) }}" class="config-nav-card">
-            <i class="bi bi-hdd-network text-secondary card-icon"></i>
-            <span class="card-title">Proxy & Rate Limits</span>
-            <span class="card-desc">Proxy de lecture, buffer, limites de requêtes par utilisateur.</span>
+            <i class="bi bi-cloud-arrow-down text-info card-icon"></i>
+            <span class="card-title">Debrid & Streaming</span>
+            <span class="card-desc">Service debrid, proxification des liens, rate limiting.</span>
             <span class="card-count"><i class="bi bi-sliders me-1"></i>{{ page_counts.get('proxy', 0) }} paramètres</span>
         </a>
     </div>
@@ -109,25 +109,17 @@
     </div>
     <div class="col-md-4 col-sm-6">
         <a href="{{ url_for('config_indexers_get')(request) }}" class="config-nav-card">
-            <i class="bi bi-search text-info card-icon"></i>
-            <span class="card-title">Indexeurs</span>
-            <span class="card-desc">Activation et URLs de chaque indexeur torrent.</span>
+            <i class="bi bi-search text-warning card-icon"></i>
+            <span class="card-title">Indexeurs & TMDB</span>
+            <span class="card-desc">Activation, URLs des indexeurs torrent et langue TMDB.</span>
             <span class="card-count"><i class="bi bi-sliders me-1"></i>{{ page_counts.get('indexers', 0) }} paramètres</span>
-        </a>
-    </div>
-    <div class="col-md-4 col-sm-6">
-        <a href="{{ url_for('config_tmdb_get')(request) }}" class="config-nav-card">
-            <i class="bi bi-film text-warning card-icon"></i>
-            <span class="card-title">TMDB</span>
-            <span class="card-desc">Langue de l'API TMDB et vidéo no-cache.</span>
-            <span class="card-count"><i class="bi bi-sliders me-1"></i>{{ page_counts.get('tmdb', 0) }} paramètres</span>
         </a>
     </div>
     <div class="col-md-4 col-sm-6">
         <a href="{{ url_for('config_system_get')(request) }}" class="config-nav-card">
             <i class="bi bi-cpu text-success card-icon"></i>
             <span class="card-title">Système</span>
-            <span class="card-desc">Pool PostgreSQL, workers, infos connexions (lecture seule).</span>
+            <span class="card-desc">Timeouts HTTP, workers Gunicorn, pools de connexions.</span>
             <span class="card-count"><i class="bi bi-sliders me-1"></i>{{ page_counts.get('system', 0) }} paramètres</span>
         </a>
     </div>

@@ -11,6 +11,7 @@ class LogLevel(str, enum.Enum):
     """Possible log levels."""
 
     NOTSET = "NOTSET"
+    TRACE = "TRACE"
     DEBUG = "DEBUG"
     INFO = "INFO"
     WARNING = "WARNING"
@@ -153,8 +154,8 @@ class Settings(BaseSettings):
     pg_pass: str = "streamfusion"  # "stremio"
     pg_base: str = "streamfusion"
     pg_echo: bool = False
-    pg_pool_size: int = 100
-    pg_max_overflow: int = 50
+    pg_pool_size: int = 5
+    pg_max_overflow: int = 5
 
     # REDIS
     redis_host: str = "redis"

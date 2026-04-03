@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% from "_config_macros.html" import save_button, save_feedback, save_script, config_breadcrumb %}
-{% block title %}Indexeurs — Configuration — StreamFusion Admin{% endblock %}
-{% block page_title %}Configuration — Indexeurs{% endblock %}
+{% from "_config_macros.html" import render_field, save_button, save_feedback, save_script, config_breadcrumb %}
+{% block title %}Indexeurs & TMDB — Configuration — StreamFusion Admin{% endblock %}
+{% block page_title %}Configuration — Indexeurs & TMDB{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -17,12 +17,12 @@
 {% endblock %}
 
 {% block content %}
-{{ config_breadcrumb('Indexeurs') }}
+{{ config_breadcrumb('Indexeurs & TMDB') }}
 
 <div class="alert alert-secondary d-flex gap-2 align-items-start mb-4" style="font-size:0.83rem;">
     <i class="bi bi-info-circle-fill flex-shrink-0 mt-1"></i>
     <div>
-        Les clés API et passkeys des indexeurs sont des variables d'environnement et ne peuvent pas être modifiées ici.
+        Les clés API, passkeys et le token TMDB sont des variables d'environnement et ne peuvent pas être modifiées ici.
         Activez ou désactivez chaque indexeur et modifiez son URL si nécessaire.
     </div>
 </div>
@@ -30,6 +30,23 @@
 {{ save_feedback() }}
 
 <form id="cfg-form" method="POST">
+
+    <div class="cfg-card">
+        <div class="cfg-card-header"><i class="bi bi-film text-warning"></i> TMDB — Métadonnées</div>
+        {% for defn in registry_sections.get('tmdb', []) %}
+        {{ render_field(defn, effective) }}
+        {% endfor %}
+        <div class="cfg-row">
+            <span class="cfg-label">TMDB_API_KEY</span>
+            <span class="cfg-value">
+                {% if cfg_readonly and cfg_readonly.tmdb.api_key_set %}
+                    <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Configurée</span>
+                {% else %}
+                    <span class="badge bg-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>Non configurée</span>
+                {% endif %}
+            </span>
+        </div>
+    </div>
 
     <div class="cfg-card">
         <div class="cfg-card-header"><i class="bi bi-search text-info"></i> Indexeurs Torznab / Torrent</div>

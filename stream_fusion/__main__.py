@@ -21,6 +21,8 @@ def main() -> None:
                 "*.log",
                 ".git/*",
                 ".vscode/*",
+                ".kilo/*",
+                ".material/*",
                 "tests/*",
                 "docs/*",
                 ".venv/*",

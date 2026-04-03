@@ -59,7 +59,7 @@ SETTINGS_REGISTRY: list[SettingDef] = [
     ),
     SettingDef(
         "proxied_link", "bool",
-        "Proxifier les liens de stream", "general",
+        "Proxifier les liens de stream", "proxy",
         description=(
             "Lorsqu'activé, les liens de stream renvoyés à Stremio passent par stream-fusion "
             "au lieu de pointer directement vers le CDN debrid. "
@@ -72,7 +72,7 @@ SETTINGS_REGISTRY: list[SettingDef] = [
     ),
     SettingDef(
         "download_service", "enum",
-        "Service debrid par défaut du serveur", "general",
+        "Service debrid par défaut du serveur", "proxy",
         enum_choices=["", "Real-Debrid", "AllDebrid", "TorBox", "Premiumize",
                       "Debrid-Link", "EasyDebrid", "Offcloud", "PikPak"],
         description=(
@@ -86,10 +86,11 @@ SETTINGS_REGISTRY: list[SettingDef] = [
     SettingDef(
         "log_level", "enum",
         "Niveau de verbosité des logs", "general",
-        enum_choices=["NOTSET", "DEBUG", "INFO", "WARNING", "ERROR", "FATAL"],
+        enum_choices=["NOTSET", "TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "FATAL"],
         description=(
             "Contrôle la quantité de messages écrits dans les logs. "
-            "DEBUG : tous les détails internes, utile pour le débogage (très verbeux). "
+            "TRACE : tous les détails internes, utile pour le débogage (très verbeux). "
+            "DEBUG : détails internes, utile pour le débogage (verbeux). "
             "INFO : messages d'état normaux, valeur recommandée en production. "
             "WARNING : uniquement les situations anormales non bloquantes. "
             "ERROR : uniquement les erreurs qui empêchent une opération de se terminer. "
@@ -111,7 +112,7 @@ SETTINGS_REGISTRY: list[SettingDef] = [
     ),
     SettingDef(
         "aiohttp_timeout", "int",
-        "Timeout des requêtes HTTP sortantes (secondes)", "general",
+        "Timeout des requêtes HTTP sortantes (secondes)", "system",
         description=(
             "Durée maximale d'attente pour toutes les requêtes HTTP effectuées par stream-fusion "
             "vers des services externes : API debrid, indexeurs torrent, TMDB, etc. "
@@ -562,7 +563,6 @@ PAGE_CATEGORIES: dict[str, list[str]] = {
     "general": ["general"],
     "proxy": ["proxy"],
     "cache": ["cache", "scheduler"],
-    "indexers": ["indexers", "indexer_urls"],
-    "tmdb": ["tmdb"],
+    "indexers": ["indexers", "indexer_urls", "tmdb"],
     "system": ["system"],
 }

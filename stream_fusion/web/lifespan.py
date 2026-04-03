@@ -26,7 +26,13 @@ def _setup_db(app: FastAPI) -> None:  # pragma: no cover
 
     :param app: fastAPI application.
     """
-    engine = create_async_engine(str(settings.pg_url), echo=settings.pg_echo, pool_size=settings.pg_pool_size, max_overflow=settings.pg_max_overflow)
+    engine = create_async_engine(
+        str(settings.pg_url),
+        echo=settings.pg_echo,
+        pool_size=settings.pg_pool_size,
+        max_overflow=settings.pg_max_overflow,
+        connect_args={"statement_cache_size": 0},  # requis pour compatibilité PgBouncer (transaction mode)
+    )
     session_factory = async_sessionmaker(
         engine,
         expire_on_commit=False,

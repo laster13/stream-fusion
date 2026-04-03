@@ -1488,7 +1488,9 @@ async def config_indexers_get(
     request: Request,
     authenticated: bool = Depends(session_based_security),
 ):
-    return await _config_subpage(request, "indexers", "config_indexers.html", authenticated)
+    cfg = _build_config_view(settings)
+    return await _config_subpage(request, "indexers", "config_indexers.html", authenticated,
+                                  extra_ctx={"cfg_readonly": cfg})
 
 
 @router.post("/config/indexers")
@@ -1505,11 +1507,8 @@ async def config_tmdb_get(
     request: Request,
     authenticated: bool = Depends(session_based_security),
 ):
-    cfg = _build_config_view(settings)
-    return await _config_subpage(
-        request, "tmdb", "config_tmdb.html", authenticated,
-        extra_ctx={"cfg_readonly": cfg},
-    )
+    # Page TMDB fusionnée dans Indexeurs & TMDB
+    return RedirectResponse(url=str(request.url_for("config_indexers_get")), status_code=301)
 
 
 @router.post("/config/tmdb")

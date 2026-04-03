@@ -2,11 +2,15 @@ import os
 import sys
 import logging
 import inspect
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Union
 import stackprinter
 import re
 from loguru import logger
 from stream_fusion.settings import settings
+
+_LOG_DIR = Path("/app/config/logs")
 
 REDACTED = settings.log_redacted
 patterns = [
@@ -82,8 +86,27 @@ class InterceptHandler(logging.Handler):
             level, record.getMessage()
         )
 
+def _cleanup_stale_log_files() -> None:
+    """Supprime les fichiers de log des workers morts non nettoyés par la rotation.
+
+    Problème : la rotation loguru ne nettoie que les fichiers rotatés par le sink
+    courant. Si un worker meurt avant sa rotation journalière, son fichier .log
+    reste indéfiniment. Cette fonction le purge au démarrage de chaque worker.
+    """
+    if not _LOG_DIR.exists():
+        return
+    cutoff = datetime.now() - timedelta(days=7)
+    for f in _LOG_DIR.glob("stream-fusion.w*.log"):
+        try:
+            if datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
+                f.unlink()
+        except OSError:
+            pass
+
+
 def configure_logging() -> None:
-    logger.remove()  # Remove default handler
+    _cleanup_stale_log_files()
+    logger.remove()
 
     log_level = settings.log_level.value
 
@@ -95,16 +118,19 @@ def configure_logging() -> None:
         backtrace=True,
         diagnose=True,
         filter=SecretFilter(patterns) if REDACTED else None,
-        enqueue=True
+        enqueue=True,
     )
 
-    # File logging
+    # File logging — un fichier par worker (PID), rotation journalière.
+    # La rétention s'applique aux fichiers rotatés ; _cleanup_stale_log_files()
+    # gère les fichiers des workers morts entre deux rotations.
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
     logger.add(
-        f"/app/config/logs/api_worker_{os.getpid()}.log",
+        str(_LOG_DIR / f"stream-fusion.w{os.getpid()}.log"),
         format=format_file,
         level="DEBUG",
-        rotation="2 MB",
-        retention="5 days",
+        rotation="1 day",
+        retention="7 days",
         compression="zip",
         enqueue=True,
         filter=SecretFilter(patterns) if REDACTED else None,

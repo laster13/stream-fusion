@@ -197,6 +197,13 @@ class SettingsService:
         except Exception as exc:
             logger.warning(f"SettingsService: could not patch singleton for '{key}': {exc}")
 
+        # Les handlers loguru sont configurés une fois au démarrage avec le niveau initial.
+        # Si log_level change, on doit reconfigurer les handlers pour que le nouveau niveau
+        # prenne effet immédiatement dans ce worker.
+        if key == "log_level":
+            from stream_fusion.logging_config import configure_logging
+            configure_logging()
+
     async def set_many(self, updates: dict[str, Any]) -> list[str]:
         """Batch update multiple settings. Returns keys that require a restart."""
         requires_restart: list[str] = []
@@ -260,6 +267,10 @@ class SettingsService:
             defn = REGISTRY_BY_KEY.get(key)
             if defn and defn.requires_restart:
                 requires_restart.append(key)
+
+        if "log_level" in keys:
+            from stream_fusion.logging_config import configure_logging
+            configure_logging()
 
         logger.info(f"SettingsService: reset {len(keys)} setting(s) to env-var defaults")
         return requires_restart

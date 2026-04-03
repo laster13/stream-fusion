@@ -21,7 +21,8 @@
 <div class="alert alert-warning d-flex gap-2 align-items-start mb-4" style="font-size:0.83rem;">
     <i class="bi bi-arrow-clockwise flex-shrink-0 mt-1"></i>
     <div>
-        Tous les paramètres de cette page nécessitent un <strong>redémarrage</strong> pour prendre effet.
+        Les paramètres marqués <span class="badge bg-warning text-dark" style="font-size:0.75rem;">↻ redémarrage</span>
+        nécessitent un redémarrage de l'application pour prendre effet.
     </div>
 </div>
 
@@ -30,8 +31,15 @@
 <form id="cfg-form" method="POST">
 
     <div class="cfg-card">
-        <div class="cfg-card-header"><i class="bi bi-cpu text-success"></i> Workers &amp; Pool</div>
-        {% for defn in registry_sections.get('system', []) %}
+        <div class="cfg-card-header"><i class="bi bi-clock text-info"></i> Timeouts HTTP</div>
+        {% for defn in registry_sections.get('system', []) if defn.key in ('aiohttp_timeout', 'gunicorn_timeout') %}
+        {{ render_field(defn, effective) }}
+        {% endfor %}
+    </div>
+
+    <div class="cfg-card">
+        <div class="cfg-card-header"><i class="bi bi-cpu text-success"></i> Workers &amp; Pool de connexions</div>
+        {% for defn in registry_sections.get('system', []) if defn.key not in ('aiohttp_timeout', 'gunicorn_timeout') %}
         {{ render_field(defn, effective) }}
         {% endfor %}
     </div>

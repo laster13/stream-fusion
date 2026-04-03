@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_config_macros.html" import render_field, save_button, save_feedback, save_script, config_breadcrumb %}
-{% block title %}Général — Configuration — StreamFusion Admin{% endblock %}
-{% block page_title %}Configuration — Général{% endblock %}
+{% block title %}Application — Configuration — StreamFusion Admin{% endblock %}
+{% block page_title %}Configuration — Application{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -15,7 +15,7 @@
 {% endblock %}
 
 {% block content %}
-{{ config_breadcrumb('Général') }}
+{{ config_breadcrumb('Application') }}
 {{ save_feedback() }}
 
 <form id="cfg-form" method="POST">
@@ -28,7 +28,7 @@
     </div>
 
     <div class="cfg-card">
-        <div class="cfg-card-header"><i class="bi bi-cloud-arrow-down text-info"></i> Téléchargement & Logs</div>
+        <div class="cfg-card-header"><i class="bi bi-sliders text-info"></i> Logs & Affichage</div>
         {% for defn in registry_sections.get('general', []) if defn.type in ('enum', 'int', 'str') %}
         {{ render_field(defn, effective) }}
         {% endfor %}

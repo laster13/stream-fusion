@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_config_macros.html" import render_field, save_button, save_feedback, save_script, config_breadcrumb %}
-{% block title %}Proxy & Rate Limits — Configuration — StreamFusion Admin{% endblock %}
-{% block page_title %}Configuration — Proxy & Rate Limits{% endblock %}
+{% block title %}Debrid & Streaming — Configuration — StreamFusion Admin{% endblock %}
+{% block page_title %}Configuration — Debrid & Streaming{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -15,19 +15,26 @@
 {% endblock %}
 
 {% block content %}
-{{ config_breadcrumb('Proxy & Rate Limits') }}
+{{ config_breadcrumb('Debrid & Streaming') }}
 
 <div class="alert alert-secondary d-flex gap-2 align-items-start mb-4" style="font-size:0.83rem;">
     <i class="bi bi-info-circle-fill flex-shrink-0 mt-1"></i>
     <div>
-        L'URL du proxy (<code>PROXY_URL</code>) est une variable d'environnement et ne peut pas être modifiée ici.
-        Ces paramètres contrôlent le comportement du proxy de lecture et les limites de requêtes par utilisateur.
+        Les tokens debrid (<code>RD_TOKEN</code>, <code>AD_TOKEN</code>…) et l'URL du proxy (<code>PROXY_URL</code>)
+        sont des variables d'environnement et ne peuvent pas être modifiées ici.
     </div>
 </div>
 
 {{ save_feedback() }}
 
 <form id="cfg-form" method="POST">
+
+    <div class="cfg-card">
+        <div class="cfg-card-header"><i class="bi bi-cloud-arrow-down text-info"></i> Service Debrid</div>
+        {% for defn in registry_sections.get('proxy', []) if defn.key in ('download_service', 'proxied_link') %}
+        {{ render_field(defn, effective) }}
+        {% endfor %}
+    </div>
 
     <div class="cfg-card">
         <div class="cfg-card-header"><i class="bi bi-hdd-network text-secondary"></i> Proxy de lecture</div>
