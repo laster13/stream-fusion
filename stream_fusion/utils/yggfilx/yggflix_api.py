@@ -12,7 +12,7 @@ from stream_fusion.logging_config import logger
 class YggflixAPI:
     TORZNAB_NS = {"torznab": "http://torznab.com/schemas/2015/feed"}
 
-    def __init__(self, pool_connections=10, pool_maxsize=50, max_retries=3, timeout=10):
+    def __init__(self, pool_connections=10, pool_maxsize=50, max_retries=1, timeout=2):
         self.base_url = settings.yggflix_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
@@ -49,12 +49,12 @@ class YggflixAPI:
         except requests.exceptions.HTTPError as e:
             logger.error(f"YGG Relay HTTP error: {e}")
             raise
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"YGG Relay connection error: {e}")
-            raise
-        except requests.exceptions.Timeout as e:
-            logger.error(f"YGG Relay timeout: {e}")
-            raise
+        except requests.exceptions.ConnectionError:
+            logger.warning("YGG Relay connection failed — relay likely offline")
+            return None
+        except requests.exceptions.Timeout:
+            logger.warning(f"YGG Relay timeout after {self.timeout}s — relay likely offline")
+            return None
         except requests.exceptions.RequestException as e:
             logger.error(f"YGG Relay request error: {e}")
             raise

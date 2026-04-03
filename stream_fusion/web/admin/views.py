@@ -31,6 +31,12 @@ templates = Jinja2Templates(directory=settings.admin_template_dir)
 # base.html calls {% set csrf_token = csrf_token_gen() %} once per render.
 templates.env.globals["csrf_token_gen"] = generate_csrf_token
 
+from stream_fusion.version import get_version
+try:
+    templates.env.globals["app_version"] = get_version()
+except Exception:
+    templates.env.globals["app_version"] = "?"
+
 _DEFAULT_SESSION_KEY = "331cbfe48117fcba53d09572b10d2fc293d86131dc51be46d8aa9843c2e9f48d"
 
 
@@ -334,6 +340,14 @@ async def dashboard(
     except Exception:
         torrent_count = 0
 
+    # Matched/orphan torrents
+    try:
+        result = await db.execute(text("SELECT COUNT(*) FROM torrent_items WHERE tmdb_id IS NOT NULL"))
+        torrent_matched_count = result.scalar() or 0
+    except Exception:
+        torrent_matched_count = 0
+    torrent_orphan_count = torrent_count - torrent_matched_count
+
     # Redis status
     try:
         redis_ok = bool(redis_client.ping())
@@ -347,6 +361,8 @@ async def dashboard(
         "active_peers": active_peers,
         "debrid_cache_count": debrid_cache_count,
         "torrent_count": torrent_count,
+        "torrent_matched_count": torrent_matched_count,
+        "torrent_orphan_count": torrent_orphan_count,
         "redis_ok": redis_ok,
     })
 

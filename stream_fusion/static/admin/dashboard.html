@@ -3,8 +3,9 @@
 {% block page_title %}Dashboard{% endblock %}
 
 {% block content %}
-<div class="row g-3 mb-4">
-    <div class="col-sm-6 col-xl-3">
+{# ── Ligne 1 : 5 stat cards ── #}
+<div class="row g-3 mb-3">
+    <div class="col-sm-6 col-xl">
         <div class="stat-card">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
@@ -15,7 +16,7 @@
             </div>
         </div>
     </div>
-    <div class="col-sm-6 col-xl-3">
+    <div class="col-sm-6 col-xl">
         <div class="stat-card">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
@@ -26,18 +27,7 @@
             </div>
         </div>
     </div>
-    <div class="col-sm-6 col-xl-3">
-        <div class="stat-card">
-            <div class="d-flex justify-content-between align-items-start">
-                <div>
-                    <div class="stat-value text-warning">{{ "{:,}".format(debrid_cache_count) }}</div>
-                    <div class="stat-label">Cache debrid</div>
-                </div>
-                <i class="bi bi-database stat-icon text-warning"></i>
-            </div>
-        </div>
-    </div>
-    <div class="col-sm-6 col-xl-3">
+    <div class="col-sm-6 col-xl">
         <div class="stat-card">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
@@ -48,9 +38,34 @@
             </div>
         </div>
     </div>
+    <div class="col-sm-6 col-xl">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value text-warning">
+                        {{ "%.1f"|format(torrent_matched_count / torrent_count * 100 if torrent_count else 0) }}%
+                    </div>
+                    <div class="stat-label">Taux matching TMDB</div>
+                </div>
+                <i class="bi bi-crosshair stat-icon text-warning"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-xl">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value text-secondary">{{ "{:,}".format(debrid_cache_count) }}</div>
+                    <div class="stat-label">Cache debrid</div>
+                </div>
+                <i class="bi bi-database stat-icon text-secondary"></i>
+            </div>
+        </div>
+    </div>
 </div>
 
-<div class="row g-3">
+{# ── Ligne 2 : Actions rapides + Scheduler ── #}
+<div class="row g-3 mb-3">
     <div class="col-md-6">
         <div class="stat-card h-100">
             <h6 class="fw-semibold mb-3"><i class="bi bi-lightning-charge me-2 text-primary"></i>Actions rapides</h6>
@@ -75,6 +90,18 @@
     </div>
     <div class="col-md-6">
         <div class="stat-card h-100">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-clock-history me-2 text-info"></i>Scheduler</h6>
+            <div id="scheduler-widget" style="font-size:0.85rem;">
+                <div class="text-secondary"><i class="bi bi-hourglass-split me-1"></i>Chargement…</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Ligne 3 : Base de données + Recherche ── #}
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="stat-card h-100">
             <h6 class="fw-semibold mb-3"><i class="bi bi-info-circle me-2 text-secondary"></i>Base de données</h6>
             <dl class="mb-0" style="font-size:0.85rem;">
                 <div class="d-flex justify-content-between py-1 border-bottom border-secondary border-opacity-25">
@@ -88,45 +115,97 @@
                     <dd class="mb-0 text-success"><i class="bi bi-check-circle-fill"></i> Connecté</dd>
                 </div>
                 <div class="d-flex justify-content-between py-1 border-bottom border-secondary border-opacity-25">
-                    <dt class="fw-normal" style="color:var(--bs-secondary-color);">Cache debrid</dt>
-                    <dd class="mb-0">{{ "{:,}".format(debrid_cache_count) }} entrées</dd>
+                    <dt class="fw-normal" style="color:var(--bs-secondary-color);">Torrents matchés</dt>
+                    <dd class="mb-0">{{ "{:,}".format(torrent_matched_count) }} <span class="text-secondary" style="font-size:0.8rem;">({{ "%.1f"|format(torrent_matched_count / torrent_count * 100 if torrent_count else 0) }}%)</span></dd>
+                </div>
+                <div class="d-flex justify-content-between py-1 border-bottom border-secondary border-opacity-25">
+                    <dt class="fw-normal" style="color:var(--bs-secondary-color);">Torrents orphelins</dt>
+                    <dd class="mb-0 {% if torrent_orphan_count > 0 %}text-warning{% endif %}">{{ "{:,}".format(torrent_orphan_count) }}</dd>
                 </div>
                 <div class="d-flex justify-content-between py-1">
-                    <dt class="fw-normal" style="color:var(--bs-secondary-color);">Torrents indexés</dt>
-                    <dd class="mb-0">{{ "{:,}".format(torrent_count) }}</dd>
+                    <dt class="fw-normal" style="color:var(--bs-secondary-color);">Cache debrid</dt>
+                    <dd class="mb-0">{{ "{:,}".format(debrid_cache_count) }} entrées</dd>
                 </div>
             </dl>
         </div>
     </div>
-</div>
-
-<div class="row g-3 mt-1">
-    <div class="col-12">
-        <div class="stat-card">
+    <div class="col-md-6">
+        <div class="stat-card h-100">
             <h6 class="fw-semibold mb-3"><i class="bi bi-search me-2 text-info"></i>Recherche dans la base</h6>
-            <div class="row g-3">
-                <div class="col-md-6">
-                    <form action="{{ url_for('search_hash_page')(request) }}" method="get" class="d-flex gap-2">
-                        <input type="text" name="q" class="form-control form-control-sm font-monospace"
-                               placeholder="info_hash (40 car. hex)" maxlength="40"
-                               style="font-size:0.82rem;">
-                        <button type="submit" class="btn btn-sm btn-outline-info flex-shrink-0">
-                            <i class="bi bi-hash me-1"></i>Par hash
-                        </button>
-                    </form>
-                </div>
-                <div class="col-md-6">
-                    <form action="{{ url_for('search_tmdb_page')(request) }}" method="get" class="d-flex gap-2">
-                        <input type="number" name="q" class="form-control form-control-sm"
-                               placeholder="TMDB ID (ex : 272565)" min="1"
-                               style="font-size:0.82rem;">
-                        <button type="submit" class="btn btn-sm btn-outline-primary flex-shrink-0">
-                            <i class="bi bi-film me-1"></i>Par TMDB ID
-                        </button>
-                    </form>
-                </div>
+            <div class="d-flex flex-column gap-3">
+                <form action="{{ url_for('search_hash_page')(request) }}" method="get" class="d-flex gap-2">
+                    <input type="text" name="q" class="form-control form-control-sm font-monospace"
+                           placeholder="info_hash (40 car. hex)" maxlength="40"
+                           style="font-size:0.82rem;">
+                    <button type="submit" class="btn btn-sm btn-outline-info flex-shrink-0">
+                        <i class="bi bi-hash me-1"></i>Par hash
+                    </button>
+                </form>
+                <form action="{{ url_for('search_tmdb_page')(request) }}" method="get" class="d-flex gap-2">
+                    <input type="number" name="q" class="form-control form-control-sm"
+                           placeholder="TMDB ID (ex : 272565)" min="1"
+                           style="font-size:0.82rem;">
+                    <button type="submit" class="btn btn-sm btn-outline-primary flex-shrink-0">
+                        <i class="bi bi-film me-1"></i>Par TMDB ID
+                    </button>
+                </form>
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+    fetch('/admin/scheduler/status')
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (data) {
+            var jobs = Array.isArray(data.jobs) ? data.jobs : [];
+
+            var leaderBadge = data.is_leader
+                ? '<span class="badge bg-success">Leader</span>'
+                : '<span class="badge bg-secondary">Replica</span>';
+            var runBadge = data.scheduler_running
+                ? '<span class="badge bg-success bg-opacity-25 text-success">Actif</span>'
+                : '<span class="badge bg-danger bg-opacity-25 text-danger">Arrêté</span>';
+
+            var html = '<div class="d-flex align-items-center gap-2 mb-3">'
+                + leaderBadge + ' ' + runBadge
+                + '<span class="text-secondary ms-auto" style="font-size:0.8rem;">'
+                + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '')
+                + '</span></div>';
+
+            if (jobs.length > 0) {
+                html += '<div style="max-height:160px;overflow-y:auto;">';
+                jobs.forEach(function (job) {
+                    // next_run_at est un timestamp Unix (secondes)
+                    var nextRun = job.next_run_at
+                        ? new Date(job.next_run_at * 1000).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})
+                        : '—';
+                    var statusIcon = job.last_status === 'ok'
+                        ? '<i class="bi bi-check-circle-fill text-success" style="font-size:0.75rem;"></i>'
+                        : job.last_status === 'error'
+                            ? '<i class="bi bi-x-circle-fill text-danger" style="font-size:0.75rem;"></i>'
+                            : '<i class="bi bi-dash-circle text-secondary" style="font-size:0.75rem;"></i>';
+                    var iconHtml = job.icon ? '<i class="bi ' + job.icon + '" style="font-size:0.8rem;width:14px;text-align:center;flex-shrink:0;"></i> ' : '';
+                    html += '<div class="d-flex align-items-center justify-content-between py-1 border-bottom border-secondary border-opacity-25">'
+                        + '<span style="font-size:0.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;display:flex;align-items:center;gap:5px;">'
+                        + iconHtml + (job.name || job.id) + '</span>'
+                        + '<div class="d-flex align-items-center gap-2 flex-shrink-0">'
+                        + statusIcon
+                        + '<span style="font-size:0.75rem;color:var(--bs-secondary-color);">→ ' + nextRun + '</span>'
+                        + '</div></div>';
+                });
+                html += '</div>';
+            }
+
+            document.getElementById('scheduler-widget').innerHTML = html;
+        })
+        .catch(function () {
+            document.getElementById('scheduler-widget').innerHTML =
+                '<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>Indisponible</span>';
+        });
+})();
+</script>
 {% endblock %}
