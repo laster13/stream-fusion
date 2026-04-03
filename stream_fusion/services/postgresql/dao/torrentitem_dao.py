@@ -40,7 +40,7 @@ class TorrentItemDAO:
                 query = select(TorrentItemModel).limit(limit).offset(offset)
                 result = await self.session.execute(query)
                 items = result.scalars().all()
-                logger.debug(f"TorrentItemDAO: Retrieved {len(items)} TorrentItems")
+                logger.trace(f"TorrentItemDAO: Retrieved {len(items)} TorrentItems")
                 return items
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error retrieving TorrentItems: {str(e)}")
@@ -84,7 +84,7 @@ class TorrentItemDAO:
                 db_item.updated_at = int(datetime.now(timezone.utc).timestamp())
                 await self.session.flush()
                 await self.session.refresh(db_item)
-                logger.debug(f"TorrentItemDAO: Updated TorrentItem: {item_id}")
+                logger.trace(f"TorrentItemDAO: Updated TorrentItem: {item_id}")
                 return db_item
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error updating TorrentItem {item_id}: {str(e)}")
@@ -99,7 +99,7 @@ class TorrentItemDAO:
 
                 if db_item:
                     await self.session.delete(db_item)
-                    logger.debug(f"TorrentItemDAO: Deleted TorrentItem: {item_id}")
+                    logger.trace(f"TorrentItemDAO: Deleted TorrentItem: {item_id}")
                     return True
                 else:
                     logger.warning(f"TorrentItemDAO: TorrentItem not found for deletion: {item_id}")
@@ -114,7 +114,7 @@ class TorrentItemDAO:
                 query = select(TorrentItemModel).where(TorrentItemModel.info_hash == info_hash)
                 result = await self.session.execute(query)
                 items = result.scalars().all()
-                logger.debug(f"TorrentItemDAO: Retrieved {len(items)} TorrentItems with info_hash: {info_hash}")
+                logger.trace(f"TorrentItemDAO: Retrieved {len(items)} TorrentItems with info_hash: {info_hash}")
                 return items
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error retrieving TorrentItems by info_hash {info_hash}: {str(e)}")
@@ -141,7 +141,7 @@ class TorrentItemDAO:
                 query = select(TorrentItemModel).where(TorrentItemModel.indexer == indexer)
                 result = await self.session.execute(query)
                 items = result.scalars().all()
-                logger.debug(f"TorrentItemDAO: Retrieved {len(items)} TorrentItems from indexer: {indexer}")
+                logger.trace(f"TorrentItemDAO: Retrieved {len(items)} TorrentItems from indexer: {indexer}")
                 return items
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error retrieving TorrentItems by indexer {indexer}: {str(e)}")
@@ -154,7 +154,7 @@ class TorrentItemDAO:
                 result = await self.session.execute(query)
                 count = result.scalar_one()
                 is_cached = count > 0
-                logger.debug(f"TorrentItemDAO: TorrentItem {item_id} {'is' if is_cached else 'is not'} in cache")
+                logger.trace(f"TorrentItemDAO: TorrentItem {item_id} {'is' if is_cached else 'is not'} in cache")
                 return is_cached
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error checking if TorrentItem {item_id} is cached: {str(e)}")
@@ -166,7 +166,7 @@ class TorrentItemDAO:
                 query = select(TorrentItemModel).where(TorrentItemModel.type == item_type)
                 result = await self.session.execute(query)
                 items = result.scalars().all()
-                logger.debug(f"TorrentItemDAO: Retrieved {len(items)} TorrentItems of type: {item_type}")
+                logger.trace(f"TorrentItemDAO: Retrieved {len(items)} TorrentItems of type: {item_type}")
                 return items
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error retrieving TorrentItems by type {item_type}: {str(e)}")
@@ -178,7 +178,7 @@ class TorrentItemDAO:
                 query = select(TorrentItemModel).where(TorrentItemModel.availability == available)
                 result = await self.session.execute(query)
                 items = result.scalars().all()
-                logger.debug(f"TorrentItemDAO: Retrieved {len(items)} TorrentItems with availability: {available}")
+                logger.trace(f"TorrentItemDAO: Retrieved {len(items)} TorrentItems with availability: {available}")
                 return items
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error retrieving TorrentItems by availability {available}: {str(e)}")
@@ -193,7 +193,7 @@ class TorrentItemDAO:
                 query = select(TorrentItemModel).where(TorrentItemModel.info_hash.in_(hashes))
                 result = await self.session.execute(query)
                 rows = result.scalars().all()
-                logger.debug(f"TorrentItemDAO: get_batch_by_hashes — {len(rows)}/{len(hashes)} found")
+                logger.trace(f"TorrentItemDAO: get_batch_by_hashes — {len(rows)}/{len(hashes)} found")
                 return {
                     row.info_hash: {
                         "raw_title": row.raw_title,
@@ -218,7 +218,7 @@ class TorrentItemDAO:
                 result = await self.session.execute(query)
                 item = result.scalar_one_or_none()
                 if item:
-                    logger.debug(f"TorrentItemDAO: Found torrent with info_hash: {info_hash}")
+                    logger.trace(f"TorrentItemDAO: Found torrent with info_hash: {info_hash}")
                 return item
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error searching by info_hash {info_hash}: {str(e)}")
@@ -241,7 +241,7 @@ class TorrentItemDAO:
                 )
                 result = await self.session.execute(query)
                 items = result.scalars().all()
-                logger.debug(f"TorrentItemDAO: Found {len(items)} torrents for TMDB ID: {tmdb_id}")
+                logger.trace(f"TorrentItemDAO: Found {len(items)} torrents for TMDB ID: {tmdb_id}")
                 return items
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error searching by TMDB ID {tmdb_id}: {str(e)}")
@@ -262,7 +262,7 @@ class TorrentItemDAO:
                 db_item.updated_at = int(datetime.now(timezone.utc).timestamp())
                 await self.session.flush()
                 await self.session.refresh(db_item)
-                logger.debug(f"TorrentItemDAO: Updated torrent_file_path for {torrent_id}: {file_path}")
+                logger.trace(f"TorrentItemDAO: Updated torrent_file_path for {torrent_id}: {file_path}")
                 return True
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error updating torrent_file_path for {torrent_id}: {str(e)}")
@@ -285,7 +285,7 @@ class TorrentItemDAO:
                 db_item.updated_at = int(datetime.now(timezone.utc).timestamp())
                 await self.session.flush()
                 await self.session.refresh(db_item)
-                logger.debug(f"TorrentItemDAO: Updated torrent_file_path ({file_path}) and TMDB ID ({tmdb_id}) for {torrent_id}")
+                logger.trace(f"TorrentItemDAO: Updated torrent_file_path ({file_path}) and TMDB ID ({tmdb_id}) for {torrent_id}")
                 return True
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error updating torrent_file_path and tmdb_id for {torrent_id}: {str(e)}")
@@ -318,11 +318,11 @@ class TorrentItemDAO:
             await self.session.flush()
             row_count = result.rowcount
             if row_count:
-                logger.debug(f"TorrentItemDAO: Updated {row_count} torrents with info_hash '{info_hash}' to tmdb_id {tmdb_id}")
+                logger.trace(f"TorrentItemDAO: Updated {row_count} torrents with info_hash '{info_hash}' to tmdb_id {tmdb_id}")
                 # Propagate the new tmdb_id to all members of the group (if any)
                 await self._propagate_tmdb_to_groups_by_hash(info_hash, tmdb_id)
             else:
-                logger.debug(f"TorrentItemDAO: Skipped tmdb_id assignment for '{info_hash}' (already set or known mismatch)")
+                logger.trace(f"TorrentItemDAO: Skipped tmdb_id assignment for '{info_hash}' (already set or known mismatch)")
             return row_count
         except Exception as e:
             logger.error(f"TorrentItemDAO: Error updating tmdb_id for info_hash '{info_hash}': {str(e)}")
@@ -394,7 +394,7 @@ class TorrentItemDAO:
 
             if total_rows:
                 sibling_info = f", propagated via {len(matched_hashes)} hash(es)" if matched_hashes else ""
-                logger.debug(
+                logger.trace(
                     f"TorrentItemDAO: Updated {total_rows} torrents with raw_title '{raw_title}'"
                     f" (indexer={indexer}{sibling_info}) to tmdb_id {tmdb_id}"
                 )
@@ -402,7 +402,7 @@ class TorrentItemDAO:
                 for info_hash in (safe_hashes if matched_hashes else []):
                     await self._propagate_tmdb_to_groups_by_hash(info_hash, tmdb_id)
             else:
-                logger.debug(
+                logger.trace(
                     f"TorrentItemDAO: Skipped tmdb_id for raw_title '{raw_title}'"
                     f" (already set, no match, or known mismatch)"
                 )
@@ -420,17 +420,33 @@ class TorrentItemDAO:
         """
         if not info_hashes:
             return
-        try:
-            stmt = (
-                update(TorrentItemModel)
-                .where(TorrentItemModel.info_hash.in_(info_hashes))
-                .values(updated_at=int(datetime.now(timezone.utc).timestamp()))
-            )
-            await self.session.execute(stmt)
-            await self.session.flush()
-            logger.debug(f"TorrentItemDAO: Touched updated_at for {len(info_hashes)} items (TTL refresh)")
-        except Exception as e:
-            logger.error(f"TorrentItemDAO: Error touching items by info_hash: {str(e)}")
+        # Sort for consistent row-locking order across concurrent requests.
+        sorted_hashes = sorted(info_hashes)
+        for attempt in range(2):
+            try:
+                stmt = (
+                    update(TorrentItemModel)
+                    .where(TorrentItemModel.info_hash.in_(sorted_hashes))
+                    .values(updated_at=int(datetime.now(timezone.utc).timestamp()))
+                )
+                await self.session.execute(stmt)
+                await self.session.flush()
+                logger.trace(f"TorrentItemDAO: Touched updated_at for {len(sorted_hashes)} items (TTL refresh)")
+                return
+            except Exception as e:
+                if "DeadlockDetectedError" in str(e):
+                    if attempt == 0:
+                        logger.debug("TorrentItemDAO: Deadlock on touch, retrying after rollback")
+                        try:
+                            await self.session.rollback()
+                        except Exception:
+                            pass
+                        continue
+                    logger.warning(
+                        f"TorrentItemDAO: Deadlock on touch after retry — TTL refresh skipped for {len(sorted_hashes)} items"
+                    )
+                else:
+                    logger.error(f"TorrentItemDAO: Error touching items by info_hash: {str(e)}")
 
     async def get_latest_tmdb_ids(self, item_type: str, limit: int = 50) -> List[int]:
         async with self.session.begin():
@@ -452,7 +468,7 @@ class TorrentItemDAO:
                 result = await self.session.execute(query)
                 rows = result.fetchall()
                 tmdb_ids = [row.tmdb_id for row in rows]
-                logger.debug(f"TorrentItemDAO: Retrieved {len(tmdb_ids)} latest TMDB IDs (FR/MULTI) for {item_type}")
+                logger.trace(f"TorrentItemDAO: Retrieved {len(tmdb_ids)} latest TMDB IDs (FR/MULTI) for {item_type}")
                 return tmdb_ids
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error getting latest TMDB IDs for {item_type}: {str(e)}")
@@ -477,7 +493,7 @@ class TorrentItemDAO:
                 result = await self.session.execute(query)
                 rows = result.fetchall()
                 tmdb_ids = [row.tmdb_id for row in rows]
-                logger.debug(f"TorrentItemDAO: Retrieved {len(tmdb_ids)} recently added TMDB IDs for {item_type}")
+                logger.trace(f"TorrentItemDAO: Retrieved {len(tmdb_ids)} recently added TMDB IDs for {item_type}")
                 return tmdb_ids
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error getting recently added TMDB IDs for {item_type}: {str(e)}")
@@ -519,7 +535,7 @@ class TorrentItemDAO:
                 result = await self.session.execute(query)
                 rows = result.fetchall()
                 tmdb_ids = [row.tmdb_id for row in rows]
-                logger.debug(f"TorrentItemDAO: Retrieved {len(tmdb_ids)} series with new episodes (last {recent_days} days)")
+                logger.trace(f"TorrentItemDAO: Retrieved {len(tmdb_ids)} series with new episodes (last {recent_days} days)")
                 return tmdb_ids
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error getting series with new episodes: {str(e)}")
@@ -642,7 +658,7 @@ class TorrentItemDAO:
                             'first_seen': row[3]
                         })
                     episode_data.sort(key=lambda x: x['first_seen'], reverse=True)
-                    logger.debug(f"TorrentItemDAO: Filtered {len(tmdb_ids)} TMDB IDs to {len(episode_data)} with episode info for {item_type}")
+                    logger.trace(f"TorrentItemDAO: Filtered {len(tmdb_ids)} TMDB IDs to {len(episode_data)} with episode info for {item_type}")
                     return episode_data
                 elif sort_by_added and recent_days is None:
                     filtered_ids = [row[0] for row in rows]
@@ -652,7 +668,7 @@ class TorrentItemDAO:
 
                 recent_info = f" (recent {recent_days}d, by episode)" if recent_days and item_type == "series" else (f" (recent {recent_days}d)" if recent_days else "")
                 sort_info = ", sorted by added date" if sort_by_added else ""
-                logger.debug(f"TorrentItemDAO: Filtered {len(tmdb_ids)} TMDB IDs to {len(filtered_ids)} existing (FR/MULTI{recent_info}{sort_info}) for {item_type}")
+                logger.trace(f"TorrentItemDAO: Filtered {len(tmdb_ids)} TMDB IDs to {len(filtered_ids)} existing (FR/MULTI{recent_info}{sort_info}) for {item_type}")
                 return filtered_ids
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error filtering TMDB IDs for {item_type}: {str(e)}")
@@ -681,7 +697,7 @@ class TorrentItemDAO:
                 )
                 result = await self.session.execute(stmt)
                 items = result.scalars().all()
-                logger.debug(f"TorrentItemDAO: Found {len(items)} unmatched torrents (query={query!r})")
+                logger.trace(f"TorrentItemDAO: Found {len(items)} unmatched torrents (query={query!r})")
                 return items
             except Exception as e:
                 logger.error(f"TorrentItemDAO: Error searching unmatched torrents: {str(e)}")
@@ -707,7 +723,7 @@ class TorrentItemDAO:
             result = await self.session.execute(stmt)
             await self.session.flush()
             row_count = result.rowcount
-            logger.info(
+            logger.trace(
                 f"TorrentItemDAO: Admin assigned tmdb_id={tmdb_id} to {row_count} torrents"
             )
             return row_count

@@ -92,7 +92,7 @@ class TheOldSchoolAPI:
             if info_hash and info_hash not in unique_results:
                 unique_results[info_hash] = item
 
-        logger.info(f"TheOldSchool: Found {len(unique_results)} unique torrents after deduplication")
+        logger.debug(f"TheOldSchool: Found {len(unique_results)} unique torrents after deduplication")
         return list(unique_results.values())
 
     async def _search_tracker(
@@ -105,7 +105,7 @@ class TheOldSchoolAPI:
         params = {"perPage": 100, **query_params}
 
         log_url = f"{url}?{urlencode(params)}"
-        logger.info(f"TheOldSchool: Requesting {log_url}")
+        logger.debug(f"TheOldSchool: Requesting {log_url}")
 
         try:
             async with session.get(url, params=params, headers=headers, timeout=15) as response:
@@ -119,7 +119,7 @@ class TheOldSchoolAPI:
                     results = data
                 else:
                     results = []
-                logger.info(f"TheOldSchool: {len(results)} raw items for params {query_params}")
+                logger.debug(f"TheOldSchool: {len(results)} raw items for params {query_params}")
                 return [r for r in results if isinstance(r, dict)]
         except Exception as e:
             logger.warning(f"TheOldSchool: Request failed: {e}")

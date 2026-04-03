@@ -41,7 +41,7 @@ class AppSettingDAO:
         )
         await self.session.execute(stmt)
         await self.session.commit()
-        logger.debug(f"AppSettingDAO: upserted '{key}' = '{value}' by {updated_by}")
+        logger.trace(f"AppSettingDAO: upserted '{key}' = '{value}' by {updated_by}")
 
     async def delete(self, key: str) -> bool:
         """Remove the override for *key* (reverts to env-based default on next read)."""
@@ -52,7 +52,7 @@ class AppSettingDAO:
         if row:
             await self.session.delete(row)
             await self.session.commit()
-            logger.debug(f"AppSettingDAO: deleted override for '{key}'")
+            logger.trace(f"AppSettingDAO: deleted override for '{key}'")
             return True
         return False
 

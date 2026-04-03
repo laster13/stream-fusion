@@ -16,7 +16,7 @@ class Torbox(BaseDebrid):
         super().__init__(config, session)
         self.base_url = f"{settings.tb_base_url}/{settings.tb_api_version}/api"
         self.token = settings.tb_token if settings.tb_unique_account else self.config["TBToken"]
-        logger.info(f"Torbox: Initialized with base URL: {self.base_url}")
+        logger.trace(f"Torbox: Initialized with base URL: {self.base_url}")
 
     def get_headers(self):
         if settings.tb_unique_account:
@@ -254,7 +254,7 @@ class Torbox(BaseDebrid):
             return {}, hashes
 
     async def get_availability_bulk(self, hashes_or_magnets, ip=None):
-        logger.info(f"Torbox: Checking availability for {len(hashes_or_magnets)} hashes/magnets")
+        logger.debug(f"Torbox: Checking availability for {len(hashes_or_magnets)} hashes/magnets")
 
         # Normalize and deduplicate inputs while preserving order
         cleaned_hashes = list(
@@ -301,7 +301,7 @@ class Torbox(BaseDebrid):
                 logger.debug(f"Torbox: No cached results for batch {i // batch_size + 1}")
 
         cached_count = len(result_by_hash)
-        logger.info(f"Torbox: Availability check done — {cached_count}/{len(cleaned_hashes)} cached")
+        logger.debug(f"Torbox: Availability check done — {cached_count}/{len(cleaned_hashes)} cached")
 
         return {
             "success": True,

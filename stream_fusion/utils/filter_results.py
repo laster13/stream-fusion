@@ -240,7 +240,7 @@ def apply_preference_filters(items, media, config, skip_resolution=False):
     except Exception as e:
         logger.error("Filters: Error while applying language priority filter", exc_info=e)
 
-    logger.info(f"Filters: Filtering complete. Final item count: {len(items)}")
+    logger.debug(f"Filters: Filtering complete. Final item count: {len(items)}")
     return items
 
 

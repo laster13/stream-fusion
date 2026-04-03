@@ -334,7 +334,7 @@ class TorrentSmartContainer:
             )
 
     def _update_availability_realdebrid(self, response, media):
-        self.logger.info("TorrentSmartContainer: Updating availability for RealDebrid")
+        self.logger.debug("TorrentSmartContainer: Updating availability for RealDebrid")
         for info_hash, details in response.items():
             normalized_hash = self._normalize_hash(info_hash)
             if "rd" not in details:
@@ -362,7 +362,7 @@ class TorrentSmartContainer:
                 self._process_movie_files(details, files)
             self._update_file_details(torrent_item, files, debrid="RD")
 
-        self.logger.info(
+        self.logger.debug(
             "TorrentSmartContainer: RealDebrid availability update completed"
         )
 
@@ -488,7 +488,7 @@ class TorrentSmartContainer:
             files = self._process_torbox_files(data["files"], torrent_item.type, media)
             self._update_file_details(torrent_item, files, debrid="TB")
 
-        self.logger.info("TorrentSmartContainer: Torbox availability update completed")
+        self.logger.debug("TorrentSmartContainer: Torbox availability update completed")
 
     def _process_torbox_files(self, files, type, media):
         processed_files = []
@@ -523,7 +523,7 @@ class TorrentSmartContainer:
         return season_episode_in_filename(filename, numeric_season, numeric_episode)
 
     def _update_availability_premiumize(self, response):
-        self.logger.info("TorrentSmartContainer: Updating availability for Premiumize")
+        self.logger.debug("TorrentSmartContainer: Updating availability for Premiumize")
         if not response:
             self.logger.error(
                 "TorrentSmartContainer: Empty response from Premiumize API"

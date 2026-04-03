@@ -120,6 +120,38 @@ def _build_next_episode_media(media):
     return next_episode_id, next_media
 
 
+async def _bg_assign_tmdb_ids(session_factory, tmdb_data: list):
+    """Background task: sequential TMDB ID assignment with its own DB session."""
+    session = session_factory()
+    try:
+        dao = TorrentItemDAO(session)
+        for entry in tmdb_data:
+            if entry["info_hash"]:
+                await dao.update_tmdb_id_by_info_hash(entry["info_hash"], entry["tmdb_id"])
+            else:
+                await dao.update_tmdb_id_by_raw_title(
+                    entry["raw_title"], entry["tmdb_id"], indexer=entry.get("indexer")
+                )
+        await session.commit()
+    except Exception as e:
+        logger.debug(f"BG TMDB assign error: {e}")
+    finally:
+        await session.close()
+
+
+async def _bg_touch_items(session_factory, info_hashes: list):
+    """Background task: refresh updated_at (TTL) with its own DB session."""
+    session = session_factory()
+    try:
+        dao = TorrentItemDAO(session)
+        await dao.touch_items_by_info_hash(info_hashes)
+        await session.commit()
+    except Exception as e:
+        logger.debug(f"BG touch error: {e}")
+    finally:
+        await session.close()
+
+
 async def full_prefetch_from_cache(
     media,
     config,
@@ -373,8 +405,8 @@ async def full_prefetch_from_cache(
                                 else:
                                     tmdb_updates.append(background_torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int, indexer=item.indexer))
                                 item.tmdb_id = tmdb_id_int
-                        if tmdb_updates:
-                            asyncio.ensure_future(asyncio.gather(*tmdb_updates))
+                        for coro in tmdb_updates:
+                            await coro
 
                     # Step 3: refresh TTL for Postgres items so cache-first stays valid
                     postgres_hashes = [
@@ -382,7 +414,7 @@ async def full_prefetch_from_cache(
                         if item.info_hash and item.indexer in _POSTGRES_INDEXERS
                     ]
                     if postgres_hashes:
-                        asyncio.ensure_future(background_torrent_dao.touch_items_by_info_hash(postgres_hashes))
+                        await background_torrent_dao.touch_items_by_info_hash(postgres_hashes)
 
                     # Step 4: user-preference filters + per-quality cap
                     filtered_results = ResultsPerQualityFilter(config).filter(
@@ -540,13 +572,13 @@ async def get_results(
 
     debrid_session = getattr(request.app.state, "debrid_session", None)
     debrid_services = get_all_debrid_services(config, debrid_session)
-    logger.debug(f"Search: Debrid services: {[debrid.__class__.__name__ for debrid in debrid_services]}")
+    logger.trace(f"Search: Debrid services: {[debrid.__class__.__name__ for debrid in debrid_services]}")
 
     http_session = getattr(request.app.state, "http_session", None)
 
     # --- Metadata: TMDB preferred, Cinemeta as fallback; result cached in Redis ---
     async def get_metadata(episode_id=None, media_type=None):
-        logger.debug(f"Search: Fetching metadata from {config['metadataProvider']}")
+        logger.trace(f"Search: Fetching metadata from {config['metadataProvider']}")
         actual_id = episode_id if episode_id is not None else stream_id
         actual_type = media_type if media_type is not None else stream_type
 
@@ -565,7 +597,7 @@ async def get_results(
     media = await redis_cache.get_or_set(
         get_metadata, stream_id, stream_type, config["metadataProvider"]
     )
-    logger.debug(f"Search: Retrieved media metadata for {str(media.titles)}")
+    logger.trace(f"Search: Retrieved media metadata for {str(media.titles)}")
     logger.info(f"Search: [{media.titles[0]}] {stream_type} {stream_id}")
 
     # stream_cache_key: user-specific (api_key or IP) + media identifier → 16-char SHA256 prefix
@@ -829,21 +861,24 @@ async def get_results(
         min_postgres = int(config.get("minPostgresResults", 5))
         postgres_max_age_days = int(config.get("postgresMaxAgeDays", 7))
 
-        # --- Helper: retroactive TMDB ID assignment (background, non-blocking) ---
+        # --- Helper: build TMDB update data and launch background task ---
         def _assign_tmdb_ids_background(items):
             if not (hasattr(media, "tmdb_id") and media.tmdb_id):
                 return
             tmdb_id_int = int(media.tmdb_id)
-            updates = []
+            tmdb_data = []
             for item in items:
                 if item.tmdb_id is None and item.indexer in _POSTGRES_INDEXERS:
-                    if item.info_hash:
-                        updates.append(torrent_dao.update_tmdb_id_by_info_hash(item.info_hash, tmdb_id_int))
-                    else:
-                        updates.append(torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int, indexer=item.indexer))
+                    tmdb_data.append({
+                        "info_hash": item.info_hash,
+                        "raw_title": item.raw_title,
+                        "tmdb_id": tmdb_id_int,
+                        "indexer": item.indexer,
+                    })
                     item.tmdb_id = tmdb_id_int
-            if updates:
-                asyncio.ensure_future(asyncio.gather(*updates))
+            if tmdb_data:
+                session_factory = request.app.state.db_session_factory
+                asyncio.ensure_future(_bg_assign_tmdb_ids(session_factory, tmdb_data))
 
         # --- Helper: check Postgres cache validity (sufficient + fresh) ---
         # max_ts comes from the DB model timestamps (not TorrentItem DTO which has no timestamp fields)
@@ -1025,8 +1060,8 @@ async def get_results(
                                 else:
                                     tmdb_updates.append(bg_torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int, indexer=item.indexer))
                                 item.tmdb_id = tmdb_id_int
-                        if tmdb_updates:
-                            await asyncio.gather(*tmdb_updates)
+                        for coro in tmdb_updates:
+                            await coro
                     pg_hashes = [
                         item.info_hash for item in bg_confirmed
                         if item.info_hash and item.indexer in _POSTGRES_INDEXERS
@@ -1138,7 +1173,7 @@ async def get_results(
             if item.info_hash and item.indexer in _POSTGRES_INDEXERS
         ]
         if postgres_info_hashes:
-            asyncio.ensure_future(torrent_dao.touch_items_by_info_hash(postgres_info_hashes))
+            asyncio.ensure_future(_bg_touch_items(request.app.state.db_session_factory, postgres_info_hashes))
 
         # --- Step 3: user-preference filters (language, quality, exclusions, sorting) ---
         filtered_results = await asyncio.to_thread(
@@ -1169,12 +1204,16 @@ async def get_results(
             hashes = torrent_smart_container.get_unaviable_hashes()
             if fast_debrids and hashes:
                 async def _check_debrid(debrid):
+                    debrid_session = request.app.state.db_session_factory()
                     try:
-                        result = await debrid.get_availability_bulk_cached(hashes, ip, _avail_redis, db_session=db)
+                        result = await debrid.get_availability_bulk_cached(hashes, ip, _avail_redis, db_session=debrid_session)
+                        await debrid_session.commit()
                         return debrid, result
                     except Exception as e:
                         logger.warning(f"Search: {type(debrid).__name__} availability check failed: {e}")
                         return debrid, None
+                    finally:
+                        await debrid_session.close()
 
                 parallel_results = await asyncio.gather(*[_check_debrid(d) for d in fast_debrids])
 

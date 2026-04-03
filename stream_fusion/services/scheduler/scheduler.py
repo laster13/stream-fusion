@@ -18,14 +18,15 @@ RENEW_EVERY = 60    # secondes — intervalle de renouvellement du lock
 
 # Métadonnées des jobs pour l'affichage dans l'interface admin
 JOB_META: dict[str, dict] = {
-    "debrid_cache_cleanup":    {"name": "Purge cache debrid expiré",          "icon": "bi-database-x"},
-    "torrent_orphan_cleanup":  {"name": "Suppression torrents non matchés",    "icon": "bi-file-earmark-x"},
-    "torrent_dedup":           {"name": "Déduplication torrents",              "icon": "bi-copy"},
-    "torrent_group_hash":      {"name": "Groupement par info_hash",            "icon": "bi-diagram-3"},
-    "torrent_group_title_size":{"name": "Groupement par titre + taille",       "icon": "bi-diagram-2"},
-    "api_keys_cleanup":        {"name": "Désactivation clés API expirées",     "icon": "bi-key"},
-    "peer_keys_cleanup":       {"name": "Désactivation peer keys expirées",    "icon": "bi-diagram-3"},
-    "tmdb_orphan_matching":    {"name": "Résolution TMDB orphelins",           "icon": "bi-link-45deg"},
+    "debrid_cache_cleanup":       {"name": "Purge cache debrid expiré",          "icon": "bi-database-x"},
+    "torrent_orphan_cleanup":     {"name": "Suppression torrents non matchés",    "icon": "bi-file-earmark-x"},
+    "torrent_dedup":              {"name": "Déduplication torrents",              "icon": "bi-copy"},
+    "torrent_group_hash":         {"name": "Groupement par info_hash",            "icon": "bi-diagram-3"},
+    "torrent_group_title_size":   {"name": "Groupement par titre + taille",       "icon": "bi-diagram-2"},
+    "api_keys_cleanup":           {"name": "Désactivation clés API expirées",     "icon": "bi-key"},
+    "peer_keys_cleanup":          {"name": "Désactivation peer keys expirées",    "icon": "bi-diagram-3"},
+    "tmdb_orphan_matching":       {"name": "Résolution TMDB orphelins",           "icon": "bi-link-45deg"},
+    "fix_type_inconsistencies":   {"name": "Correction type film/série",          "icon": "bi-arrow-repeat"},
 }
 
 
@@ -58,6 +59,7 @@ class StreamFusionScheduler:
             "api_keys_cleanup":         self._cleanup_api_keys,
             "peer_keys_cleanup":        self._cleanup_peer_keys,
             "tmdb_orphan_matching":     self._tmdb_orphan_matching,
+            "fix_type_inconsistencies": self._fix_type_inconsistencies,
         }
         # Lazy-initialised — created on first job run to avoid import overhead
         self._orphan_matcher = None
@@ -116,14 +118,15 @@ class StreamFusionScheduler:
         mh = settings.scheduler_tmdb_match_interval_hours
 
         jobs = [
-            (self._cleanup_debrid_cache,    "debrid_cache_cleanup",     dh),
-            (self._cleanup_orphan_torrents, "torrent_orphan_cleanup",   th),
-            (self._dedup_torrents,          "torrent_dedup",            th),
-            (self._group_by_info_hash,      "torrent_group_hash",       th),
-            (self._group_by_title_size,     "torrent_group_title_size", th),
-            (self._cleanup_api_keys,        "api_keys_cleanup",         kh),
-            (self._cleanup_peer_keys,       "peer_keys_cleanup",        kh),
-            (self._tmdb_orphan_matching,    "tmdb_orphan_matching",     mh),
+            (self._cleanup_debrid_cache,      "debrid_cache_cleanup",       dh),
+            (self._cleanup_orphan_torrents,   "torrent_orphan_cleanup",     th),
+            (self._dedup_torrents,            "torrent_dedup",              th),
+            (self._group_by_info_hash,        "torrent_group_hash",         th),
+            (self._group_by_title_size,       "torrent_group_title_size",   th),
+            (self._cleanup_api_keys,          "api_keys_cleanup",           kh),
+            (self._cleanup_peer_keys,         "peer_keys_cleanup",          kh),
+            (self._tmdb_orphan_matching,      "tmdb_orphan_matching",       mh),
+            (self._fix_type_inconsistencies,  "fix_type_inconsistencies",   th),
         ]
         for i, (func, job_id, interval_hours) in enumerate(jobs):
             start_date = now + timedelta(minutes=5) + stagger * i
@@ -286,6 +289,27 @@ class StreamFusionScheduler:
             """,
         )
 
+    async def _fix_type_inconsistencies(self) -> None:
+        """Correct torrent_items tagged 'movie' whose title contains a season marker (SXX).
+
+        These are typically season packs (e.g. S05) that were indexed during a movie
+        search context and therefore inherited the wrong type. The SQL regex mirrors
+        the Python _SEASON_RE used in the orphan matcher.
+        """
+        await self._run_job(
+            "fix_type_inconsistencies",
+            r"""
+            UPDATE torrent_items
+            SET type = 'series',
+                updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+            WHERE type = 'movie'
+              AND (
+                raw_title ~* '(^|[^[:alnum:]])S[0-9]{2}([^[:alnum:]]|$)'
+                OR raw_title ~* '(^|[^[:alnum:]])(COMPLETE|INTEGRALE|INTEGR.LE)([^[:alnum:]]|$)'
+              )
+            """,
+        )
+
     async def _tmdb_orphan_matching(self) -> None:
         """Assign TMDB IDs to orphan torrent_items via title-based TMDB search."""
         from stream_fusion.services.tmdb_matcher.orphan_matcher import OrphanMatcher
@@ -346,14 +370,15 @@ class StreamFusionScheduler:
         leader_pid = int(leader_raw) if leader_raw else None
 
         job_intervals = {
-            "debrid_cache_cleanup":     settings.scheduler_debrid_cleanup_interval_hours,
-            "torrent_orphan_cleanup":   settings.scheduler_torrent_cleanup_interval_hours,
-            "torrent_dedup":            settings.scheduler_torrent_cleanup_interval_hours,
-            "torrent_group_hash":       settings.scheduler_torrent_cleanup_interval_hours,
-            "torrent_group_title_size": settings.scheduler_torrent_cleanup_interval_hours,
-            "api_keys_cleanup":         settings.scheduler_keys_cleanup_interval_hours,
-            "peer_keys_cleanup":        settings.scheduler_keys_cleanup_interval_hours,
-            "tmdb_orphan_matching":     settings.scheduler_tmdb_match_interval_hours,
+            "debrid_cache_cleanup":       settings.scheduler_debrid_cleanup_interval_hours,
+            "torrent_orphan_cleanup":     settings.scheduler_torrent_cleanup_interval_hours,
+            "torrent_dedup":              settings.scheduler_torrent_cleanup_interval_hours,
+            "torrent_group_hash":         settings.scheduler_torrent_cleanup_interval_hours,
+            "torrent_group_title_size":   settings.scheduler_torrent_cleanup_interval_hours,
+            "api_keys_cleanup":           settings.scheduler_keys_cleanup_interval_hours,
+            "peer_keys_cleanup":          settings.scheduler_keys_cleanup_interval_hours,
+            "tmdb_orphan_matching":       settings.scheduler_tmdb_match_interval_hours,
+            "fix_type_inconsistencies":   settings.scheduler_torrent_cleanup_interval_hours,
         }
 
         jobs = []

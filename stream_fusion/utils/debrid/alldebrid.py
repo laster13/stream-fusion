@@ -229,7 +229,7 @@ class AllDebrid(BaseDebrid):
                 response = await self.delete_magnet(magnet_id, ip)
                 if response and response.get("status") == "success":
                     success += 1
-                    logger.debug(f"AllDebrid: Deleted temp magnet {magnet_id}")
+                    logger.trace(f"AllDebrid: Deleted temp magnet {magnet_id}")
             except Exception as e:
                 logger.debug(f"AllDebrid: Could not delete temp magnet {magnet_id}: {e}")
         logger.debug(f"AllDebrid: background cleanup done — {success}/{len(magnet_ids)} deleted")
@@ -279,16 +279,16 @@ class AllDebrid(BaseDebrid):
             magnet, torrent_download, torrent_file_content, ip
         )
         torrent_id = str(torrent_id) if torrent_id else ""
-        logger.info(f"AllDebrid: Torrent ID: {torrent_id}")
+        logger.debug(f"AllDebrid: Torrent ID: {torrent_id}")
 
         if not torrent_id or torrent_id.startswith("Error"):
             logger.error(f"AllDebrid: Failed to add torrent: {torrent_id}")
             return settings.no_cache_video_url
 
-        logger.info(f"AllDebrid: Retrieving files for torrent ID: {torrent_id}")
+        logger.debug(f"AllDebrid: Retrieving files for torrent ID: {torrent_id}")
         try:
             files_response = await self.get_magnet_files(torrent_id, ip)
-            logger.debug(f"AllDebrid: Files response: {files_response}")
+            logger.trace(f"AllDebrid: Files response: {files_response}")
 
             if not files_response:
                 logger.error("AllDebrid: Null response from get_magnet_files")
@@ -311,7 +311,7 @@ class AllDebrid(BaseDebrid):
 
             magnet_data = magnets[0]
             files = flatten_files(magnet_data.get("files", []))
-            logger.info(
+            logger.debug(
                 f"AllDebrid: Retrieved {len(files)} files (after flattening)"
             )
 
@@ -337,7 +337,7 @@ class AllDebrid(BaseDebrid):
         elif stream_type == "series":
             numeric_season = int(query["season"].replace("S", ""))
             numeric_episode = int(query["episode"].replace("E", ""))
-            logger.info(
+            logger.debug(
                 f"AllDebrid: Finding S{numeric_season:02d}E{numeric_episode:02d}"
             )
 
@@ -401,7 +401,7 @@ class AllDebrid(BaseDebrid):
                         )
                         if target_file.get("l"):
                             link = target_file["l"]
-                            logger.info(
+                            logger.debug(
                                 "AllDebrid: Found episode link by filename match"
                             )
                         else:
@@ -422,7 +422,7 @@ class AllDebrid(BaseDebrid):
             logger.info("AllDebrid: No link found, returning no-cache URL")
             return link
 
-        logger.info("AllDebrid: Retrieved link successfully")
+        logger.debug("AllDebrid: Retrieved link successfully")
 
         try:
             unlocked_response = await self.unrestrict_link(link, ip)
@@ -432,7 +432,7 @@ class AllDebrid(BaseDebrid):
                 and "data" in unlocked_response
             ):
                 final_link = unlocked_response["data"].get("link", link)
-                logger.info("AllDebrid: Link unrestricted")
+                logger.debug("AllDebrid: Link unrestricted")
                 return final_link
         except Exception as e:
             logger.debug(f"AllDebrid: Could not unrestrict link: {str(e)}")
@@ -655,7 +655,7 @@ class AllDebrid(BaseDebrid):
                     f"AllDebrid: Exception downloading .torrent: {str(e)}"
                 )
 
-        logger.info("AllDebrid: Adding magnet link")
+        logger.debug("AllDebrid: Adding magnet link")
         magnet_response = await self.add_magnet(magnet, ip)
 
         if not magnet_response or magnet_response.get("status") != "success":
@@ -666,7 +666,7 @@ class AllDebrid(BaseDebrid):
             magnets = magnet_response.get("data", {}).get("magnets", [])
             if magnets:
                 torrent_id = magnets[0].get("id")
-                logger.info(
+                logger.debug(
                     f"AllDebrid: Successfully added magnet, ID: {torrent_id}"
                 )
                 return str(torrent_id)

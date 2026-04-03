@@ -212,6 +212,11 @@ const JOB_DOCS = {
         detail: "Parse le titre brut, regroupe les items par titre normalisé, puis effectue une recherche TMDB par titre (+ année si présente). N'assigne que les matchs à haute confiance (exact ou sous-ensemble ordonné + validation d'année). L'historique détaillé est consultable dans la page TMDB Matcher.",
         param: "SCHEDULER_TMDB_MATCH_BATCH_SIZE (défaut : 500 items/run)",
     },
+    fix_type_inconsistencies: {
+        desc: "Corrige les <code>torrent_items</code> incorrectement marqués comme film alors qu'il s'agit de séries.",
+        detail: "Détecte les torrents avec <code>type = 'movie'</code> dont le titre contient un marqueur de saison (<code>S05</code>, <code>S05E01</code>…) ou un indicateur d'intégrale (<code>COMPLETE</code>, <code>INTEGRALE</code>). Met à jour le type en <code>series</code>. Couvre les packs complets sans numéro de saison explicite.",
+        param: null,
+    },
 };
 
 // ── Render ──────────────────────────────────────────────────────────────────

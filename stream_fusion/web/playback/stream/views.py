@@ -253,7 +253,7 @@ async def get_stream_link(
     decoded_query: str, config: dict, ip: str, redis_cache: RedisCache,
     uhash: str, chash: str, debrid_session=None, db_session=None
 ) -> str:
-    logger.debug(f"Playback: Getting stream link for query: {decoded_query}, IP: {ip}")
+    logger.trace(f"Playback: Getting stream link for query: {decoded_query}, IP: {ip}")
 
     cache_key = f"stream_link:{uhash}:{chash}"
     cached_link = await redis_cache.get(cache_key)
@@ -278,7 +278,7 @@ async def get_stream_link(
         raise DebridError("Debrid service failed to provide a valid stream link", error_code="UNKNOWN")
 
     if link != settings.no_cache_video_url:
-        logger.debug(f"Playback: Caching new stream link")
+        logger.trace(f"Playback: Caching new stream link")
         await redis_cache.set(cache_key, link, expiration=_STREAM_LINK_TTL)
         logger.debug(f"Playback: New stream link generated and cached")
     else:
@@ -315,7 +315,7 @@ async def get_playback(
         if api_key:
             try:
                 await check_api_key(api_key, apikey_dao)
-                logger.debug(f"Playback: Valid API key provided by {ip}")
+                logger.trace(f"Playback: Valid API key provided by {ip}")
             except HTTPException as e:
                 logger.warning(f"Playback: Invalid API key provided by {ip}. Error: {e.detail}")
                 raise e
@@ -327,10 +327,10 @@ async def get_playback(
             raise HTTPException(status_code=400, detail="Query required.")
 
         decoded_query = decodeb64(query)
-        logger.debug(f"Playback: Decoded query: {decoded_query}, Client IP: {ip}")
+        logger.trace(f"Playback: Decoded query: {decoded_query}, Client IP: {ip}")
 
         query_dict = json.loads(decoded_query)
-        logger.debug(f"Playback: Received playback request for query: {decoded_query}")
+        logger.trace(f"Playback: Received playback request for query: {decoded_query}")
         service = query_dict.get("service", False)
 
         debrid_session = getattr(request.app.state, 'debrid_session', None)
@@ -375,7 +375,7 @@ async def get_playback(
             finally:
                 try:
                     await lock.release()
-                    logger.debug("Playback: Lock released")
+                    logger.trace("Playback: Lock released")
                 except LockError:
                     logger.debug("Playback: Failed to release lock (already released)")
 
@@ -386,7 +386,7 @@ async def get_playback(
                 api_key_info = await apikey_dao.get_key_by_uuid(api_key)
                 if api_key_info and hasattr(api_key_info, 'proxied_links'):
                     use_proxy = api_key_info.proxied_links
-                    logger.debug(f"Playback: API key has proxied_links={use_proxy}")
+                    logger.trace(f"Playback: API key has proxied_links={use_proxy}")
             except Exception as e:
                 logger.error(f"Playback: Error checking API key proxification status: {e}")
 

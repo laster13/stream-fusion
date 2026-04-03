@@ -44,17 +44,17 @@ class TheOldSchoolService:
             return []
 
     async def _search_movie(self, media: Movie) -> List[TheOldSchoolResult]:
-        logger.info(f"TheOldSchool: Searching movie: {media.titles[0]}")
+        logger.debug(f"TheOldSchool: Searching movie: {media.titles[0]}")
 
         imdb_id = media.id if media.id and media.id.startswith("tt") else None
         tmdb_id = getattr(media, "tmdb_id", None)
 
         raw = await self.api.search_movie(tmdb_id=tmdb_id, imdb_id=imdb_id)
-        logger.info(f"TheOldSchool: {len(raw)} raw results for movie '{media.titles[0]}'")
+        logger.debug(f"TheOldSchool: {len(raw)} raw results for movie '{media.titles[0]}'")
         return self._build_results(raw, media)
 
     async def _search_series(self, media: Series) -> List[TheOldSchoolResult]:
-        logger.info(f"TheOldSchool: Searching series: {media.titles[0]}")
+        logger.debug(f"TheOldSchool: Searching series: {media.titles[0]}")
 
         raw_id = media.id.split(":")[0] if media.id else None
         imdb_id = raw_id if raw_id and raw_id.startswith("tt") else None
@@ -69,7 +69,7 @@ class TheOldSchoolService:
             season=season_num,
             episode=episode_num,
         )
-        logger.info(
+        logger.debug(
             f"TheOldSchool: {len(raw)} raw results for '{media.titles[0]}' "
             f"(S{season_num:02d}E{episode_num:02d})"
         )
@@ -85,5 +85,5 @@ class TheOldSchoolService:
                 logger.debug(f"TheOldSchool: Skipping item - {e}")
             except Exception as e:
                 logger.error(f"TheOldSchool: Unexpected error building item: {e} | item={item}")
-        logger.info(f"TheOldSchool: Built {len(results)} final result objects")
+        logger.debug(f"TheOldSchool: Built {len(results)} final result objects")
         return results

@@ -102,7 +102,7 @@ class RedisCache(CacheBase):
             self.logger.trace(f"RedisCache: Returning cached result for key: {key}")
             return cached_result
 
-        self.logger.debug(f"RedisCache: Cache miss [{key}] → executing {func.__name__}")
+        self.logger.trace(f"RedisCache: Cache miss [{key}] → executing {func.__name__}")
         result = await self._execute_func(func, *args, **kwargs)
         self.logger.trace(f"RedisCache: Function execution completed. Setting result in cache.")
         await self.set(key, result)
@@ -153,7 +153,7 @@ class RedisCache(CacheBase):
                 raise
 
         end_time = time.time()
-        self.logger.debug(f"RedisCache: {func.__name__} executed in {end_time - start_time:.2f}s")
+        self.logger.trace(f"RedisCache: {func.__name__} executed in {end_time - start_time:.2f}s")
         return result
 
     async def can_cache(self) -> bool:

@@ -44,7 +44,7 @@ class TorrentGroupDAO:
             self.session.add(group)
             await self.session.flush()
             await self.session.refresh(group)
-            logger.debug(f"TorrentGroupDAO: Created group id={group.id} hash={canonical_info_hash}")
+            logger.trace(f"TorrentGroupDAO: Created group id={group.id} hash={canonical_info_hash}")
             return group
 
     async def find_group_by_info_hash(self, info_hash: str) -> Optional[TorrentGroupModel]:
@@ -95,7 +95,7 @@ class TorrentGroupDAO:
             count = result.rowcount
             # Update denormalized item_count
             await self._refresh_item_count(group_id)
-            logger.debug(f"TorrentGroupDAO: Assigned {count} items to group {group_id}")
+            logger.trace(f"TorrentGroupDAO: Assigned {count} items to group {group_id}")
             return count
         except Exception as e:
             logger.error(f"TorrentGroupDAO: Error assigning items to group {group_id}: {e}")
@@ -112,7 +112,7 @@ class TorrentGroupDAO:
             await self.session.execute(stmt)
             await self.session.flush()
             await self._refresh_item_count(group_id)
-            logger.debug(f"TorrentGroupDAO: Assigned item {item_id} to group {group_id}")
+            logger.trace(f"TorrentGroupDAO: Assigned item {item_id} to group {group_id}")
             return True
         except Exception as e:
             logger.error(f"TorrentGroupDAO: Error assigning item {item_id} to group {group_id}: {e}")
@@ -139,35 +139,60 @@ class TorrentGroupDAO:
     # ------------------------------------------------------------------
 
     async def propagate_tmdb_within_group(self, group_id: int) -> int:
-        """Propagate the consensus tmdb_id to all group members that lack one.
+        """Propagate the consensus tmdb_id and type to all group members that lack one.
 
         Consensus = most-frequent tmdb_id among members that already have one.
+        The type is also propagated using the majority type among members that
+        share the consensus tmdb_id — this corrects items wrongly tagged 'movie'
+        when a sibling with the same hash is correctly typed 'series'.
         Skips the group if no member has a tmdb_id yet.
         Returns the number of rows updated.
         """
         try:
-            # Load all member tmdb_ids
+            # Load all member (tmdb_id, type) pairs
             rows = await self.session.execute(
-                select(TorrentItemModel.tmdb_id).where(TorrentItemModel.group_id == group_id)
+                select(TorrentItemModel.tmdb_id, TorrentItemModel.type)
+                .where(TorrentItemModel.group_id == group_id)
             )
-            all_tmdb = [r[0] for r in rows.fetchall() if r[0] is not None]
+            all_rows = rows.fetchall()
+            all_tmdb = [r[0] for r in all_rows if r[0] is not None]
             if not all_tmdb:
                 return 0
 
             consensus = Counter(all_tmdb).most_common(1)[0][0]
+
+            # Derive consensus type from members already linked to the consensus tmdb_id
+            types_for_consensus = [
+                r[1] for r in all_rows
+                if r[0] == consensus and r[1] in ("movie", "series")
+            ]
+            consensus_type = Counter(types_for_consensus).most_common(1)[0][0] if types_for_consensus else None
+
+            # Build update values — include type if a consensus could be determined
+            update_values: dict = {"tmdb_id": consensus, "updated_at": int(datetime.now().timestamp())}
+            if consensus_type:
+                update_values["type"] = consensus_type
 
             # Propagate to members without a tmdb_id
             result = await self.session.execute(
                 update(TorrentItemModel)
                 .where(TorrentItemModel.group_id == group_id)
                 .where(TorrentItemModel.tmdb_id.is_(None))
-                .values(
-                    tmdb_id=consensus,
-                    updated_at=int(datetime.now().timestamp()),
-                )
+                .values(**update_values)
             )
             await self.session.flush()
             updated = result.rowcount
+
+            # Also fix type on members that already have the correct tmdb_id but wrong type
+            if consensus_type:
+                await self.session.execute(
+                    update(TorrentItemModel)
+                    .where(TorrentItemModel.group_id == group_id)
+                    .where(TorrentItemModel.tmdb_id == consensus)
+                    .where(TorrentItemModel.type != consensus_type)
+                    .values(type=consensus_type, updated_at=int(datetime.now().timestamp()))
+                )
+                await self.session.flush()
 
             # Keep the group row itself in sync
             await self.session.execute(
@@ -178,7 +203,7 @@ class TorrentGroupDAO:
             await self.session.flush()
 
             if updated:
-                logger.debug(
+                logger.trace(
                     f"TorrentGroupDAO: Propagated tmdb_id={consensus} to {updated} items in group {group_id}"
                 )
             return updated
@@ -228,7 +253,7 @@ class TorrentGroupDAO:
                 .having(func.count() > 1)
             )
             dup_hashes = [r[0] for r in dup_hashes_result.fetchall()]
-            logger.debug(f"TorrentGroupDAO: batch_group_by_info_hash — {len(dup_hashes)} hashes to process")
+            logger.trace(f"TorrentGroupDAO: batch_group_by_info_hash — {len(dup_hashes)} hashes to process")
 
             for info_hash in dup_hashes:
                 # Items (ungrouped) sharing this hash

@@ -103,7 +103,7 @@ class YggflixService:
         year = getattr(media, "year", None)
         normalized_titles = [self.__normalize_text(t) for t in titles]
 
-        logger.info(f"Searching YGG Relay for movie: {media.titles[0] if media.titles else 'unknown'}")
+        logger.debug(f"Searching YGG Relay for movie: {media.titles[0] if media.titles else 'unknown'}")
 
         queries = []
         for title in titles:
@@ -168,7 +168,7 @@ class YggflixService:
         season_num = media.get_season_number()
         episode_num = media.get_episode_number()
 
-        logger.info(f"Searching YGG Relay for series: {media.titles[0] if media.titles else 'unknown'}")
+        logger.debug(f"Searching YGG Relay for series: {media.titles[0] if media.titles else 'unknown'}")
 
         # Build query list: for each title, generate S##E## first, then S## (for season packs).
         # Both variants are always run — S## catches season packs not tagged with episode numbers.

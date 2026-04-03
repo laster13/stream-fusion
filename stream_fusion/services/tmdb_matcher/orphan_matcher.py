@@ -45,6 +45,8 @@ _LEVEL_PRIORITY = {
 
 # Season regex (duplicated locally to avoid importing private internals)
 _SEASON_RE = re.compile(r"\bS\d{2}(?:E\d{2}(?:-E?\d{2})?)?\b", re.IGNORECASE)
+# Complete-series markers: COMPLETE, INTEGRALE (French), INTÉGRALE (accented)
+_SERIES_PACK_RE = re.compile(r"\b(?:COMPLETE|INTEGR[AÀ]LE)\b", re.IGNORECASE)
 # Year regex
 _YEAR_RE = re.compile(r"\b((?:19|20)\d{2})\b")
 
@@ -225,15 +227,22 @@ class OrphanMatcher:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _detect_type(item: TorrentItemModel) -> Optional[str]:
-    """Detect whether an item is 'movie' or 'series', or None if unknown."""
-    if item.type in ("movie", "series"):
-        return item.type
+    """Detect whether an item is 'movie' or 'series', or None if unknown.
+
+    Season patterns in the title are authoritative and override the stored type:
+    a torrent indexed during a movie search may have been wrongly tagged 'movie'
+    even when it is clearly a series (e.g. S05 in the filename).
+    """
+    # Season/pack markers in title always win — even if type is already "movie"
+    if _SEASON_RE.search(item.raw_title) or _SERIES_PACK_RE.search(item.raw_title):
+        return "series"
     if item.parsed_data:
         seasons = item.parsed_data.get("seasons")
         if seasons:
             return "series"
-    if _SEASON_RE.search(item.raw_title):
-        return "series"
+    # Fall back to stored type (reliable when no season marker is present)
+    if item.type in ("movie", "series"):
+        return item.type
     return None
 
 

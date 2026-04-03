@@ -74,7 +74,7 @@ class DebridCacheDAO:
             )
             await self.session.execute(stmt)
             await self.session.commit()
-            logger.debug(f"DebridCacheDAO: upserted {len(values)} entries for {service}")
+            logger.trace(f"DebridCacheDAO: upserted {len(values)} entries for {service}")
         except Exception as e:
             await self.session.rollback()
             logger.warning(f"DebridCacheDAO: upsert_batch failed ({e})")
@@ -125,7 +125,7 @@ class DebridCacheDAO:
             await self.session.commit()
             count = result.rowcount
             if count:
-                logger.debug(f"DebridCacheDAO: deleted {count} expired entries")
+                logger.trace(f"DebridCacheDAO: deleted {count} expired entries")
             return count
         except Exception as e:
             await self.session.rollback()
