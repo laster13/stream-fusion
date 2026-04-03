@@ -1,0 +1,416 @@
+{% extends "base.html" %}
+{% block title %}TMDB Matcher — StreamFusion Admin{% endblock %}
+{% block page_title %}TMDB Matcher — Historique{% endblock %}
+
+{% block extra_head %}
+<style>
+    .matcher-card {
+        border: 1px solid var(--bs-border-color);
+        border-radius: 10px;
+        background: var(--bs-secondary-bg);
+        overflow: hidden;
+        margin-bottom: 1rem;
+    }
+    .matcher-card-header {
+        padding: 13px 20px;
+        border-bottom: 1px solid var(--bs-border-color);
+        font-weight: 600;
+        font-size: 0.875rem;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .run-header {
+        padding: 12px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        cursor: pointer;
+        user-select: none;
+        border-bottom: 1px solid var(--bs-border-color);
+        transition: background 0.15s;
+    }
+    .run-header:hover { background: var(--bs-tertiary-bg); }
+    .run-header:last-child { border-bottom: none; }
+    .run-meta { flex: 1; font-size: 0.85rem; }
+    .run-meta .run-date { font-weight: 600; }
+    .run-meta .run-stats { color: var(--bs-secondary-color); font-size: 0.78rem; margin-top: 2px; }
+    .run-chevron { color: var(--bs-secondary-color); transition: transform 0.2s; }
+    .run-chevron.open { transform: rotate(90deg); }
+
+    .match-table td, .match-table th {
+        vertical-align: middle;
+        font-size: 0.82rem;
+        padding: 9px 14px;
+    }
+    .match-table th {
+        font-size: 0.70rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--bs-secondary-color);
+        background: var(--bs-tertiary-bg);
+        border-bottom: 1px solid var(--bs-border-color);
+        white-space: nowrap;
+    }
+    .match-table tbody tr:last-child td { border-bottom: none; }
+    .level-badge {
+        display: inline-block; padding: 2px 7px; border-radius: 8px;
+        font-size: 0.70rem; font-weight: 600;
+    }
+    .level-exact   { background: rgba(25,135,84,0.15); color: #198754; border: 1px solid rgba(25,135,84,0.25); }
+    .level-subset  { background: rgba(13,110,253,0.12); color: #0d6efd; border: 1px solid rgba(13,110,253,0.2); }
+    .type-badge {
+        display: inline-block; padding: 1px 6px; border-radius: 4px;
+        font-size: 0.68rem; background: var(--bs-tertiary-bg);
+        border: 1px solid var(--bs-border-color); color: var(--bs-secondary-color);
+        font-family: monospace;
+    }
+    .raw-title { font-family: monospace; font-size: 0.75rem; color: var(--bs-secondary-color); }
+    .stat-pill {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600;
+    }
+    .stat-matched   { background: rgba(25,135,84,0.12); color: #198754; }
+    .stat-processed { background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); }
+    .empty-state { text-align: center; padding: 48px 20px; color: var(--bs-secondary-color); }
+    .result-toast {
+        position: fixed; bottom: 24px; right: 24px;
+        z-index: 9999; min-width: 300px; max-width: 420px;
+    }
+    /* Revert button state after click */
+    .revert-btn.reverted {
+        pointer-events: none; opacity: 0.45;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Toast notification -->
+<div class="result-toast" id="resultToast" style="display:none;">
+    <div class="toast show align-items-center border-0" id="toastEl" role="alert">
+        <div class="d-flex">
+            <div class="toast-body" id="toastMsg"></div>
+            <button type="button" class="btn-close me-2 m-auto" id="toastClose"></button>
+        </div>
+    </div>
+</div>
+
+<!-- Confirmation modal -->
+<div class="modal fade" id="revertModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-arrow-counterclockwise me-2"></i>Confirmer le revert</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-1">Remettre <code>tmdb_id = NULL</code> pour :</p>
+                <p class="mb-1 fw-semibold" id="revertTitle"></p>
+                <p class="text-secondary mb-0" style="font-size:0.82rem">
+                    TMDB ID <strong id="revertTmdbId"></strong> sera ajouté aux mismatches — ce torrent ne sera plus
+                    matché automatiquement avec cet ID.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-danger btn-sm" id="revertConfirmBtn">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>Revert
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+
+    <!-- Summary banner -->
+    <div class="col-12" id="summaryBanner" style="display:none;">
+        <div class="matcher-card">
+            <div class="matcher-card-header">
+                <i class="bi bi-bar-chart-line text-primary"></i>
+                Résumé des 7 derniers jours
+                <div class="ms-auto" id="summaryStats"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Runs list -->
+    <div class="col-12">
+        <div class="matcher-card">
+            <div class="matcher-card-header">
+                <i class="bi bi-link-45deg text-primary"></i>
+                Historique des exécutions
+                <div class="ms-auto d-flex align-items-center gap-2">
+                    <button class="btn btn-sm btn-outline-primary" id="triggerBtn" title="Déclencher maintenant">
+                        <i class="bi bi-play-fill me-1"></i>Lancer maintenant
+                    </button>
+                    <button class="btn btn-link btn-sm p-0 text-secondary" id="refreshBtn" title="Rafraîchir l'historique">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+            </div>
+            <div id="runsContainer">
+                <div class="empty-state">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Chargement…
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const CSRF = window.__ADMIN_CSRF__ || '';
+
+// ── Pending revert state ───────────────────────────────────────────────────
+let pendingRevert = null;
+let pendingBtn    = null;
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function fmtDate(epochSeconds) {
+    if (!epochSeconds) return '—';
+    return new Date(epochSeconds * 1000).toLocaleString('fr-FR', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+    });
+}
+
+function levelBadge(level) {
+    if (!level) return '';
+    if (level === 'exact_normalized')
+        return `<span class="level-badge level-exact">exact</span>`;
+    if (level === 'ordered_subset')
+        return `<span class="level-badge level-subset">subset</span>`;
+    return `<span class="level-badge" style="background:var(--bs-tertiary-bg);border:1px solid var(--bs-border-color)">${level}</span>`;
+}
+
+function typeBadge(t) {
+    const icon = t === 'movie' ? 'bi-film' : t === 'series' ? 'bi-tv' : 'bi-question';
+    return `<span class="type-badge"><i class="bi ${icon} me-1"></i>${t || '?'}</span>`;
+}
+
+// ── Render a matches table (loaded lazily per run) ─────────────────────────
+function renderMatchesTable(matches) {
+    if (!matches || matches.length === 0) {
+        return `<div class="p-3 text-secondary text-center" style="font-size:0.82rem">Aucun match enregistré pour ce run.</div>`;
+    }
+    const rows = matches.map(m => `
+        <tr>
+            <td>
+                <div>${escHtml(m.tmdb_title || '—')}</div>
+                ${m.tmdb_year ? `<div style="font-size:0.72rem;color:var(--bs-secondary-color)">${m.tmdb_year}</div>` : ''}
+            </td>
+            <td><div class="raw-title">${escHtml(m.raw_title || '—')}</div></td>
+            <td>${typeBadge(m.item_type)}</td>
+            <td>${levelBadge(m.match_level)}</td>
+            <td><code style="font-size:0.70rem">${m.tmdb_id}</code></td>
+            <td>
+                <button class="btn btn-sm btn-outline-danger revert-btn"
+                    data-info-hash="${escHtml(m.info_hash)}"
+                    data-tmdb-id="${m.tmdb_id}"
+                    data-raw-title="${escHtml(m.raw_title)}"
+                    title="Revert ce match">
+                    <i class="bi bi-arrow-counterclockwise"></i>
+                </button>
+            </td>
+        </tr>`).join('');
+
+    return `
+    <div class="table-responsive">
+        <table class="table match-table mb-0">
+            <thead><tr>
+                <th>Titre TMDB</th>
+                <th>Titre brut</th>
+                <th>Type</th>
+                <th>Niveau</th>
+                <th>TMDB ID</th>
+                <th></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+    </div>`;
+}
+
+function escHtml(s) {
+    if (!s) return '';
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Load run detail on demand ──────────────────────────────────────────────
+async function loadRunDetail(runId, container) {
+    container.innerHTML = `<div class="p-3 text-center text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Chargement…</div>`;
+    try {
+        const res  = await fetch(`/admin/tmdb-matcher/history?run_id=${runId}`);
+        const data = await res.json();
+        container.innerHTML = renderMatchesTable(data.matches || []);
+        wireRevertButtons(container);
+    } catch(e) {
+        container.innerHTML = `<div class="p-3 text-danger">Erreur : ${e.message}</div>`;
+    }
+}
+
+// ── Load runs list ─────────────────────────────────────────────────────────
+async function loadRuns() {
+    const container = document.getElementById('runsContainer');
+    try {
+        const res   = await fetch('/admin/tmdb-matcher/history');
+        const runs  = await res.json();
+
+        if (!Array.isArray(runs) || runs.length === 0) {
+            container.innerHTML = `<div class="empty-state"><i class="bi bi-inbox fs-2 d-block mb-2"></i>Aucune exécution enregistrée.</div>`;
+            return;
+        }
+
+        // Summary banner
+        const totalMatched    = runs.reduce((s, r) => s + r.matched, 0);
+        const totalProcessed  = runs.reduce((s, r) => s + r.processed, 0);
+        document.getElementById('summaryBanner').style.display = '';
+        document.getElementById('summaryStats').innerHTML = `
+            <span class="stat-pill stat-processed me-2">${totalProcessed} traités</span>
+            <span class="stat-pill stat-matched">${totalMatched} matchés</span>`;
+
+        // Runs accordion
+        let html = '';
+        runs.forEach((run, idx) => {
+            const matchRate = run.processed > 0 ? Math.round(run.matched / run.processed * 100) : 0;
+            html += `
+            <div class="run-item">
+                <div class="run-header" data-run-id="${run.run_id}" data-loaded="false">
+                    <i class="bi bi-chevron-right run-chevron"></i>
+                    <div class="run-meta">
+                        <div class="run-date">${fmtDate(run.run_at)}</div>
+                        <div class="run-stats">
+                            ${run.processed} traités · ${run.matched} matchés · ${run.unmatched} non matchés
+                            <span class="ms-2 fw-semibold" style="color:${matchRate>=50?'#198754':'var(--bs-secondary-color)'}">
+                                (${matchRate}%)
+                            </span>
+                        </div>
+                    </div>
+                    ${run.matched > 0
+                        ? `<span class="stat-pill stat-matched">${run.matched} <i class="bi bi-check-circle ms-1"></i></span>`
+                        : ''}
+                </div>
+                <div class="run-detail" id="detail-${run.run_id}" style="display:none;"></div>
+            </div>`;
+        });
+        container.innerHTML = html;
+
+        // Wire accordion
+        container.querySelectorAll('.run-header').forEach(header => {
+            header.addEventListener('click', async () => {
+                const runId    = header.dataset.runId;
+                const chevron  = header.querySelector('.run-chevron');
+                const detail   = document.getElementById(`detail-${runId}`);
+                const open     = detail.style.display !== 'none';
+
+                if (open) {
+                    detail.style.display = 'none';
+                    chevron.classList.remove('open');
+                } else {
+                    detail.style.display = '';
+                    chevron.classList.add('open');
+                    if (header.dataset.loaded === 'false') {
+                        header.dataset.loaded = 'true';
+                        await loadRunDetail(runId, detail);
+                    }
+                }
+            });
+        });
+
+        // Auto-expand first run
+        if (runs.length > 0) {
+            const firstHeader = container.querySelector('.run-header');
+            if (firstHeader) firstHeader.click();
+        }
+
+    } catch(e) {
+        container.innerHTML = `<div class="empty-state text-danger">Impossible de charger l'historique.</div>`;
+    }
+}
+
+// ── Revert logic ───────────────────────────────────────────────────────────
+function wireRevertButtons(root) {
+    root.querySelectorAll('.revert-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            pendingRevert = {
+                info_hash: btn.dataset.infoHash,
+                tmdb_id:   btn.dataset.tmdbId,
+                raw_title: btn.dataset.rawTitle,
+            };
+            pendingBtn = btn;
+            document.getElementById('revertTitle').textContent  = btn.dataset.rawTitle || btn.dataset.infoHash;
+            document.getElementById('revertTmdbId').textContent = btn.dataset.tmdbId;
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('revertModal')).show();
+        });
+    });
+}
+
+document.getElementById('revertConfirmBtn').addEventListener('click', async () => {
+    if (!pendingRevert) return;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('revertModal')).hide();
+
+    const fd = new FormData();
+    fd.append('csrf_token',  CSRF);
+    fd.append('info_hash',   pendingRevert.info_hash);
+    fd.append('tmdb_id',     pendingRevert.tmdb_id);
+    fd.append('raw_title',   pendingRevert.raw_title || '');
+
+    try {
+        const res  = await fetch('/admin/tmdb-matcher/revert', { method: 'POST', body: fd });
+        const data = await res.json();
+        showToast(data.success, data.message || (data.success ? 'Revert effectué' : 'Erreur'));
+        if (data.success && pendingBtn) {
+            pendingBtn.classList.add('reverted');
+            pendingBtn.innerHTML = '<i class="bi bi-check-circle"></i>';
+        }
+    } catch(e) {
+        showToast(false, 'Erreur réseau : ' + e.message);
+    }
+    pendingRevert = null;
+    pendingBtn    = null;
+});
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function showToast(success, message) {
+    const el   = document.getElementById('toastEl');
+    const wrap = document.getElementById('resultToast');
+    el.className = 'toast show align-items-center border-0 text-bg-' + (success ? 'success' : 'danger');
+    document.getElementById('toastMsg').textContent = message;
+    wrap.style.display = 'block';
+    setTimeout(() => { wrap.style.display = 'none'; }, 5000);
+}
+document.getElementById('toastClose').addEventListener('click', () => {
+    document.getElementById('resultToast').style.display = 'none';
+});
+
+// ── Refresh button ─────────────────────────────────────────────────────────
+document.getElementById('refreshBtn').addEventListener('click', loadRuns);
+
+// ── Manual trigger ─────────────────────────────────────────────────────────
+document.getElementById('triggerBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('triggerBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>En cours…';
+    const fd = new FormData();
+    fd.append('csrf_token', CSRF);
+    try {
+        const res  = await fetch('/admin/scheduler/trigger/tmdb_orphan_matching', { method: 'POST', body: fd });
+        const data = await res.json();
+        showToast(data.success, data.message || (data.success ? 'Job déclenché' : 'Erreur'));
+        if (data.success) setTimeout(loadRuns, 15000); // rafraîchir après 15s
+    } catch(e) {
+        showToast(false, 'Erreur réseau : ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Lancer maintenant';
+    }
+});
+
+// Initial load
+loadRuns();
+</script>
+{% endblock %}

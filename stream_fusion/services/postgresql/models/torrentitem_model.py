@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, String, Boolean, Integer, JSON
+from sqlalchemy import BigInteger, ForeignKey, String, Boolean, Integer, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import ARRAY
 from stream_fusion.services.postgresql.base import Base
@@ -7,6 +7,7 @@ from typing import Optional, List
 import hashlib
 import json
 
+from stream_fusion.logging_config import logger
 from stream_fusion.utils.torrent.torrent_item import TorrentItem
 
 class TorrentItemModel(Base):
@@ -36,6 +37,22 @@ class TorrentItemModel(Base):
     availability: Mapped[bool] = mapped_column(Boolean, default=False)
 
     parsed_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+
+    # Group of torrents representing the same content (same info_hash from different
+    # indexers, or same title+size from trackers that re-hash).  Nullable — ungrouped
+    # items work exactly as before.
+    group_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("torrent_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # Timestamp of the last TMDB auto-matching attempt (NULL = never attempted).
+    # Set by the background orphan-matching job to avoid re-processing indefinitely.
+    tmdb_match_attempted_at: Mapped[Optional[int]] = mapped_column(
+        BigInteger, nullable=True, index=True
+    )
 
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)

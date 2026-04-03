@@ -49,7 +49,7 @@ class AbnAPI:
                     seen.add(key)
                     all_results.append(item)
 
-        logger.info(f"ABN: search_series '{title}' S{season}E{episode} → {len(all_results)} unique results")
+        logger.debug(f"ABN: search_series '{title}' S{season}E{episode} → {len(all_results)} unique results")
         return all_results
 
     async def _search(self, name: str) -> List[Dict[str, Any]]:
@@ -64,7 +64,7 @@ class AbnAPI:
         }
         headers = {"Authorization": f"Bearer {self.api_key}"}
         log_url = f"{url}?{urlencode(params)}"
-        logger.info(f"ABN: Requesting {log_url}")
+        logger.debug(f"ABN: Requesting {log_url}")
 
         try:
             if self.session is None:
@@ -94,7 +94,7 @@ class AbnAPI:
                     results = data
                 else:
                     results = []
-                logger.info(f"ABN: Got {len(results)} raw results")
+                logger.debug(f"ABN: Got {len(results)} raw results")
                 return [r for r in results if isinstance(r, dict)]
         except Exception as e:
             logger.warning(f"ABN: HTTP request error: {e}")

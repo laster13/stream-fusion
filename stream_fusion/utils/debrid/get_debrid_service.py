@@ -44,9 +44,9 @@ def _build_service(full_name: str, config: dict, session: aiohttp.ClientSession)
         st = StremThru(config, session)
         st.set_store_credentials(store_name, config.get(token_key, ""))
         st.extension = st_extension
-        logger.debug(f"{full_name} (via StremThru): service added to be use")
+        logger.trace(f"{full_name} (via StremThru): service added to be use")
         return st
-    logger.debug(f"{full_name}: service added to be use")
+    logger.trace(f"{full_name}: service added to be use")
     return cls(config, session)
 
 

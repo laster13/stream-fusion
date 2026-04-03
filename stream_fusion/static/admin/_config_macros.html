@@ -1,0 +1,167 @@
+{% macro render_field(defn, effective) %}
+<div style="padding: 12px 20px; border-bottom: 1px solid var(--bs-border-color);">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; min-height:32px;">
+        <span style="color:var(--bs-body-color); font-size:0.83rem; font-weight:500; flex-shrink:0;">
+            {{ defn.label }}
+            {% if defn.requires_restart %}
+            <span class="badge bg-warning text-dark ms-1" style="font-size:0.7rem;">
+                <i class="bi bi-arrow-clockwise"></i> restart
+            </span>
+            {% endif %}
+        </span>
+        <span>
+            {% if defn.type == 'bool' %}
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" role="switch"
+                       name="{{ defn.key }}" value="true"
+                       {% if effective.get(defn.key) %}checked{% endif %}>
+            </div>
+            {% elif defn.type == 'enum' %}
+            <select class="form-select form-select-sm" name="{{ defn.key }}" style="max-width:220px;">
+                {% for choice in defn.enum_choices %}
+                <option value="{{ choice }}" {% if effective.get(defn.key)|string == choice %}selected{% endif %}>
+                    {{ choice if choice else '(aucun)' }}
+                </option>
+                {% endfor %}
+            </select>
+            {% elif defn.type in ('int', 'float') %}
+            <input type="number" class="form-control form-control-sm" name="{{ defn.key }}"
+                   value="{{ effective.get(defn.key, '') }}" style="max-width:150px;">
+            {% else %}
+            <input type="text" class="form-control form-control-sm" name="{{ defn.key }}"
+                   value="{{ effective.get(defn.key, '') }}" style="max-width:320px;">
+            {% endif %}
+        </span>
+    </div>
+    {% if defn.description %}
+    <p style="margin: 7px 0 0; font-size: 0.78rem; color: var(--bs-secondary-color); line-height: 1.5;">
+        {{ defn.description }}
+    </p>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro save_button(reset_url='') %}
+<div class="d-flex justify-content-between align-items-center mt-4">
+    {% if reset_url %}
+    <button type="button" class="btn btn-outline-secondary" id="cfg-reset-btn">
+        <i class="bi bi-arrow-counterclockwise me-2"></i>Valeurs par défaut
+    </button>
+    {% else %}
+    <span></span>
+    {% endif %}
+    <button type="submit" class="btn btn-primary px-4">
+        <i class="bi bi-floppy me-2"></i>Enregistrer
+    </button>
+</div>
+{% endmacro %}
+
+{% macro save_feedback() %}
+<div id="cfg-save-result" class="mb-4" style="display:none;"></div>
+{% endmacro %}
+
+{% macro save_script(form_id, post_url, reset_url='') %}
+<script>
+(function() {
+    const form   = document.getElementById('{{ form_id }}');
+    const result = document.getElementById('cfg-save-result');
+
+    function showResult(html) {
+        result.style.display = '';
+        result.innerHTML = html;
+        result.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function restartWarning(keys) {
+        if (!keys || !keys.length) return '';
+        return `<div class="alert alert-warning d-flex align-items-center gap-2 mb-0 mt-2">
+            <i class="bi bi-arrow-clockwise fs-5 flex-shrink-0"></i>
+            <div>Redémarrage requis pour : <strong>${keys.join(', ')}</strong></div>
+        </div>`;
+    }
+
+    // ── Enregistrer ──────────────────────────────────────────────────────
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        result.style.display = 'none';
+
+        const btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Enregistrement...';
+
+        try {
+            const fd = new FormData(form);
+            fd.set('csrf_token', window.__ADMIN_CSRF__);
+            const resp = await fetch('{{ post_url }}', { method: 'POST', body: fd });
+            const data = await resp.json();
+
+            if (data.success) {
+                showResult(
+                    `<div class="alert alert-success d-flex align-items-center gap-2 mb-0">
+                        <i class="bi bi-check-circle-fill fs-5 flex-shrink-0"></i>
+                        <div>${data.saved} paramètre(s) enregistré(s).</div>
+                    </div>` + restartWarning(data.requires_restart)
+                );
+            } else {
+                const errs = data.errors ? data.errors.join('<br>') : (data.error || 'Erreur inconnue');
+                showResult(`<div class="alert alert-danger d-flex align-items-center gap-2 mb-0">
+                    <i class="bi bi-x-circle-fill fs-5 flex-shrink-0"></i>
+                    <div>${errs}</div></div>`);
+            }
+        } catch(err) {
+            showResult(`<div class="alert alert-danger mb-0">Erreur réseau : ${err.message}</div>`);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-floppy me-2"></i>Enregistrer';
+        }
+    });
+
+    // ── Valeurs par défaut ───────────────────────────────────────────────
+    {% if reset_url %}
+    const resetBtn = document.getElementById('cfg-reset-btn');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', async function() {
+            if (!confirm('Remettre tous les paramètres de cette page à leurs valeurs d\'origine (variables d\'environnement) ?\n\nLes modifications en cours non enregistrées seront perdues.')) return;
+
+            result.style.display = 'none';
+            resetBtn.disabled = true;
+            resetBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Réinitialisation...';
+
+            try {
+                const fd = new FormData();
+                fd.set('csrf_token', window.__ADMIN_CSRF__);
+                const resp = await fetch('{{ reset_url }}', { method: 'POST', body: fd });
+                const data = await resp.json();
+
+                if (data.success) {
+                    showResult(
+                        `<div class="alert alert-success d-flex align-items-center gap-2 mb-0">
+                            <i class="bi bi-check-circle-fill fs-5 flex-shrink-0"></i>
+                            <div>${data.reset} paramètre(s) remis aux valeurs par défaut. Rechargement en cours…</div>
+                        </div>` + restartWarning(data.requires_restart)
+                    );
+                    setTimeout(() => location.reload(), 1200);
+                } else {
+                    showResult(`<div class="alert alert-danger mb-0">${data.error || 'Erreur lors de la réinitialisation.'}</div>`);
+                }
+            } catch(err) {
+                showResult(`<div class="alert alert-danger mb-0">Erreur réseau : ${err.message}</div>`);
+            } finally {
+                resetBtn.disabled = false;
+                resetBtn.innerHTML = '<i class="bi bi-arrow-counterclockwise me-2"></i>Valeurs par défaut';
+            }
+        });
+    }
+    {% endif %}
+})();
+</script>
+{% endmacro %}
+
+{% macro config_breadcrumb(page_label) %}
+<nav aria-label="breadcrumb" class="mb-4">
+    <ol class="breadcrumb" style="font-size:0.85rem;">
+        <li class="breadcrumb-item"><a href="/admin/config" class="text-decoration-none">Configuration</a></li>
+        <li class="breadcrumb-item active">{{ page_label }}</li>
+    </ol>
+</nav>
+{% endmacro %}

@@ -43,24 +43,24 @@ class AbnService:
 
     async def _search_movie(self, media: Movie) -> List[AbnResult]:
         title = media.titles[0] if media.titles else None
-        logger.info(f"ABN: Searching movie: {title}")
+        logger.debug(f"ABN: Searching movie: {title}")
 
         raw = await self.api.search_movie(title=title)
-        logger.info(f"ABN: {len(raw)} raw results for movie '{title}'")
+        logger.debug(f"ABN: {len(raw)} raw results for movie '{title}'")
         return self._build_results(raw, media)
 
     async def _search_series(self, media: Series) -> List[AbnResult]:
         title = media.titles[0] if media.titles else None
         season_num = media.get_season_number()
         episode_num = media.get_episode_number()
-        logger.info(f"ABN: Searching series: {title} S{season_num:02d}E{episode_num:02d}")
+        logger.debug(f"ABN: Searching series: {title} S{season_num:02d}E{episode_num:02d}")
 
         raw = await self.api.search_series(
             title=title,
             season=season_num,
             episode=episode_num,
         )
-        logger.info(
+        logger.debug(
             f"ABN: {len(raw)} raw results for '{title}' (S{season_num:02d}E{episode_num:02d})"
         )
         return self._build_results(raw, media)
@@ -75,5 +75,5 @@ class AbnService:
                 logger.debug(f"ABN: Skipping item - {e}")
             except Exception as e:
                 logger.error(f"ABN: Unexpected error building item: {e} | item={item}")
-        logger.info(f"ABN: Built {len(results)} final result objects")
+        logger.debug(f"ABN: Built {len(results)} final result objects")
         return results

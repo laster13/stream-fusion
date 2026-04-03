@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% from "_config_macros.html" import render_field, save_button, save_feedback, save_script, config_breadcrumb %}
+{% block title %}Indexeurs & TMDB — Configuration — StreamFusion Admin{% endblock %}
+{% block page_title %}Configuration — Indexeurs & TMDB{% endblock %}
+
+{% block extra_head %}
+<style>
+    .cfg-card { border: 1px solid var(--bs-border-color); border-radius: 10px; background: var(--bs-secondary-bg); overflow: hidden; margin-bottom: 1.25rem; }
+    .cfg-card-header { padding: 13px 20px; border-bottom: 1px solid var(--bs-border-color); font-weight: 600; font-size: 0.875rem; display: flex; align-items: center; gap: 8px; }
+    .idx-table { width: 100%; font-size: 0.83rem; border-collapse: collapse; }
+    .idx-table th { padding: 9px 20px; color: var(--bs-secondary-color); font-weight: 500; border-bottom: 1px solid var(--bs-border-color); text-align: left; }
+    .idx-table td { padding: 8px 20px; border-bottom: 1px solid var(--bs-border-color); vertical-align: middle; }
+    .idx-table tr:last-child td { border-bottom: none; }
+    .idx-name { font-weight: 500; white-space: nowrap; min-width: 140px; }
+    .idx-url-input { width: 100%; max-width: 380px; font-size: 0.82rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+{{ config_breadcrumb('Indexeurs & TMDB') }}
+
+<div class="alert alert-secondary d-flex gap-2 align-items-start mb-4" style="font-size:0.83rem;">
+    <i class="bi bi-info-circle-fill flex-shrink-0 mt-1"></i>
+    <div>
+        Les clés API, passkeys et le token TMDB sont des variables d'environnement et ne peuvent pas être modifiées ici.
+        Activez ou désactivez chaque indexeur et modifiez son URL si nécessaire.
+    </div>
+</div>
+
+{{ save_feedback() }}
+
+<form id="cfg-form" method="POST">
+
+    <div class="cfg-card">
+        <div class="cfg-card-header"><i class="bi bi-film text-warning"></i> TMDB — Métadonnées</div>
+        {% for defn in registry_sections.get('tmdb', []) %}
+        {{ render_field(defn, effective) }}
+        {% endfor %}
+        <div class="cfg-row">
+            <span class="cfg-label">TMDB_API_KEY</span>
+            <span class="cfg-value">
+                {% if cfg_readonly and cfg_readonly.tmdb.api_key_set %}
+                    <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Configurée</span>
+                {% else %}
+                    <span class="badge bg-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>Non configurée</span>
+                {% endif %}
+            </span>
+        </div>
+    </div>
+
+    <div class="cfg-card">
+        <div class="cfg-card-header"><i class="bi bi-search text-info"></i> Indexeurs Torznab / Torrent</div>
+        <table class="idx-table">
+            <thead>
+                <tr>
+                    <th style="width:160px;">Indexeur</th>
+                    <th style="width:100px;">Activé</th>
+                    <th>URL / Hôte</th>
+                </tr>
+            </thead>
+            <tbody>
+                {# YGG Relay / YGGFlix #}
+                <tr>
+                    <td class="idx-name">YGGFlix / YGG Relay</td>
+                    <td>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   name="ygg_unique_account" value="true"
+                                   {% if effective.get('ygg_unique_account') %}checked{% endif %}
+                                   title="Compte unique serveur (utilise les credentials YGG pour tous les utilisateurs)">
+                        </div>
+                        <div style="font-size:0.72rem;color:var(--bs-secondary-color);margin-top:2px;">Compte unique</div>
+                    </td>
+                    <td>
+                        <input type="text" class="form-control form-control-sm idx-url-input"
+                               name="yggflix_url" value="{{ effective.get('yggflix_url', '') }}"
+                               placeholder="https://relay.ygg.gratis/torznab">
+                    </td>
+                </tr>
+                {# Jackett #}
+                <tr>
+                    <td class="idx-name">Jackett</td>
+                    <td>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   name="jackett_enable" value="true"
+                                   {% if effective.get('jackett_enable') %}checked{% endif %}>
+                        </div>
+                    </td>
+                    <td>
+                        <input type="text" class="form-control form-control-sm idx-url-input"
+                               name="jackett_host" value="{{ effective.get('jackett_host', '') }}"
+                               placeholder="jackett">
+                    </td>
+                </tr>
+                {# C411 #}
+                <tr>
+                    <td class="idx-name">C411</td>
+                    <td>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   name="c411_enable" value="true"
+                                   {% if effective.get('c411_enable') %}checked{% endif %}>
+                        </div>
+                    </td>
+                    <td>
+                        <input type="text" class="form-control form-control-sm idx-url-input"
+                               name="c411_url" value="{{ effective.get('c411_url', '') }}"
+                               placeholder="https://c411.org">
+                    </td>
+                </tr>
+                {# Torr9 #}
+                <tr>
+                    <td class="idx-name">Torr9</td>
+                    <td>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   name="torr9_enable" value="true"
+                                   {% if effective.get('torr9_enable') %}checked{% endif %}>
+                        </div>
+                    </td>
+                    <td>
+                        <input type="text" class="form-control form-control-sm idx-url-input"
+                               name="torr9_url" value="{{ effective.get('torr9_url', '') }}"
+                               placeholder="https://api.torr9.net">
+                    </td>
+                </tr>
+                {# LaCale #}
+                <tr>
+                    <td class="idx-name">LaCale</td>
+                    <td>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   name="lacale_enable" value="true"
+                                   {% if effective.get('lacale_enable') %}checked{% endif %}>
+                        </div>
+                    </td>
+                    <td>
+                        <input type="text" class="form-control form-control-sm idx-url-input"
+                               name="lacale_url" value="{{ effective.get('lacale_url', '') }}"
+                               placeholder="https://la-cale.space/api/external/torznab">
+                    </td>
+                </tr>
+                {# GénérationFree #}
+                <tr>
+                    <td class="idx-name">GénérationFree</td>
+                    <td>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   name="generationfree_enable" value="true"
+                                   {% if effective.get('generationfree_enable') %}checked{% endif %}>
+                        </div>
+                    </td>
+                    <td>
+                        <input type="text" class="form-control form-control-sm idx-url-input"
+                               name="generationfree_url" value="{{ effective.get('generationfree_url', '') }}"
+                               placeholder="https://generation-free.org">
+                    </td>
+                </tr>
+                {# ABN #}
+                <tr>
+                    <td class="idx-name">ABN</td>
+                    <td>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   name="abn_enable" value="true"
+                                   {% if effective.get('abn_enable') %}checked{% endif %}>
+                        </div>
+                    </td>
+                    <td>
+                        <input type="text" class="form-control form-control-sm idx-url-input"
+                               name="abn_url" value="{{ effective.get('abn_url', '') }}"
+                               placeholder="https://abn.lol">
+                    </td>
+                </tr>
+                {# G3Mini #}
+                <tr>
+                    <td class="idx-name">G3Mini</td>
+                    <td>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   name="g3mini_enable" value="true"
+                                   {% if effective.get('g3mini_enable') %}checked{% endif %}>
+                        </div>
+                    </td>
+                    <td>
+                        <input type="text" class="form-control form-control-sm idx-url-input"
+                               name="g3mini_url" value="{{ effective.get('g3mini_url', '') }}"
+                               placeholder="https://gemini-tracker.org">
+                    </td>
+                </tr>
+                {# TheOldSchool #}
+                <tr>
+                    <td class="idx-name">TheOldSchool</td>
+                    <td>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   name="theoldschool_enable" value="true"
+                                   {% if effective.get('theoldschool_enable') %}checked{% endif %}>
+                        </div>
+                    </td>
+                    <td>
+                        <input type="text" class="form-control form-control-sm idx-url-input"
+                               name="theoldschool_url" value="{{ effective.get('theoldschool_url', '') }}"
+                               placeholder="https://theoldschool.cc">
+                    </td>
+                </tr>
+                {# Zilean DMM (pas de flag enable — toujours disponible si configuré) #}
+                <tr>
+                    <td class="idx-name">Zilean DMM</td>
+                    <td>
+                        <span class="badge bg-secondary" style="font-size:0.72rem;">Toujours actif</span>
+                    </td>
+                    <td>
+                        <input type="text" class="form-control form-control-sm idx-url-input"
+                               name="zilean_host" value="{{ effective.get('zilean_host', '') }}"
+                               placeholder="zileanfortheweebs.midnightignite.me">
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    {{ save_button(url_for('config_indexers_reset')(request)) }}
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+{{ save_script('cfg-form', url_for('config_indexers_post')(request), url_for('config_indexers_reset')(request)) }}
+{% endblock %}

@@ -11,7 +11,7 @@ from stream_fusion.logging_config import logger
 
 class TMDB(MetadataProvider):
     async def get_metadata(self, id, type):
-        self.logger.debug("Getting metadata for " + type + " with id " + id)
+        self.logger.trace("Getting metadata for " + type + " with id " + id)
 
         full_id = id.split(":")
         imdb_id = full_id[0]
@@ -109,5 +109,5 @@ class TMDB(MetadataProvider):
             result.titles = [t for t in db_mapping.search_titles if t]
             self.logger.info(f"TMDB: search_titles override for {imdb_id} → {result.titles}")
 
-        self.logger.debug("Got metadata for " + type + " with id " + id)
+        self.logger.trace("Got metadata for " + type + " with id " + id)
         return result

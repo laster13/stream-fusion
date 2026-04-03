@@ -158,3 +158,4 @@ docker-compose-dev.yml
 
 # Claude
 .claude/
+.kilo

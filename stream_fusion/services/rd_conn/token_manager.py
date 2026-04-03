@@ -64,7 +64,7 @@ class RDTokenManager:
             raise Exception("Missing required Real Debrid configuration")
 
         self.token_key = self.generate_token_key()
-        self.logger.debug("RDTokenManager initialized successfully")
+        self.logger.trace("RDTokenManager initialized successfully")
 
     def generate_token_key(self):
         unique_string = f"{self.client_id}:{self.client_secret}:{self.refresh_token}"

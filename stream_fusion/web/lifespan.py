@@ -26,7 +26,13 @@ def _setup_db(app: FastAPI) -> None:  # pragma: no cover
 
     :param app: fastAPI application.
     """
-    engine = create_async_engine(str(settings.pg_url), echo=settings.pg_echo, pool_size=settings.pg_pool_size, max_overflow=settings.pg_max_overflow)
+    engine = create_async_engine(
+        str(settings.pg_url),
+        echo=settings.pg_echo,
+        pool_size=settings.pg_pool_size,
+        max_overflow=settings.pg_max_overflow,
+        connect_args={"statement_cache_size": 0},  # requis pour compatibilité PgBouncer (transaction mode)
+    )
     session_factory = async_sessionmaker(
         engine,
         expire_on_commit=False,
@@ -80,6 +86,16 @@ async def lifespan_setup(
     app.state.redis_pool = ConnectionPool(
         host=settings.redis_host, port=settings.redis_port, db=settings.redis_db, max_connections=200
     )
+
+    # Initialize dynamic settings service (DB + Redis cache, seeds env-var defaults)
+    from stream_fusion.services.settings.settings_service import SettingsService
+    settings_service = SettingsService(
+        session_factory=app.state.db_session_factory,
+        redis_pool=app.state.redis_pool,
+    )
+    await settings_service.seed_defaults()
+    await settings_service.apply_overrides_to_singleton()
+    app.state.settings_service = settings_service
 
     # Initialize title matching module (loads rules from DB/Redis, seeds if empty)
     await initialize_title_matching(app.state.redis_pool, app.state.db_session_factory)

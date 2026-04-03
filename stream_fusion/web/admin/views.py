@@ -16,6 +16,7 @@ from stream_fusion.utils.security.security_secret import SecretManager
 from stream_fusion.services.postgresql.dao.apikey_dao import APIKeyDAO
 from stream_fusion.services.postgresql.dao.peerkey_dao import PeerKeyDAO
 from stream_fusion.services.postgresql.dao.debridcache_dao import DebridCacheDAO
+from stream_fusion.services.postgresql.dao.torrentgroup_dao import TorrentGroupDAO
 from stream_fusion.web.api.auth.schemas import UsageLogs, UsageLog
 from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
@@ -29,6 +30,12 @@ templates = Jinja2Templates(directory=settings.admin_template_dir)
 # Expose the CSRF token generator as a Jinja2 global —
 # base.html calls {% set csrf_token = csrf_token_gen() %} once per render.
 templates.env.globals["csrf_token_gen"] = generate_csrf_token
+
+from stream_fusion.version import get_version
+try:
+    templates.env.globals["app_version"] = get_version()
+except Exception:
+    templates.env.globals["app_version"] = "?"
 
 _DEFAULT_SESSION_KEY = "331cbfe48117fcba53d09572b10d2fc293d86131dc51be46d8aa9843c2e9f48d"
 
@@ -333,6 +340,14 @@ async def dashboard(
     except Exception:
         torrent_count = 0
 
+    # Matched/orphan torrents
+    try:
+        result = await db.execute(text("SELECT COUNT(*) FROM torrent_items WHERE tmdb_id IS NOT NULL"))
+        torrent_matched_count = result.scalar() or 0
+    except Exception:
+        torrent_matched_count = 0
+    torrent_orphan_count = torrent_count - torrent_matched_count
+
     # Redis status
     try:
         redis_ok = bool(redis_client.ping())
@@ -346,6 +361,8 @@ async def dashboard(
         "active_peers": active_peers,
         "debrid_cache_count": debrid_cache_count,
         "torrent_count": torrent_count,
+        "torrent_matched_count": torrent_matched_count,
+        "torrent_orphan_count": torrent_orphan_count,
         "redis_ok": redis_ok,
     })
 
@@ -878,6 +895,107 @@ async def clean_orphan_torrents(
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
 
+@router.post("/maintenance/group-by-infohash")
+async def group_torrents_by_infohash(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Create/extend groups for all torrent_items that share the same info_hash."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        group_dao = TorrentGroupDAO(db)
+        result = await group_dao.batch_group_by_info_hash()
+        await db.commit()
+        msg = (
+            f"{result['groups_created']} groupe(s) créé(s), "
+            f"{result['items_grouped']} torrent(s) groupé(s) par info_hash"
+        )
+        logger.info(f"Admin maintenance: group-by-infohash — {msg}")
+        return JSONResponse({"success": True, **result, "message": msg})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: group-by-infohash failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/group-by-title-size")
+async def group_torrents_by_title_size(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Create/extend groups for torrents with matching normalized title and similar size."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        group_dao = TorrentGroupDAO(db)
+        result = await group_dao.batch_group_by_title_size()
+        await db.commit()
+        msg = (
+            f"{result['groups_created']} groupe(s) créé(s), "
+            f"{result['items_grouped']} torrent(s) groupé(s) par titre+taille"
+        )
+        logger.info(f"Admin maintenance: group-by-title-size — {msg}")
+        return JSONResponse({"success": True, **result, "message": msg})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: group-by-title-size failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/propagate-tmdb-groups")
+async def propagate_tmdb_to_groups(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Propagate TMDB IDs to all members of every existing group."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        group_dao = TorrentGroupDAO(db)
+        result = await group_dao.propagate_tmdb_all_groups()
+        await db.commit()
+        msg = (
+            f"{result['groups_updated']} groupe(s) mis à jour, "
+            f"{result['items_updated']} torrent(s) avec TMDB ID propagé"
+        )
+        logger.info(f"Admin maintenance: propagate-tmdb-groups — {msg}")
+        return JSONResponse({"success": True, **result, "message": msg})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: propagate-tmdb-groups failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/cleanup-empty-groups")
+async def cleanup_empty_groups(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Delete torrent groups that have no members."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        group_dao = TorrentGroupDAO(db)
+        count = await group_dao.delete_empty_groups()
+        await db.commit()
+        msg = f"{count} groupe(s) vide(s) supprimé(s)"
+        logger.info(f"Admin maintenance: cleanup-empty-groups — {msg}")
+        return JSONResponse({"success": True, "deleted": count, "message": msg})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: cleanup-empty-groups failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
 @router.get("/maintenance/stats")
 async def maintenance_stats(
     request: Request,
@@ -964,6 +1082,29 @@ async def maintenance_stats(
         pg_stats["metadata_mappings"] = r.scalar() or 0
     except Exception:
         pg_stats["metadata_mappings"] = "?"
+
+    try:
+        r = await db.execute(text("""
+            SELECT
+                (SELECT COUNT(*) FROM torrent_groups) AS total_groups,
+                (SELECT COUNT(*) FROM torrent_items WHERE group_id IS NOT NULL) AS grouped_items,
+                (SELECT COUNT(*) FROM torrent_items WHERE group_id IS NULL) AS ungrouped_items,
+                (SELECT COUNT(*) FROM torrent_groups WHERE tmdb_id IS NOT NULL) AS groups_with_tmdb
+        """))
+        row = r.fetchone()
+        pg_stats["torrent_groups"] = {
+            "total_groups": row[0] or 0,
+            "grouped_items": row[1] or 0,
+            "ungrouped_items": row[2] or 0,
+            "groups_with_tmdb": row[3] or 0,
+        }
+    except Exception:
+        pg_stats["torrent_groups"] = {
+            "total_groups": "?",
+            "grouped_items": "?",
+            "ungrouped_items": "?",
+            "groups_with_tmdb": "?",
+        }
 
     redis_stats = {}
     try:
@@ -1208,8 +1349,285 @@ async def config_page(
 ):
     if isinstance(authenticated, RedirectResponse):
         return authenticated
+    from stream_fusion.services.settings.settings_registry import REGISTRY_BY_CATEGORY, PAGE_CATEGORIES
+    # Build summary: count of settings per sub-page
+    page_counts = {
+        page: sum(len(REGISTRY_BY_CATEGORY.get(cat, [])) for cat in cats)
+        for page, cats in PAGE_CATEGORIES.items()
+    }
+    return templates.TemplateResponse(
+        "config_page.html",
+        {"request": request, "page_counts": page_counts},
+    )
+
+
+async def _get_settings_service(request: Request):
+    from stream_fusion.services.settings.settings_service import SettingsService
+    return request.app.state.settings_service
+
+
+async def _config_subpage(
+    request: Request,
+    page_name: str,
+    template_name: str,
+    authenticated,
+    extra_ctx: dict = None,
+):
+    """Shared logic for all config sub-pages (GET)."""
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+    from stream_fusion.services.settings.settings_registry import (
+        REGISTRY_BY_CATEGORY, PAGE_CATEGORIES, SETTINGS_REGISTRY,
+    )
+    svc = await _get_settings_service(request)
+    effective = await svc.get_all_effective()
+    cats = PAGE_CATEGORIES.get(page_name, [])
+    registry_sections = {cat: REGISTRY_BY_CATEGORY.get(cat, []) for cat in cats}
+    ctx = {
+        "request": request,
+        "effective": effective,
+        "registry_sections": registry_sections,
+        "page_name": page_name,
+    }
+    if extra_ctx:
+        ctx.update(extra_ctx)
+    return templates.TemplateResponse(template_name, ctx)
+
+
+async def _config_subpage_post(request: Request, page_name: str, authenticated):
+    """Shared logic for all config sub-pages (POST)."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    from stream_fusion.services.settings.settings_registry import (
+        REGISTRY_BY_KEY, PAGE_CATEGORIES, REGISTRY_BY_CATEGORY,
+    )
+    svc = await _get_settings_service(request)
+    form = await request.form()
+
+    # Collect all keys that belong to this page's categories
+    cats = PAGE_CATEGORIES.get(page_name, [])
+    page_keys = {
+        defn.key
+        for cat in cats
+        for defn in REGISTRY_BY_CATEGORY.get(cat, [])
+    }
+
+    updates: dict[str, str] = {}
+    validation_errors: list[str] = []
+
+    for key in page_keys:
+        defn = REGISTRY_BY_KEY.get(key)
+        if defn is None:
+            continue
+        raw = form.get(key)
+        if raw is None:
+            # Unchecked checkboxes don't appear in form data — treat as False
+            if defn.type == "bool":
+                updates[key] = "false"
+            continue
+        try:
+            svc._coerce(key, str(raw))
+            updates[key] = str(raw)
+        except (ValueError, TypeError) as exc:
+            validation_errors.append(f"{defn.label}: {exc}")
+
+    if validation_errors:
+        return JSONResponse({"success": False, "errors": validation_errors}, status_code=422)
+
+    requires_restart = await svc.set_many(updates)
+    logger.info(
+        f"Admin: config/{page_name} — saved {len(updates)} setting(s), "
+        f"{len(requires_restart)} require restart"
+    )
+    return JSONResponse({
+        "success": True,
+        "saved": len(updates),
+        "requires_restart": requires_restart,
+    })
+
+
+# ── Config sub-pages ──────────────────────────────────────────────────────────
+
+@router.get("/config/general", response_class=HTMLResponse)
+async def config_general_get(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    return await _config_subpage(request, "general", "config_general.html", authenticated)
+
+
+@router.post("/config/general")
+async def config_general_post(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_post(request, "general", authenticated)
+
+
+@router.get("/config/proxy", response_class=HTMLResponse)
+async def config_proxy_get(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    return await _config_subpage(request, "proxy", "config_proxy.html", authenticated)
+
+
+@router.post("/config/proxy")
+async def config_proxy_post(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_post(request, "proxy", authenticated)
+
+
+@router.get("/config/cache", response_class=HTMLResponse)
+async def config_cache_get(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    return await _config_subpage(request, "cache", "config_cache.html", authenticated)
+
+
+@router.post("/config/cache")
+async def config_cache_post(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_post(request, "cache", authenticated)
+
+
+@router.get("/config/indexers", response_class=HTMLResponse)
+async def config_indexers_get(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
     cfg = _build_config_view(settings)
-    return templates.TemplateResponse("config_page.html", {"request": request, "cfg": cfg})
+    return await _config_subpage(request, "indexers", "config_indexers.html", authenticated,
+                                  extra_ctx={"cfg_readonly": cfg})
+
+
+@router.post("/config/indexers")
+async def config_indexers_post(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_post(request, "indexers", authenticated)
+
+
+@router.get("/config/tmdb", response_class=HTMLResponse)
+async def config_tmdb_get(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    # Page TMDB fusionnée dans Indexeurs & TMDB
+    return RedirectResponse(url=str(request.url_for("config_indexers_get")), status_code=301)
+
+
+@router.post("/config/tmdb")
+async def config_tmdb_post(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_post(request, "tmdb", authenticated)
+
+
+@router.get("/config/system", response_class=HTMLResponse)
+async def config_system_get(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    cfg = _build_config_view(settings)
+    return await _config_subpage(
+        request, "system", "config_system.html", authenticated,
+        extra_ctx={"cfg_readonly": cfg},
+    )
+
+
+@router.post("/config/system")
+async def config_system_post(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_post(request, "system", authenticated)
+
+
+# ── Config reset routes ───────────────────────────────────────────────────────
+
+async def _config_subpage_reset(request: Request, page_name: str, authenticated):
+    """Restore all settings of a page to their original env-var defaults."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    from stream_fusion.services.settings.settings_registry import PAGE_CATEGORIES, REGISTRY_BY_CATEGORY
+    svc = await _get_settings_service(request)
+    cats = PAGE_CATEGORIES.get(page_name, [])
+    keys = [
+        defn.key
+        for cat in cats
+        for defn in REGISTRY_BY_CATEGORY.get(cat, [])
+    ]
+    requires_restart = await svc.reset_many(keys)
+    logger.info(f"Admin: config/{page_name} — reset {len(keys)} setting(s) to env defaults")
+    return JSONResponse({"success": True, "reset": len(keys), "requires_restart": requires_restart})
+
+
+@router.post("/config/general/reset")
+async def config_general_reset(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_reset(request, "general", authenticated)
+
+
+@router.post("/config/proxy/reset")
+async def config_proxy_reset(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_reset(request, "proxy", authenticated)
+
+
+@router.post("/config/cache/reset")
+async def config_cache_reset(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_reset(request, "cache", authenticated)
+
+
+@router.post("/config/indexers/reset")
+async def config_indexers_reset(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_reset(request, "indexers", authenticated)
+
+
+@router.post("/config/tmdb/reset")
+async def config_tmdb_reset(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_reset(request, "tmdb", authenticated)
+
+
+@router.post("/config/system/reset")
+async def config_system_reset(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    return await _config_subpage_reset(request, "system", authenticated)
 
 
 @router.post("/mappings/delete")
@@ -1630,3 +2048,130 @@ async def assign_tmdb_to_selection(
     updated = await dao.assign_tmdb_by_info_hashes(info_hashes, int(tmdb_id_raw))
     logger.info(f"Admin: assigned tmdb_id={tmdb_id_raw} to {updated} torrents")
     return JSONResponse({"success": True, "updated": updated})
+
+
+# ── Torrent Groups Browser ────────────────────────────────────────────────────
+
+@router.get("/search/groups", response_class=HTMLResponse)
+async def search_groups_page(
+    request: Request,
+    q: str = "",
+    authenticated: bool = Depends(session_based_security),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Admin page to browse torrent groups — search by TMDB ID, info_hash, or title."""
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+
+    results = []
+    error = None
+    query = q.strip()
+    search_type = None
+
+    if query:
+        try:
+            from stream_fusion.services.postgresql.dao.torrentgroup_dao import TorrentGroupDAO
+            group_dao = TorrentGroupDAO(db)
+
+            if query.isdigit():
+                # TMDB ID
+                search_type = "tmdb"
+                results = await group_dao.search_groups_by_tmdb_id(int(query))
+            elif len(query) == 40 and all(c in "0123456789abcdefABCDEF" for c in query):
+                # info_hash
+                search_type = "hash"
+                results = await group_dao.search_groups_by_info_hash(query)
+            else:
+                # Titre libre
+                search_type = "title"
+                results = await group_dao.search_groups_by_title(query)
+        except Exception as e:
+            logger.error(f"Admin search_groups_page: {e}")
+            error = str(e)
+
+    return templates.TemplateResponse("search_groups.html", {
+        "request": request,
+        "query": query,
+        "search_type": search_type,
+        "results": results,
+        "error": error,
+    })
+
+
+# ── TMDB Orphan Matcher ───────────────────────────────────────────────────────
+
+@router.get("/tmdb-matcher", response_class=HTMLResponse)
+async def tmdb_matcher_page(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return authenticated
+    return templates.TemplateResponse("tmdb_matcher.html", {"request": request})
+
+
+@router.get("/tmdb-matcher/history")
+async def tmdb_matcher_history(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    run_id: str = None,
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    scheduler = getattr(request.app.state, "scheduler", None)
+    tracker = getattr(scheduler, "_history_tracker", None) if scheduler else None
+
+    if tracker is None:
+        # Tracker not yet initialised (no run has occurred); build one on the fly
+        from stream_fusion.services.tmdb_matcher.history import MatchHistoryTracker
+        redis_pool = getattr(request.app.state, "redis_pool", None)
+        if redis_pool is None:
+            return JSONResponse({"error": "Redis non disponible"}, status_code=503)
+        tracker = MatchHistoryTracker(redis_pool)
+
+    if run_id:
+        detail = tracker.get_run(run_id)
+        if detail is None:
+            return JSONResponse({"error": "Run introuvable"}, status_code=404)
+        from dataclasses import asdict
+        return JSONResponse(asdict(detail))
+
+    from dataclasses import asdict
+    summaries = tracker.list_runs()
+    return JSONResponse([asdict(s) for s in summaries])
+
+
+@router.post("/tmdb-matcher/revert")
+async def tmdb_matcher_revert(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+    info_hash: str = Form(...),
+    tmdb_id: int = Form(...),
+    raw_title: str = Form(""),
+    indexer: str = Form(""),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+
+    from stream_fusion.services.postgresql.dao.mismatch_dao import TmdbMismatchDAO
+    dao = TmdbMismatchDAO(db)
+    mismatch = await dao.create(
+        info_hash=info_hash,
+        tmdb_id=tmdb_id,
+        raw_title=raw_title or info_hash,
+        indexer=indexer or "auto_match",
+        notes="Revert depuis l'historique TMDB matcher",
+    )
+    if mismatch:
+        logger.warning(
+            f"Admin: reverted TMDB match ({info_hash[:8]}…, tmdb_id={tmdb_id}) "
+            f"via tmdb_matcher history"
+        )
+        return JSONResponse({"success": True, "message": "Match revert avec succès"})
+    return JSONResponse(
+        {"success": False, "message": "Revert échoué (déjà revert ou erreur DB)"},
+        status_code=400,
+    )

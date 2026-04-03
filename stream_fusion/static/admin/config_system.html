@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% from "_config_macros.html" import render_field, save_button, save_feedback, save_script, config_breadcrumb %}
+{% block title %}Système — Configuration — StreamFusion Admin{% endblock %}
+{% block page_title %}Configuration — Système{% endblock %}
+
+{% block extra_head %}
+<style>
+    .cfg-card { border: 1px solid var(--bs-border-color); border-radius: 10px; background: var(--bs-secondary-bg); overflow: hidden; margin-bottom: 1.25rem; }
+    .cfg-card-header { padding: 13px 20px; border-bottom: 1px solid var(--bs-border-color); font-weight: 600; font-size: 0.875rem; display: flex; align-items: center; gap: 8px; }
+    .cfg-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 20px; border-bottom: 1px solid var(--bs-border-color); gap: 12px; font-size: 0.83rem; min-height: 40px; }
+    .cfg-row:last-child { border-bottom: none; }
+    .cfg-label { color: var(--bs-secondary-color); flex-shrink: 0; }
+    .cfg-value { font-weight: 500; text-align: right; }
+    .cfg-mono { font-family: var(--bs-font-monospace); font-size: 0.8rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+{{ config_breadcrumb('Système') }}
+
+<div class="alert alert-warning d-flex gap-2 align-items-start mb-4" style="font-size:0.83rem;">
+    <i class="bi bi-arrow-clockwise flex-shrink-0 mt-1"></i>
+    <div>
+        Les paramètres marqués <span class="badge bg-warning text-dark" style="font-size:0.75rem;">↻ redémarrage</span>
+        nécessitent un redémarrage de l'application pour prendre effet.
+    </div>
+</div>
+
+{{ save_feedback() }}
+
+<form id="cfg-form" method="POST">
+
+    <div class="cfg-card">
+        <div class="cfg-card-header"><i class="bi bi-clock text-info"></i> Timeouts HTTP</div>
+        {% for defn in registry_sections.get('system', []) if defn.key in ('aiohttp_timeout', 'gunicorn_timeout') %}
+        {{ render_field(defn, effective) }}
+        {% endfor %}
+    </div>
+
+    <div class="cfg-card">
+        <div class="cfg-card-header"><i class="bi bi-cpu text-success"></i> Workers &amp; Pool de connexions</div>
+        {% for defn in registry_sections.get('system', []) if defn.key not in ('aiohttp_timeout', 'gunicorn_timeout') %}
+        {{ render_field(defn, effective) }}
+        {% endfor %}
+    </div>
+
+    {{ save_button(url_for('config_system_reset')(request)) }}
+</form>
+
+<!-- Sections lecture seule -->
+<div class="cfg-card mt-4">
+    <div class="cfg-card-header"><i class="bi bi-database text-primary"></i> PostgreSQL — Connexion (lecture seule)</div>
+    <div class="cfg-row">
+        <span class="cfg-label">Hôte</span>
+        <span class="cfg-value cfg-mono">{{ cfg_readonly.postgresql.host }}:{{ cfg_readonly.postgresql.port }}</span>
+    </div>
+    <div class="cfg-row">
+        <span class="cfg-label">Base</span>
+        <span class="cfg-value cfg-mono">{{ cfg_readonly.postgresql.database }}</span>
+    </div>
+    <div class="cfg-row">
+        <span class="cfg-label">Utilisateur</span>
+        <span class="cfg-value cfg-mono">{{ cfg_readonly.postgresql.user }}</span>
+    </div>
+    <div class="cfg-row">
+        <span class="cfg-label">Mot de passe</span>
+        <span class="cfg-value"><span class="badge bg-secondary">Masqué</span></span>
+    </div>
+</div>
+
+<div class="cfg-card">
+    <div class="cfg-card-header"><i class="bi bi-hdd-stack text-danger"></i> Redis — Connexion (lecture seule)</div>
+    <div class="cfg-row">
+        <span class="cfg-label">Hôte</span>
+        <span class="cfg-value cfg-mono">{{ cfg_readonly.redis.host }}:{{ cfg_readonly.redis.port }}</span>
+    </div>
+    <div class="cfg-row">
+        <span class="cfg-label">Base (DB)</span>
+        <span class="cfg-value cfg-mono">{{ cfg_readonly.redis.db }}</span>
+    </div>
+    <div class="cfg-row">
+        <span class="cfg-label">Mot de passe</span>
+        <span class="cfg-value">
+            {% if cfg_readonly.redis.password_set %}<span class="badge bg-success">Configuré</span>{% else %}<span class="badge bg-secondary">Non configuré</span>{% endif %}
+        </span>
+    </div>
+</div>
+
+<div class="cfg-card">
+    <div class="cfg-card-header"><i class="bi bi-shield-lock text-warning"></i> Sécurité (lecture seule)</div>
+    <div class="cfg-row">
+        <span class="cfg-label">SESSION_KEY</span>
+        <span class="cfg-value">
+            {% if cfg_readonly.security.session_key_is_default %}
+                <span class="badge bg-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>Défaut — non sécurisé</span>
+            {% else %}
+                <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Personnalisé</span>
+            {% endif %}
+        </span>
+    </div>
+    <div class="cfg-row">
+        <span class="cfg-label">SECRET_API_KEY</span>
+        <span class="cfg-value">
+            {% if cfg_readonly.security.secret_api_key_set %}<span class="badge bg-success">Configurée</span>{% else %}<span class="badge bg-secondary">Non configurée</span>{% endif %}
+        </span>
+    </div>
+    <div class="cfg-row">
+        <span class="cfg-label">CONFIG_SECRET_KEY</span>
+        <span class="cfg-value">
+            {% if cfg_readonly.security.config_secret_key_set %}
+                <span class="badge bg-success"><i class="bi bi-shield-lock-fill me-1"></i>Configurée</span>
+            {% else %}
+                <span class="badge bg-danger"><i class="bi bi-shield-exclamation me-1"></i>Non configurée — Base64 seulement</span>
+            {% endif %}
+        </span>
+    </div>
+    <div class="cfg-row">
+        <span class="cfg-label">Masquer la doc API</span>
+        <span class="cfg-value">
+            {% if cfg_readonly.security.security_hide_docs %}<span class="badge bg-success">Oui</span>{% else %}<span class="badge bg-warning text-dark">Non</span>{% endif %}
+        </span>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+{{ save_script('cfg-form', url_for('config_system_post')(request), url_for('config_system_reset')(request)) }}
+{% endblock %}

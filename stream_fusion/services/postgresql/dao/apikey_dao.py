@@ -83,7 +83,7 @@ class APIKeyDAO:
             result = await self.session.execute(query)
             db_key = result.scalar_one_or_none()
             if db_key:
-                logger.debug(f"Retrieved API key: {api_key}")
+                logger.trace(f"Retrieved API key: {api_key}")
                 return self._model_to_schema(db_key)
             else:
                 logger.warning(f"API key not found: {api_key}")
@@ -174,10 +174,10 @@ class APIKeyDAO:
                     db_key.latest_query_date = datetime_to_timestamp(now)
                     db_key.total_queries += 1
                     await self.session.commit()
-                    logger.debug(f"Checked and recorded usage for API key {api_key}")
+                    logger.trace(f"Checked and recorded usage for API key {api_key}")
                     return True
                 else:
-                    logger.debug(f"Checked API key {api_key}: invalid")
+                    logger.trace(f"Checked API key {api_key}: invalid")
                     return False
                     
             except Exception as e:
@@ -197,7 +197,7 @@ class APIKeyDAO:
                     db_key.latest_query_date = datetime_to_timestamp(now)
                     db_key.total_queries += 1
                     await self.session.commit()
-                    logger.debug(f"Recorded query for API key: {api_key}")
+                    logger.trace(f"Recorded query for API key: {api_key}")
             except Exception as e:
                 await self.session.rollback()
                 logger.error(f"Error recording query for API key {api_key}: {str(e)}")

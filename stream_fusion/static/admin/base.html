@@ -212,7 +212,10 @@
 <nav id="sidebar">
     <a class="sidebar-brand" href="{{ url_for('dashboard')(request) }}">
         <i class="bi bi-lightning-fill brand-icon"></i>
-        StreamFusion
+        <div>
+            <div>StreamFusion</div>
+            <div style="font-size:0.65rem;font-weight:400;opacity:0.5;margin-top:1px;">v{{ app_version }}</div>
+        </div>
     </a>
 
     <div class="sidebar-nav">
@@ -241,20 +244,30 @@
            href="{{ url_for('search_hash_page')(request) }}">
             <i class="bi bi-hash"></i> Par hash
         </a>
+        <a class="sidebar-link {% if '/search/groups' in request.url.path %}active{% endif %}"
+           href="{{ url_for('search_groups_page')(request) }}">
+            <i class="bi bi-collection"></i> Groupes torrents
+        </a>
+
+        <div class="sidebar-section">Matching TMDB</div>
         <a class="sidebar-link {% if '/search/unmatched' in request.url.path %}active{% endif %}"
            href="{{ url_for('search_unmatched_page')(request) }}">
             <i class="bi bi-question-circle"></i> Non-matchés
         </a>
         <a class="sidebar-link {% if '/mismatches' in request.url.path %}active{% endif %}"
            href="{{ url_for('list_mismatches')(request) }}">
-            <i class="bi bi-exclamation-triangle"></i> Mismatches TMDB
+            <i class="bi bi-exclamation-triangle"></i> Mismatches
         </a>
         <a class="sidebar-link {% if '/mappings' in request.url.path %}active{% endif %}"
            href="{{ url_for('list_mappings')(request) }}">
             <i class="bi bi-arrow-left-right"></i> Mappings méta
         </a>
+        <a class="sidebar-link {% if '/tmdb-matcher' in request.url.path %}active{% endif %}"
+           href="{{ url_for('tmdb_matcher_page')(request) }}">
+            <i class="bi bi-link-45deg"></i> TMDB Matcher
+        </a>
 
-        <div class="sidebar-section">Matching</div>
+        <div class="sidebar-section">Règles</div>
         <a class="sidebar-link {% if '/matching/title-rules' in request.url.path %}active{% endif %}"
            href="{{ url_for('matching_title_rules')(request) }}">
             <i class="bi bi-type"></i> Règles titres
@@ -265,17 +278,17 @@
         </a>
         <a class="sidebar-link {% if '/matching/test' in request.url.path %}active{% endif %}"
            href="{{ url_for('matching_test_page')(request) }}">
-            <i class="bi bi-flask"></i> Test matching
+            <i class="bi bi-play-circle"></i> Test matching
         </a>
 
         <div class="sidebar-section">Système</div>
-        <a class="sidebar-link {% if '/maintenance' in request.url.path %}active{% endif %}"
-           href="{{ url_for('maintenance_page')(request) }}">
-            <i class="bi bi-tools"></i> Maintenance
-        </a>
         <a class="sidebar-link {% if '/scheduler' in request.url.path %}active{% endif %}"
            href="{{ url_for('scheduler_page')(request) }}">
             <i class="bi bi-clock-history"></i> Tâches planifiées
+        </a>
+        <a class="sidebar-link {% if '/maintenance' in request.url.path %}active{% endif %}"
+           href="{{ url_for('maintenance_page')(request) }}">
+            <i class="bi bi-tools"></i> Maintenance
         </a>
         <a class="sidebar-link {% if '/config' in request.url.path %}active{% endif %}"
            href="{{ url_for('config_page')(request) }}">
@@ -284,6 +297,26 @@
     </div>
 
     <div class="sidebar-footer">
+        <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.07);">
+            <div style="font-size:0.68rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:rgba(255,255,255,0.25);margin-bottom:6px;">Support</div>
+            <div class="d-flex flex-column gap-1">
+                <a href="https://github.com/LimeHubs/stream-fusion" target="_blank" rel="noopener"
+                   style="display:flex;align-items:center;gap:8px;color:rgba(255,255,255,0.45);text-decoration:none;font-size:0.8rem;transition:color 0.15s;"
+                   onmouseover="this.style.color='rgba(255,255,255,0.85)'" onmouseout="this.style.color='rgba(255,255,255,0.45)'">
+                    <i class="bi bi-github" style="width:16px;text-align:center;"></i> Dépôt GitHub
+                </a>
+                <a href="https://github.com/LimeHubs/stream-fusion/issues/new/choose" target="_blank" rel="noopener"
+                   style="display:flex;align-items:center;gap:8px;color:rgba(255,255,255,0.45);text-decoration:none;font-size:0.8rem;transition:color 0.15s;"
+                   onmouseover="this.style.color='#dc3545'" onmouseout="this.style.color='rgba(255,255,255,0.45)'">
+                    <i class="bi bi-bug" style="width:16px;text-align:center;"></i> Signaler un bug
+                </a>
+                <a href="https://github.com/LimeHubs/stream-fusion/discussions/new/choose" target="_blank" rel="noopener"
+                   style="display:flex;align-items:center;gap:8px;color:rgba(255,255,255,0.45);text-decoration:none;font-size:0.8rem;transition:color 0.15s;"
+                   onmouseover="this.style.color='rgba(255,255,255,0.85)'" onmouseout="this.style.color='rgba(255,255,255,0.45)'">
+                    <i class="bi bi-chat-dots" style="width:16px;text-align:center;"></i> Discussions
+                </a>
+            </div>
+        </div>
         <a class="logout-link" href="{{ url_for('logout')(request) }}">
             <i class="bi bi-box-arrow-left"></i> Déconnexion
         </a>

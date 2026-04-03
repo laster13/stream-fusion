@@ -334,7 +334,7 @@ class TorrentSmartContainer:
             )
 
     def _update_availability_realdebrid(self, response, media):
-        self.logger.info("TorrentSmartContainer: Updating availability for RealDebrid")
+        self.logger.debug("TorrentSmartContainer: Updating availability for RealDebrid")
         for info_hash, details in response.items():
             normalized_hash = self._normalize_hash(info_hash)
             if "rd" not in details:
@@ -362,7 +362,7 @@ class TorrentSmartContainer:
                 self._process_movie_files(details, files)
             self._update_file_details(torrent_item, files, debrid="RD")
 
-        self.logger.info(
+        self.logger.debug(
             "TorrentSmartContainer: RealDebrid availability update completed"
         )
 
@@ -488,7 +488,7 @@ class TorrentSmartContainer:
             files = self._process_torbox_files(data["files"], torrent_item.type, media)
             self._update_file_details(torrent_item, files, debrid="TB")
 
-        self.logger.info("TorrentSmartContainer: Torbox availability update completed")
+        self.logger.debug("TorrentSmartContainer: Torbox availability update completed")
 
     def _process_torbox_files(self, files, type, media):
         processed_files = []
@@ -523,7 +523,7 @@ class TorrentSmartContainer:
         return season_episode_in_filename(filename, numeric_season, numeric_episode)
 
     def _update_availability_premiumize(self, response):
-        self.logger.info("TorrentSmartContainer: Updating availability for Premiumize")
+        self.logger.debug("TorrentSmartContainer: Updating availability for Premiumize")
         if not response:
             self.logger.error(
                 "TorrentSmartContainer: Empty response from Premiumize API"
@@ -840,27 +840,62 @@ class TorrentSmartContainer:
         self.logger.trace(
             f"TorrentSmartContainer: Building items dictionary by infohash ({len(items)} items)"
         )
-        items_dict = {}
+        items_dict: dict[str, TorrentItem] = {}
+        # Maps group_id → the representative info_hash key stored in items_dict
+        group_representative: dict[int, str] = {}
+
+        def _prefer(new_item: TorrentItem, existing_item: TorrentItem) -> bool:
+            """Return True if new_item should replace existing_item."""
+            if new_item.indexer == "Yggtorrent - API" and existing_item.indexer != "Yggtorrent - API":
+                return True
+            return False
+
         for item in items:
-            if item.info_hash is not None:
-                normalized_hash = self._normalize_hash(item.info_hash)
-                if normalized_hash not in items_dict:
-                    self.logger.trace(f"Adding {normalized_hash} to items dict")
+            if item.info_hash is None:
+                continue
+
+            normalized_hash = self._normalize_hash(item.info_hash)
+            group_id = getattr(item, "group_id", None)
+
+            # ── Group-aware deduplication ──────────────────────────────────────
+            if group_id is not None and group_id in group_representative:
+                # A representative for this group already exists
+                rep_hash = group_representative[group_id]
+                existing_item = items_dict.get(rep_hash)
+                if existing_item is None or _prefer(item, existing_item):
+                    # Replace the representative for this group
+                    del items_dict[rep_hash]
                     items_dict[normalized_hash] = item
+                    group_representative[group_id] = normalized_hash
+                    self.logger.trace(
+                        f"TorrentSmartContainer: Replaced group {group_id} representative with {item.indexer} ({normalized_hash})"
+                    )
                 else:
-                    existing_item = items_dict[normalized_hash]
-                    if (
-                        item.indexer == "Yggtorrent - API"
-                        and existing_item.indexer != "Yggtorrent - API"
-                    ):
-                        self.logger.trace(
-                            f"TorrentSmartContainer: Replacing {existing_item.indexer} with Yggtorrent for hash: {normalized_hash}"
-                        )
-                        items_dict[normalized_hash] = item
-                    else:
-                        self.logger.trace(
-                            f"TorrentSmartContainer: Skipping duplicate info hash: {normalized_hash} (keeping {existing_item.indexer})"
-                        )
+                    self.logger.trace(
+                        f"TorrentSmartContainer: Skipping group duplicate (hash={normalized_hash}, group={group_id}, keeping {existing_item.indexer})"
+                    )
+                continue
+
+            # ── Standard info_hash deduplication ───────────────────────────────
+            if normalized_hash not in items_dict:
+                self.logger.trace(f"Adding {normalized_hash} to items dict")
+                items_dict[normalized_hash] = item
+                if group_id is not None:
+                    group_representative[group_id] = normalized_hash
+            else:
+                existing_item = items_dict[normalized_hash]
+                if _prefer(item, existing_item):
+                    self.logger.trace(
+                        f"TorrentSmartContainer: Replacing {existing_item.indexer} with {item.indexer} for hash: {normalized_hash}"
+                    )
+                    items_dict[normalized_hash] = item
+                    if group_id is not None:
+                        group_representative[group_id] = normalized_hash
+                else:
+                    self.logger.trace(
+                        f"TorrentSmartContainer: Skipping duplicate info hash: {normalized_hash} (keeping {existing_item.indexer})"
+                    )
+
         self.logger.trace(
             f"TorrentSmartContainer: Built dictionary with {len(items_dict)} unique items"
         )

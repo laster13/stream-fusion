@@ -423,7 +423,7 @@ class BaseDebrid:
                         to_check.append(h)
                 redis_hit_count = len(hashes) - len(to_check)
                 if redis_hit_count:
-                    logger.info(
+                    logger.debug(
                         f"{self.__class__.__name__}: Redis cache hit "
                         f"{redis_hit_count}/{len(hashes)} hashes"
                     )

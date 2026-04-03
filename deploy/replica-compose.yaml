@@ -1,0 +1,209 @@
+---
+# replica-compose.yaml — déploiement scalable avec Traefik HTTPS + PgBouncer
+#
+# Traefik agit ici comme reverse proxy direct (ports 80/443 publics),
+# gère les certificats TLS via Let's Encrypt, et load balance les répliques.
+#
+# Variables requises dans le .env :
+#   DOMAIN=stream-fusion.example.com   # domaine public de l'instance
+#   ACME_EMAIL=admin@example.com       # email pour les notifications Let's Encrypt
+#   SECRET_API_KEY=...
+#   TMDB_API_KEY=...
+#
+# Avant le premier lancement, créer le fichier de stockage des certificats :
+#   touch ./letsencrypt/acme.json && chmod 600 ./letsencrypt/acme.json
+#
+# Lancement (3 répliques) :
+#   docker compose -f deploy/replica-compose.yaml up --scale stream-fusion=3 -d
+#
+# IMPORTANT — volumes existants :
+#   Si tu migres depuis docker-compose.yml, passe --project-name stream-fusion
+#   pour réutiliser les volumes existants :
+#   docker compose -f deploy/replica-compose.yaml --project-name stream-fusion up --scale stream-fusion=3 -d
+
+networks:
+  proxy_network:
+    external: true
+
+services:
+
+  # ─── Reverse Proxy + TLS + Load Balancer ────────────────────────────────────
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik-sf
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      # Entrypoints
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Redirection HTTP → HTTPS automatique
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
+      # Let's Encrypt (HTTP-01 challenge)
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:?Provide ACME_EMAIL for Let's Encrypt}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"   # stockage acme.json — chmod 600 avant 1er lancement
+    restart: unless-stopped
+    networks:
+      - proxy_network
+
+  # ─── Connection Pooler ──────────────────────────────────────────────────────
+  pgbouncer:
+    image: bitnami/pgbouncer:latest
+    container_name: pgbouncer-sf
+    environment:
+      POSTGRESQL_HOST: stremio-postgres
+      POSTGRESQL_PORT: "5432"
+      POSTGRESQL_DATABASE: streamfusion
+      POSTGRESQL_USERNAME: ${POSTGRES_USER:-stremio}
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-stremio}
+      PGBOUNCER_DATABASE: streamfusion
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_MAX_CLIENT_CONN: "1000"
+      PGBOUNCER_DEFAULT_POOL_SIZE: "20"
+    expose:
+      - 6432
+    depends_on:
+      - stremio-postgres
+    restart: unless-stopped
+    networks:
+      - proxy_network
+
+  # ─── Application (scalable) ─────────────────────────────────────────────────
+  stream-fusion:
+    image: ghcr.io/limehubs/stream-fusion:latest
+    # Pas de container_name — requis pour que --scale fonctionne
+    environment:
+      SECRET_API_KEY: ${SECRET_API_KEY:?Please provide a secret API key in the environment}
+      TMDB_API_KEY: ${TMDB_API_KEY:?Please provide a TMDB API key in the environment}
+      JACKETT_API_KEY: ${JACKETT_API_KEY:-''}
+      RD_TOKEN: ${RD_TOKEN:-''}
+      AD_TOKEN: ${AD_TOKEN:-''}
+      YGG_PASSKEY: ${YGG_PASSKEY:-''}
+      SHAREWOOD_PASSKEY: ${SHAREWOOD_PASSKEY:-''}
+      REDIS_HOST: ${REDIS_HOST:-stremio-redis}
+      PG_HOST: pgbouncer
+      PG_PORT: "6432"
+      PG_USER: ${POSTGRES_USER:-stremio}
+      PG_PASS: ${POSTGRES_PASSWORD:-stremio}
+      USE_HTTPS: "True"
+      PROXY_URL: ${PROXY_URL:-http://warp:1080}
+      TZ: ${TZ:-Europe/London}
+    expose:
+      - 8080
+    volumes:
+      - stream-fusion:/app/config
+    depends_on:
+      - pgbouncer
+      - stremio-redis
+      - zilean
+      - jackett
+    restart: unless-stopped
+    networks:
+      - proxy_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.stream-fusion.rule=Host(`${DOMAIN:?Provide DOMAIN}`)"
+      - "traefik.http.routers.stream-fusion.entrypoints=websecure"
+      - "traefik.http.routers.stream-fusion.tls.certresolver=letsencrypt"
+      - "traefik.http.services.stream-fusion.loadbalancer.server.port=8080"
+
+  # ─── Infrastructure (identique à docker-compose.yml) ────────────────────────
+  stremio-redis:
+    image: redis:latest
+    container_name: stremio-redis
+    expose:
+      - 6379
+    volumes:
+      - stremio-redis:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - proxy_network
+
+  zilean:
+    image: ipromknight/zilean:latest
+    container_name: zilean
+    restart: unless-stopped
+    expose:
+      - 8181
+    volumes:
+      - zilean-data:/app/data
+    environment:
+      Zilean__Database__ConnectionString: ${ZILEAN_DB_CONNECTION_STRING:-Host=stremio-postgres;Port=5432;Database=zilean;Username=stremio;Password=stremio}
+      Zilean__Dmm__ImportBatched: ${ZILEAN_DMM_IMPORT_BATCHED:-True}
+      Zilean__Dmm__MaxFilteredResults: ${ZILEAN_DMM_MAX_FILTERED_RESULTS:-200}
+      Zilean__Dmm__MinimumScoreMatch: ${ZILEAN_DMM_MINIMUM_SCORE_MATCH:-0.85}
+      Zilean__Imdb__EnableEndpoint: ${ZILEAN_IMDB_ENABLE_ENDPOINT:-False}
+      Zilean__Imdb__EnableImportMatching: ${ZILEAN_IMDB_ENABLE_IMPORT_MATCHING:-False}
+    depends_on:
+      - stremio-postgres
+    networks:
+      - proxy_network
+
+  stremio-postgres:
+    image: postgres:16.3-alpine3.20
+    container_name: stremio-postgres
+    restart: unless-stopped
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_USER: ${POSTGRES_USER:-stremio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stremio}
+      POSTGRES_DB: ${POSTGRES_DB:-zilean}
+    expose:
+      - 5432
+    volumes:
+      - stremio-postgres:/var/lib/postgresql/data/pgdata
+    networks:
+      - proxy_network
+
+  jackett:
+    image: lscr.io/linuxserver/jackett:latest
+    container_name: jackett
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/London}
+    volumes:
+      - jackett-data:/config
+    expose:
+      - 9117
+    restart: unless-stopped
+    networks:
+      - proxy_network
+
+  warp:
+    image: caomingjun/warp
+    container_name: warp
+    restart: always
+    expose:
+      - 1080
+    environment:
+      - WARP_SLEEP=2
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv4.conf.all.src_valid_mark=1
+    volumes:
+      - warp-data:/var/lib/cloudflare-warp
+    networks:
+      - proxy_network
+
+volumes:
+  stremio-postgres:
+  stremio-redis:
+  stream-fusion:
+  zilean-data:
+  jackett-data:
+  warp-data:
+  # letsencrypt est un bind mount (./letsencrypt/acme.json), pas un named volume
