@@ -9,7 +9,7 @@ class Offcloud(StremThruDebrid):
         self.extension = "OC"
 
         # Retrieve Offcloud credentials (email:password)
-        self.credentials = config.get("offcloud_credentials", "")
+        self.credentials = config.get("OCCredentials", "")
 
         # Configure StremThru to use Offcloud
         self.set_store_credentials("offcloud", self.credentials)

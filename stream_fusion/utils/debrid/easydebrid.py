@@ -9,7 +9,7 @@ class EasyDebrid(StremThruDebrid):
         self.extension = "ED"
 
         # Retrieve the EasyDebrid API key
-        self.api_key = config.get("easydebrid_api_key", "")
+        self.api_key = config.get("EDToken", "")
 
         # Configure StremThru to use EasyDebrid
         self.set_store_credentials("easydebrid", self.api_key)

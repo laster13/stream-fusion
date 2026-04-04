@@ -9,7 +9,7 @@ class PikPak(StremThruDebrid):
         self.extension = "PP"
 
         # Retrieve PikPak credentials (email:password)
-        self.credentials = config.get("pikpak_credentials", "")
+        self.credentials = config.get("PPCredentials", "")
 
         # Configure StremThru to use PikPak
         self.set_store_credentials("pikpak", self.credentials)

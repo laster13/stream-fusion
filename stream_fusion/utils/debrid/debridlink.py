@@ -9,7 +9,7 @@ class DebridLink(StremThruDebrid):
         self.extension = "DL"
 
         # Retrieve the DebridLink API key
-        self.api_key = config.get("debridlink_api_key", "")
+        self.api_key = config.get("DLToken", "")
 
         # Configure StremThru to use DebridLink
         self.set_store_credentials("debridlink", self.api_key)

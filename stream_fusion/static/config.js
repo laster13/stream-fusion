@@ -812,6 +812,10 @@ function loadData() {
 
     setElementValue('stremthru_enabled', decodedData.stremthru, false);
     setElementValue('stremthru_url', decodedData.stremthruUrl, 'https://stremthru.13377001.xyz/');
+    setElementValue('debridlink_api_key', decodedData.DLToken, '');
+    setElementValue('easydebrid_api_key', decodedData.EDToken, '');
+    setElementValue('offcloud_credentials', decodedData.OCCredentials, '');
+    setElementValue('pikpak_credentials', decodedData.PPCredentials, '');
 
     handleUniqueAccounts();
     updateProviderFields();
@@ -1013,10 +1017,10 @@ async function getLink(method) {
         stremthru: document.getElementById('stremthru_enabled')?.checked || false,
         stremthruUrl: document.getElementById('stremthru_url')?.value || 'https://stremthru.13377001.xyz',
         // Nouveaux débrideurs
-        debridlinkApiKey: document.getElementById('debridlink_api_key')?.value || '',
-        easydebridApiKey: document.getElementById('easydebrid_api_key')?.value || '',
-        offcloudCredentials: document.getElementById('offcloud_credentials')?.value || '',
-        pikpakCredentials: document.getElementById('pikpak_credentials')?.value || ''
+        DLToken: document.getElementById('debridlink_api_key')?.value || '',
+        EDToken: document.getElementById('easydebrid_api_key')?.value || '',
+        OCCredentials: document.getElementById('offcloud_credentials')?.value || '',
+        PPCredentials: document.getElementById('pikpak_credentials')?.value || ''
     };
 
     data.service = Array.from(document.getElementById('debridOrderList').children).map(li => li.dataset.serviceName);
@@ -1028,10 +1032,10 @@ async function getLink(method) {
     if (data.service.includes('AllDebrid') && document.getElementById('ad_token_info') && !data.ADToken) missingRequiredFields.push("AllDebrid Account Connection");
     if (data.service.includes('TorBox') && document.getElementById('tb_token_info') && !data.TBToken) missingRequiredFields.push("TorBox Account Connection");
     if (data.service.includes('Premiumize') && document.getElementById('pm_token_info') && !data.PMToken) missingRequiredFields.push("Premiumize Account Connection");
-    if (data.service.includes('Debrid-Link') && document.getElementById('debridlink_api_key') && !data.debridlinkApiKey) missingRequiredFields.push("Debrid-Link API Key");
-    if (data.service.includes('EasyDebrid') && document.getElementById('easydebrid_api_key') && !data.easydebridApiKey) missingRequiredFields.push("EasyDebrid API Key");
-    if (data.service.includes('Offcloud') && document.getElementById('offcloud_credentials') && !data.offcloudCredentials) missingRequiredFields.push("Offcloud Credentials");
-    if (data.service.includes('PikPak') && document.getElementById('pikpak_credentials') && !data.pikpakCredentials) missingRequiredFields.push("PikPak Credentials");
+    if (data.service.includes('Debrid-Link') && document.getElementById('debridlink_api_key') && !data.DLToken) missingRequiredFields.push("Debrid-Link API Key");
+    if (data.service.includes('EasyDebrid') && document.getElementById('easydebrid_api_key') && !data.EDToken) missingRequiredFields.push("EasyDebrid API Key");
+    if (data.service.includes('Offcloud') && document.getElementById('offcloud_credentials') && !data.OCCredentials) missingRequiredFields.push("Offcloud Credentials");
+    if (data.service.includes('PikPak') && document.getElementById('pikpak_credentials') && !data.PPCredentials) missingRequiredFields.push("PikPak Credentials");
     if (data.languages.length === 0) missingRequiredFields.push("Languages");
     if (data.c411 && document.getElementById('c411ApiKey') && !data.c411ApiKey) missingRequiredFields.push("C411 API Key");
     if (data.torr9 && document.getElementById('torr9ApiKey') && !data.torr9ApiKey) missingRequiredFields.push("Torr9 API Key");
