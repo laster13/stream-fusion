@@ -1,4 +1,5 @@
 from typing import Any
+import os
 
 from gunicorn.app.base import BaseApplication
 from gunicorn.util import import_app
@@ -7,26 +8,26 @@ from uvicorn.workers import UvicornWorker as BaseUvicornWorker
 from stream_fusion.logging_config import configure_logging
 
 try:
-    import uvloop  # (Found nested import)
+    import uvloop
 except ImportError:
-    uvloop = None  # type: ignore  # (variables overlap)
+    uvloop = None  # type: ignore
 
 
 class UvicornWorker(BaseUvicornWorker):
     """
     Configuration for uvicorn workers.
 
-    This class is subclassing UvicornWorker and defines
-    some parameters class-wide, because it's impossible,
-    to pass these parameters through gunicorn.
+    This class subclasses UvicornWorker and defines some parameters
+    class-wide because Gunicorn does not expose them cleanly.
     """
 
-    CONFIG_KWARGS: dict[str, Any] = {  # typing: ignore  # noqa: RUF012
+    CONFIG_KWARGS: dict[str, Any] = {
         "loop": "uvloop" if uvloop is not None else "asyncio",
         "http": "httptools",
         "lifespan": "on",
         "factory": True,
-        "proxy_headers": False,
+        "proxy_headers": True,
+        "forwarded_allow_ips": os.getenv("FORWARDED_ALLOW_IPS", "*"),
     }
 
 

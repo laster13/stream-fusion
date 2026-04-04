@@ -1,5 +1,9 @@
 import time
-from fastapi import APIRouter, Request, Depends, Form
+import os
+from urllib.parse import urlencode
+from urllib.request import urlopen, Request as URLRequest
+from urllib.error import URLError, HTTPError
+from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.security import APIKeyHeader
@@ -130,6 +134,48 @@ def _build_config_view(s) -> dict:
 
 SECRET_KEY_NAME = "secret-key"
 secret_header = APIKeyHeader(name=SECRET_KEY_NAME, auto_error=False)
+
+SSD_STREAMFUSION_RESOLVE_URL = os.getenv(
+    "SSD_STREAMFUSION_RESOLVE_URL",
+    "https://ssd.lastharo.eu/streamfusion/resolve",
+)
+ADMIN_GATE_SESSION_KEY = "ssd_admin_gate_until"
+ADMIN_GATE_TTL_SECONDS = int(os.getenv("SSD_ADMIN_GATE_TTL_SECONDS", "900"))
+
+
+def _admin_gate_is_valid(request: Request) -> bool:
+    gate_until = request.session.get(ADMIN_GATE_SESSION_KEY)
+    if not gate_until:
+        return False
+    try:
+        return int(gate_until) > int(time.time())
+    except Exception:
+        return False
+
+
+def _grant_admin_gate(request: Request) -> None:
+    request.session[ADMIN_GATE_SESSION_KEY] = int(time.time()) + ADMIN_GATE_TTL_SECONDS
+
+
+def _validate_ssd_token(token: str) -> bool:
+    token = (token or "").strip()
+    if not token:
+        return False
+
+    query = urlencode({"token": token})
+    url = f"{SSD_STREAMFUSION_RESOLVE_URL}?{query}"
+
+    req = URLRequest(url, method="GET")
+    try:
+        with urlopen(req, timeout=5) as resp:
+            return 200 <= resp.status < 300
+    except HTTPError:
+        return False
+    except URLError:
+        return False
+    except Exception:
+        return False
+
 
 secret = SecretManager()
 
@@ -267,7 +313,18 @@ async def require_csrf(request: Request):
 
 @router.get("/", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    token = (request.query_params.get("token") or "").strip()
+
+    if token:
+        if not _validate_ssd_token(token):
+            raise HTTPException(status_code=404, detail="Not found")
+        _grant_admin_gate(request)
+        return templates.TemplateResponse("login.html", {"request": request})
+
+    if _admin_gate_is_valid(request):
+        return templates.TemplateResponse("login.html", {"request": request})
+
+    raise HTTPException(status_code=404, detail="Not found")
 
 
 @router.post("/login")
@@ -276,6 +333,9 @@ async def login(
     secret_key: str = Form(...),
     redis_client=get_redis_dependency(),
 ):
+    if not _admin_gate_is_valid(request):
+        raise HTTPException(status_code=404, detail="Not found")
+
     if secrets.compare_digest(secret_key, secret.value):
         session_id = str(uuid.uuid4())
         redis_client.setex(session_id, timedelta(hours=2), secret_key)
@@ -284,6 +344,7 @@ async def login(
         return RedirectResponse(
             url=custom_url_for("dashboard")(request), status_code=HTTP_303_SEE_OTHER
         )
+
     logger.warning("Admin login attempt with invalid secret key")
     return templates.TemplateResponse(
         "login.html", {"request": request, "error": "Clé secrète invalide"}
