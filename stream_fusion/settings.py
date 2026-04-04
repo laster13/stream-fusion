@@ -226,7 +226,7 @@ class Settings(BaseSettings):
     zilean_max_retry: int = 3
 
     # YGG RELAY / YGGFLIX
-    yggflix_url: str = "https://relay.ygg.gratis/torznab"
+    yggflix_url: str = "https://u2p.anhkagi.net/torznab"
     yggflix_max_workers: int = 4
     ygg_passkey: str | None = None
     ygg_unique_account: bool = False

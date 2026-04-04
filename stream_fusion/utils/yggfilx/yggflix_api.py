@@ -12,7 +12,7 @@ from stream_fusion.logging_config import logger
 class YggflixAPI:
     TORZNAB_NS = {"torznab": "http://torznab.com/schemas/2015/feed"}
 
-    def __init__(self, pool_connections=10, pool_maxsize=50, max_retries=1, timeout=2):
+    def __init__(self, pool_connections=10, pool_maxsize=50, max_retries=2, timeout=2):
         self.base_url = settings.yggflix_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
